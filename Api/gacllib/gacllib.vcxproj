@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\..\packages\Microsoft.ML.OnnxRuntime.1.24.2\build\native\Microsoft.ML.OnnxRuntime.props" Condition="Exists('..\..\packages\Microsoft.ML.OnnxRuntime.1.24.2\build\native\Microsoft.ML.OnnxRuntime.props')" />
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Fuzzing|x64">
+      <Configuration>Fuzzing</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{8a56e116-4e72-44e0-aa08-dd46ef9333bd}</ProjectGuid>
+    <RootNamespace>gacl</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>gacl_lib</ProjectName>
+    <OutDir>$(SolutionDir)bin\$(Platform)_$(Configuration)\</OutDir>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Fuzzing|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Fuzzing|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;_LIB;%(PreprocessorDefinitions);GACL_INCLUDE_CLER;GACL_INCLUDE_BLER</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\Lib;$(ProjectDir)..\..\Api\includes;$(SolutionDir)packages\Microsoft.ML.OnnxRuntime.1.24.2\build\native\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+    <Lib>
+      <AdditionalLibraryDirectories>$(SolutionDir)packages\Microsoft.ML.OnnxRuntime.1.24.2\runtimes\win-x64\native;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>onnxruntime.lib;dxguid.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Lib>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_LIB;%(PreprocessorDefinitions);GACL_INCLUDE_CLER;GACL_INCLUDE_BLER</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\Lib;$(ProjectDir)..\..\Api\includes;$(SolutionDir)packages\Microsoft.ML.OnnxRuntime.1.24.2\build\native\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/guard:cast /d2CastGuardFailureMode:fastfail %(AdditionalOptions)</AdditionalOptions>
+      <ControlFlowGuard>Guard</ControlFlowGuard>
+    </ClCompile>
+    <Link>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+    <Lib>
+      <AdditionalLibraryDirectories>$(SolutionDir)packages\Microsoft.ML.OnnxRuntime.1.24.2\runtimes\win-x64\native;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>onnxruntime.lib;dxguid.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Lib>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Fuzzing|x64'">
+    <ClCompile>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_LIB;%(PreprocessorDefinitions);GACL_INCLUDE_CLER;GACL_INCLUDE_BLER;SINGLETHREAD</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\lib;$(ProjectDir)..\..\api\includes;$(SolutionDir)packages\Microsoft.ML.OnnxRuntime.1.24.2\build\native\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+    <Lib>
+      <AdditionalLibraryDirectories>$(SolutionDir)packages\Microsoft.ML.OnnxRuntime.1.24.2\runtimes\win-x64\native;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>onnxruntime.lib;dxguid.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Lib>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\Api\includes\gacl.h" />
+    <ClInclude Include="..\..\Api\includes\RDO_B\blockentropy.h" />
+    <ClInclude Include="..\..\Api\includes\shuffle.h" />
+    <ClInclude Include="..\..\Helpers\FileUtility.h" />
+    <ClInclude Include="..\..\Helpers\FormatHelper.h" />
+    <ClInclude Include="..\..\Helpers\Utility.h" />
+    <ClInclude Include="..\..\Lib\BCnBlockDefs.h" />
+    <ClInclude Include="..\..\Lib\RDO_ML\KmeansRDO.h" />
+    <ClInclude Include="..\..\Lib\RDO_ML\LossMetrics.h" />
+    <ClInclude Include="..\..\Api\includes\RDO_ML\ML_RDO.h" />
+    <ClInclude Include="..\..\Lib\RDO_B\ClusterBlocks_BruteForce.h" />
+    <ClInclude Include="..\..\Lib\RDO_B\ClusterBlocks_Common.h" />
+    <ClInclude Include="..\..\Lib\shuffle\bc7.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\Helpers\FileUtility.cpp" />
+    <ClCompile Include="..\..\Helpers\FormatHelper.cpp" />
+    <ClCompile Include="..\..\Helpers\Utility.cpp" />
+    <ClCompile Include="..\..\Lib\RDO_ML\KMeansRDO.cpp" />
+    <ClCompile Include="..\..\Lib\RDO_ML\LossMetrics.cpp" />
+    <ClCompile Include="..\..\Lib\RDO_ML\ML_RDO.cpp" />
+    <ClCompile Include="..\..\Lib\RDO_B\blockentropy.cpp" />
+    <ClCompile Include="..\..\Lib\shuffle\bc1.cpp" />
+    <ClCompile Include="..\..\Lib\shuffle\bc3.cpp" />
+    <ClCompile Include="..\..\Lib\shuffle\bc4.cpp" />
+    <ClCompile Include="..\..\Lib\shuffle\bc5.cpp" />
+    <ClCompile Include="..\..\Lib\shuffle\bc7.cpp" />
+    <ClCompile Include="..\..\Lib\shuffle\bc7modejoin.cpp" />
+    <ClCompile Include="..\..\Lib\shuffle\bc7modesplit.cpp" />
+    <ClCompile Include="..\..\Lib\shuffle\shuffle.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(SolutionDir)packages\directxtex_desktop_win10.2025.7.10.1\build\native\directxtex_desktop_win10.targets" Condition="Exists('$(SolutionDir)packages\directxtex_desktop_win10.2025.7.10.1\build\native\directxtex_desktop_win10.targets')" />
+    <Import Project="$(SolutionDir)packages\Microsoft.ML.OnnxRuntime.1.24.2\build\native\Microsoft.ML.OnnxRuntime.targets" Condition="Exists('..\..\packages\Microsoft.ML.OnnxRuntime.1.24.2\build\native\Microsoft.ML.OnnxRuntime.targets')" />
+  </ImportGroup>
+  <Target Name="CheckGitSubmodules" BeforeTargets="PrepareForBuild">
+    <Warning Condition="!Exists('$(SolutionDir)ThirdParty\zstd\lib\zstd.h')" Text="Git submodules not found. Did you forget to run 'git submodule init' and 'git submodule update'? See README.md" />
+  </Target>
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them. The missing file is {0}.</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(SolutionDir)packages\directxtex_desktop_win10.2025.7.10.1\build\native\directxtex_desktop_win10.targets')" Text="$([System.String]::Format('$(ErrorText)', '$(SolutionDir)packages\directxtex_desktop_win10.2025.7.10.1\build\native\directxtex_desktop_win10.targets'))" />
+    <Error Condition="!Exists('$(SolutionDir)packages\Microsoft.ML.OnnxRuntime.1.24.2\build\native\Microsoft.ML.OnnxRuntime.props')" Text="$([System.String]::Format('$(ErrorText)', '..\..\packages\Microsoft.ML.OnnxRuntime.1.24.2\build\native\Microsoft.ML.OnnxRuntime.props'))" />
+    <Error Condition="!Exists('$(SolutionDir)packages\Microsoft.ML.OnnxRuntime.1.24.2\build\native\Microsoft.ML.OnnxRuntime.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\..\packages\Microsoft.ML.OnnxRuntime.1.24.2\build\native\Microsoft.ML.OnnxRuntime.targets'))" />
+  </Target>
+</Project>

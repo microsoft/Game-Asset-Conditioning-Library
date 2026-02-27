@@ -1,0 +1,5 @@
+-zstdlevel:5			-chunksizeKB:16		BC1_BlackboardEraser_albedo.DDS
+				-ns		-chunksizeKB:256	BC3_flower_orm.DDS
+				-ns	-nc						BC4_gerberaSingleLeaf_opacity.DDS
+-zstdblock:4096			-chunksizeKB:1024	BC5_firefly_normal.DDS
+

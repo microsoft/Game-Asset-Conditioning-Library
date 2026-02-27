@@ -1,0 +1,13 @@
+{
+    "codebaseName": "AssetConditioning",
+    "instanceUrl": "https://xbox-atg.visualstudio.com/",
+    "projectName": "Shared Work",
+    "areaPath": "Shared Work\\Game Asset Conditioning Library",
+    "iterationPath": "Shared Work\\Future",
+    "family": "Applications",
+    "notificationAliases": [
+        "zuoming.shi@microsoft.com",
+        "assetconditioning@service.microsoft.com"
+    ],
+    "ignoreBranchName": true
+}

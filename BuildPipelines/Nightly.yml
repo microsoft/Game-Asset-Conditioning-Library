@@ -1,0 +1,69 @@
+# BuildPipelines/Nightly.yml
+name: $(date:yyMM).$(date:dd).$(rev:rr)-Nightly
+
+# Don't trigger on pull requests
+pr: none
+
+trigger: none
+
+# Daily at 10:00 UTC (2:00 AM PST / 3:00 AM PDT)
+schedules:
+- cron: "0 10 * * *"
+  displayName: "Nightly Run (ADO source only)"
+  branches:
+    include:
+    - main
+  always: true
+
+# ----------------------------------------------------------
+# Global Variables (shared template)
+# ----------------------------------------------------------
+variables:
+- template: templates/common.variables.yml@self
+  parameters:
+    debug: false
+    triggerCodeQL: false
+
+# ----------------------------------------------------------
+# Resources
+# ----------------------------------------------------------
+resources:
+  repositories:
+    - repository: templates
+      type: git
+      name: OneBranch.Pipelines/GovernedTemplates
+      ref: refs/heads/main
+
+# ----------------------------------------------------------
+# Stages
+# ----------------------------------------------------------
+extends:
+  template: v2/OneBranch.NonOfficial.CrossPlat.yml@templates # https://aka.ms/obpipelines/templates
+  parameters:
+    platform:
+      name: 'windows_undocked'
+
+    featureFlags:
+      EnableCDPxPAT: false
+      WindowsHostVersion: '1ESWindows2022'
+
+    cloudvault: # https://aka.ms/obpipelines/cloudvault
+      enabled: false
+
+    globalSdl: # https://aka.ms/obpipelines/sdl
+      baseline:
+        baselineFile: $(Build.SourcesDirectory)\.gdn\.gdnbaselines
+        suppressionSet: default
+      suppression:
+        suppressionFile: $(Build.SourcesDirectory)\.gdn\.gdnsuppress
+        suppressionSet: default
+      tsa:
+        enabled: false
+      isNativeCode: true
+
+    stages:
+    - template: templates/pipeline.core.stages.yml@self
+      parameters:
+        runTestsOnCloud: true
+        runPreFast: true
+        useGitHub: false

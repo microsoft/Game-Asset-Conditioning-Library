@@ -1,0 +1,67 @@
+jobs:
+- job: Test
+  displayName: Test Pass
+  timeoutInMinutes: 90
+  pool:
+    type: windows
+
+  variables:
+    ob_outputDirectory: '$(Build.BinariesDirectory)'
+    ob_artifactBaseName: AssetConditioning_TestResults_
+    ob_artifactSuffix: '$(BuildConfiguration)_$(BuildPlatform)'
+
+  strategy:
+    matrix:
+      Release_x64:
+        BuildPlatform: x64
+        BuildConfiguration: Release
+      Debug_x64:
+        BuildPlatform: x64
+        BuildConfiguration: Debug
+
+  steps:
+    - task: NuGetToolInstaller@1
+
+    - task: NuGetCommand@2
+      displayName: 'Install GoogleTestAdapter nupkg'
+      inputs:
+        command: 'custom'
+        arguments: 'install GoogleTestAdapter -Source https://pkgs.dev.azure.com/cga-exchange/_packaging/GameAssetConditioningLibrary-Org/nuget/v3/index.json -OutputDirectory $(Pipeline.Workspace)/packages'
+
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        buildType: 'current'
+        artifactName: AssetConditioning_Binaries_$(BuildConfiguration)_$(BuildPlatform)
+        targetPath: $(Pipeline.Workspace)/artifacts
+
+    # Enable developer mode; these tests need it
+    - powershell: reg add "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
+      displayName: 'Enable Developer mode'
+
+    # Remove overrides; tests assume no overrides are configured
+    - powershell: |
+        if (Test-Path -Path HKLM:\SOFTWARE\Microsoft\DirectStorage\Overrides)
+        {
+            Remove-Item HKLM:\SOFTWARE\Microsoft\DirectStorage\Overrides -Force
+        }
+      displayName: 'Remove Registry overrides'
+
+    - task: VSTest@2
+      displayName: 'Tests'
+      inputs:
+        testRunTitle: 'TestRun_$(BuildPlatform)_$(BuildConfiguration)'
+        testSelector: 'testAssemblies'
+        testAssemblyVer2: |
+            **\*tests.exe
+        searchFolder: '$(Pipeline.Workspace)/artifacts'
+        pathtoCustomTestAdapters: '$(Pipeline.Workspace)/packages'
+        diagnosticsEnabled: true
+        collectDumpOn: 'onAbortOnly'
+
+    # copy any binary intermediate results to artifact export folder
+    - powershell: |
+        if (Test-Path "$(Pipeline.Workspace)\artifacts\$(BuildConfiguration)\$(BuildPlatform)\bin\TestResults\Bins") 
+        {
+          Copy-Item -Path "$(Pipeline.Workspace)\artifacts\$(BuildConfiguration)\$(BuildPlatform)\bin\TestResults\Bins\*" -Destination "$(Build.BinariesDirectory)\"
+        }
+      displayName: 'Copying binary intermediate results'

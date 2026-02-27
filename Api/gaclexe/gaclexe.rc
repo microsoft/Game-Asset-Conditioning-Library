@@ -1,0 +1,59 @@
+//-------------------------------------------------------------------------------------
+// gaclexe.rc
+//
+// Game Asset Conditioning Library - Command-line tool version resource
+//
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+//
+// Version numbers must match GACL_VERSION_MAJOR/MINOR/PATCH in Api/includes/gacl.h
+//-------------------------------------------------------------------------------------
+
+#define APSTUDIO_READONLY_SYMBOLS
+#include "verrsrc.h"
+#undef APSTUDIO_READONLY_SYMBOLS
+
+#include "../includes/gacl.h"
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
+LANGUAGE 9, 1
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Version
+//
+
+VS_VERSION_INFO     VERSIONINFO
+  FILEVERSION       GACL_VERSION_MAJOR,GACL_VERSION_MINOR,GACL_VERSION_PATCH,GACL_VERSION_BUILD
+  PRODUCTVERSION    GACL_VERSION_MAJOR,GACL_VERSION_MINOR,GACL_VERSION_PATCH,GACL_VERSION_BUILD
+  FILEFLAGSMASK     VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+  FILEFLAGS         VS_FF_DEBUG
+#else
+  FILEFLAGS         0x0L
+#endif
+  FILEOS            VOS_NT_WINDOWS32
+  FILETYPE          VFT_APP
+  FILESUBTYPE       VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "Microsoft Corporation"
+            VALUE "FileDescription",  "Game Asset Conditioning Library command-line tool"
+            VALUE "FileVersion",      STR(GACL_VERSION_MAJOR) "." STR(GACL_VERSION_MINOR) "." STR(GACL_VERSION_PATCH) "." STR(GACL_VERSION_LABEL)
+            VALUE "InternalName",     "gacl.exe"
+            VALUE "LegalCopyright",   "Copyright (c) Microsoft Corporation. Licensed under the MIT License."
+            VALUE "OriginalFilename", "gacl.exe"
+            VALUE "ProductName",      "Game Asset Conditioning Library"
+            VALUE "ProductVersion",   STR(GACL_VERSION_MAJOR) "." STR(GACL_VERSION_MINOR) "." STR(GACL_VERSION_PATCH) "." STR(GACL_VERSION_LABEL)
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END
+
+#endif

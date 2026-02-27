@@ -1,0 +1,27 @@
+jobs:
+- job: ConfigureTestLab
+  displayName: Configure Test Lab
+  timeoutInMinutes: 30
+  pool:
+    type: windows
+
+  variables:
+    ob_outputDirectory: '$(Build.BinariesDirectory)'
+    ob_artifactBaseName: TestRunScripts
+    ob_artifactSuffix: ''
+    # Disable scanning tools because they have already been run in the Build stage
+    ob_sdl_binskim_enabled: false
+    ob_sdl_checkcflags_enabled: false
+    ob_sdl_xfgcheck_enabled: false
+
+  steps:
+    - checkout: self
+      submodules: true
+      fetchDepth: 1
+      lfs: true
+      path: s
+
+    - powershell: |  
+        Copy-Item -Path "build/TestRun/scripts/*" -Destination "$(Build.BinariesDirectory)" -Verbose -Recurse
+      workingDirectory: $(Build.SourcesDirectory)
+      displayName: Stage TestRunScripts Artifact

@@ -1,0 +1,10 @@
+{
+  "solution": {
+    "path": "gacl.sln",
+    "projects": [
+      "ThirdParty\\zstd_p\\build\\VS2010\\libzstd_p-dll\\libzstd_p-dll.vcxproj",
+      "Api\\gaclexe\\gaclexe.vcxproj",
+      "Api\\gacllib\\gacllib.vcxproj",
+    ]
+  }
+}

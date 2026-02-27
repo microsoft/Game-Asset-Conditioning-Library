@@ -1,0 +1,28 @@
+# BuildPipelines/common.variables.yml
+parameters:
+- name: debug
+  type: boolean
+  default: false
+
+- name: triggerCodeQL
+  type: boolean
+  default: false
+
+variables:
+  CDP_DEFINITION_BUILD_COUNT: $[counter('', 0)]
+  system.debug: ${{ parameters.debug }}
+  ROOT: $(Build.SourcesDirectory)
+  REPOROOT: $(Build.SourcesDirectory)
+  OUTPUTROOT: $(REPOROOT)\out
+  NUGET_XMLDOC_MODE: none
+
+  ${{ if eq(parameters.triggerCodeQL, true) }}:
+    CodeQL.Cadence: 0
+
+  # Docker image which is used to build the project https://aka.ms/obpipelines/containers
+  WindowsContainerImage: 'onebranch.azurecr.io/windows/ltsc2022/vse2022:latest'
+
+  Packaging.EnableSBOMSigning: false
+  NUGET_PLUGIN_HANDSHAKE_TIMEOUT_IN_SECONDS: 60
+  NUGET_PLUGIN_REQUEST_TIMEOUT_IN_SECONDS: 60
+  RELEASE_TYPE: Internal
