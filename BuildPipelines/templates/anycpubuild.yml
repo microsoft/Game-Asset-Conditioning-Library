@@ -1,0 +1,57 @@
+jobs:
+- job: Build_Win32Metadata
+  displayName: Build Win32 Metadata
+  timeoutInMinutes: 90
+  pool:
+    type: windows
+
+  variables:
+    ob_outputDirectory: '$(Build.BinariesDirectory)'
+    ob_artifactBaseName: DirectStorage_
+    ob_artifactSuffix: Win32Metadata
+    # Disable scanning tools because they have already been run in the Build stage
+    ob_sdl_binskim_enabled: false
+    ob_sdl_checkcflags_enabled: false
+    ob_sdl_xfgcheck_enabled: false
+
+  steps:
+    - checkout: self
+      submodules: true
+      fetchDepth: 1
+      lfs: true
+      path: s
+
+    - task: CodeQL3000Init@0
+      inputs:
+        Enabled: true
+      target: windows_build_container # Needed to collect trace form the build container
+      env:
+        ob_restore_phase: true
+
+    # DotNet 6.0 required for ClangSharpPInvokeGenerator.exe
+    - task: UseDotNet@2
+      inputs:
+        version: 6.x
+
+    - task: NuGetToolInstaller@1
+      displayName: 'Setup NuGet Tools'
+      env:
+        ob_restore_phase: true
+
+    - task: NuGetCommand@2
+      displayName: 'Restore NuGet Packages'
+      env:
+        ob_restore_phase: true
+      inputs:
+        command: 'restore'
+        restoreSolution: '**/packages.config'
+        feedsToUse: 'config'
+        nugetConfigPath: 'nuget.config'
+
+    - task: NuGetAuthenticate@1
+
+    - task: CodeQL3000Finalize@0
+      condition: always()
+      target: windows_build_container # Needed to collect trace form the build container
+      env:
+        ob_restore_phase: true

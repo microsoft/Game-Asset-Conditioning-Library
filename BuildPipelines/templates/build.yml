@@ -1,0 +1,156 @@
+parameters:
+  - name: enableSigning
+    type: boolean
+    default: false
+
+  - name: runPreFast
+    type: boolean
+    default: false
+
+  - name: useGitHub
+    type: boolean
+    default: true
+
+jobs:
+- job: Build
+  displayName: Build GACL
+  timeoutInMinutes: 180
+  pool:
+    type: windows
+
+  variables:
+    # binaries scanning tools are run on this directory ( https://onebranch.visualstudio.com/OneBranch/_wiki/wikis/OneBranch.wiki/4634/SDL-(Static-Analysis)-for-Containerized-Workflows ) and 
+    # this directory is uploaded to pipeline artifacts. More info at https://aka.ms/obpipelines/artifacts
+    ob_outputDirectory: '$(Build.BinariesDirectory)'
+    ob_artifactBaseName: AssetConditioning_Binaries_
+    ob_artifactSuffix: '$(BuildConfiguration)_$(BuildPlatform)'
+    # Exclude all .exe - DirectStorage only ships .dlls
+    # Exclude all TAEF, Wex and test tools
+    ${{ if eq(parameters.enableSigning, true) }}:
+      ob_sdl_codeSignValidation_excludes: -|**\*.exe;-|**\TE.*\**;-|**\Wex.*\**;-|**\EtwProcessor*\**;-|**\Conduit.*\**;-|**\WTTlog*
+    ${{ else }}:
+      ob_sdl_codeSignValidation_excludes: -|**\*.*
+
+    symbolsArtifactName: '$(System.TeamProject)/$(Build.BuildNumber)_$(BuildConfiguration)$(BuildPlatform)/$(Build.BuildId)'
+
+  strategy:
+    maxParallel: 8
+    matrix:
+      Release_x64:
+        BuildPlatform: x64
+        BuildConfiguration: Release
+      Debug_x64:
+        BuildPlatform: x64
+        BuildConfiguration: Debug
+
+  steps:
+  - ${{ if eq(parameters.useGitHub, true) }}:
+    - checkout: gacl_github
+      env:
+        ob_restore_phase: true
+      submodules: true
+      fetchDepth: 1
+      lfs: false
+      path: s
+
+  - ${{ else }}:
+    - checkout: self
+      env:
+        ob_restore_phase: true
+      submodules: true
+      fetchDepth: 1
+      lfs: true
+      path: s
+
+  - task: NuGetToolInstaller@1
+    displayName: 'Setup NuGet Tools'
+    env:
+      ob_restore_phase: true
+
+  - task: NuGetCommand@2
+    displayName: 'Restore NuGet Packages'
+    env:
+      ob_restore_phase: true
+    inputs:
+      command: 'restore'
+      restoreSolution: '**/packages.config'
+      feedsToUse: 'config'
+      nugetConfigPath: 'nuget.config'
+
+  # By default OneBranch Pipelines doesn't upload binaries files 
+  # (exe, dll, sys, nupkg, zip, pdb, cat, vhd, vhdx, cspkg etc)
+  # to artifacts in failed builds.
+  # To change the behavior we put an empty .artifactignore in the root
+  # of the output directory.
+  #
+  # The .artifactignore is a text file that controls what files are
+  # uploaded when you publish Pipeline Artifact. .artifactignore is typically
+  # checked into the root of the repository or generated during the build in
+  # the root of the output directory.
+  #
+  # Example:
+  #
+  # **/*
+  # !src/MyApp/bin/Release/**.*
+  #
+  - task: PowerShell@2
+    displayName: 'Overwrite artifactignore on failure'
+    env:
+      ob_restore_phase: true
+    condition: always()
+    continueOnError: true
+    inputs:
+      targetType: 'inline'
+      script: |
+        $path = "$(ob_outputDirectory)"
+        New-Item -Path $path -Force -ItemType Directory
+        # create empty file in the root of output 
+        "" | Out-File -FilePath "$path\.artifactignore" -Encoding ascii
+
+  - ${{ if eq(parameters.runPreFast, true) }}:
+    - task: VSBuild@1
+      displayName: "Compliance: PreFast Code Analysis (Build with Code Analysis on Gacl.sln)"
+      continueOnError: true
+      env:
+        ob_restore_phase: true
+      inputs:
+        solution: '**/gaclProjectsForCodeAnalysis.slnf'
+        msbuildArgs: '/p:RunCodeAnalysis=true /p:ClOptions="/analyze:log MyApp.nativecodeanalysis.combined.sarif /p:OutputPath=$(Build.BinariesDirectory)/$(BuildConfiguration)/$(BuildPlatform)/bin/"'
+        platform: '$(buildPlatform)'
+        configuration: '$(buildConfiguration)'
+
+  - task: CodeQL3000Init@0
+    inputs:
+      Enabled: true
+    target: windows_build_container # Needed to collect trace from the build container
+    env:
+      ob_restore_phase: true
+
+  - task: VSBuild@1
+    displayName: 'Build solution gacl.sln'
+    env:
+      ob_restore_phase: true
+    inputs:
+      solution: '**/gacl.sln'
+      vsVersion: 17.0
+      msbuildArgs: '/fl /flp:LogFile=$(XES_MsBuildLogDir)\MsBuild.log;Verbosity=diagnostic /p:UseNativeEnvironment=True /p:OutDir=$(Build.BinariesDirectory)/$(BuildConfiguration)/$(BuildPlatform)/bin/'
+      platform: '$(BuildPlatform)'
+      configuration: '$(BuildConfiguration)'
+      clean: true
+      maximumCpuCount: true
+      msbuildArchitecture: 'x64'
+
+  - task: UseDotNet@2
+    inputs:
+      version: 6.x
+
+  - task: AzureArtifacts.manifest-generator-task.manifest-generator-task.ManifestGeneratorTask@0
+    displayName: 'Generation Task'
+    inputs:
+      BuildDropPath: '$(Build.BinariesDirectory)/$(BuildConfiguration)/$(BuildPlatform)/bin'
+
+  - task: CodeQL3000Finalize@0
+    condition: always()
+    target: windows_build_container # Needed to collect trace form the build container
+    env:
+      ob_restore_phase: true

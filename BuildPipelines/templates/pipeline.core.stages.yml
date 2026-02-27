@@ -1,0 +1,31 @@
+# BuildPipelines/pipeline.core.stages.yml
+# Core stages template (no triggers/schedules/resources/extends)
+
+parameters:
+- name: runTestsOnCloud
+  type: boolean
+  default: true
+
+- name: runPreFast
+  type: boolean
+  default: true
+
+- name: useGitHub
+  type: boolean
+  default: false
+
+stages:
+- stage: Build
+  jobs:
+  - template: build.yml@self
+    parameters:
+      enableSigning: false
+      runPreFast: ${{ parameters.runPreFast }}
+      useGitHub: ${{ parameters.useGitHub }}
+
+- ${{ if eq(parameters.runTestsOnCloud, true) }}:
+  - stage: CloudTestRun
+    dependsOn: [Build]
+    jobs:
+    - template: configuretestlab.yml@self
+    - template: test.yml@self

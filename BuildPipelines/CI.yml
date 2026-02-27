@@ -1,0 +1,89 @@
+# BuildPipelines/CI.yml
+name: $(date:yyMM).$(date:dd).$(rev:rr)
+
+# Don't trigger on pull requests
+pr: none
+
+# Trigger on commits to main
+trigger:
+  batch: true
+  branches:
+    include:
+    - main
+
+# ----------------------------------------------------------
+# Parameters
+# ----------------------------------------------------------
+parameters:
+- name: runTestsOnCloud
+  displayName: Run tests on cloud agents
+  type: boolean
+  default: true
+
+- name: runPreFast
+  displayName: Run PreFast (MSFT Static Analyzer)
+  type: boolean
+  default: true
+
+- name: triggerCodeQL
+  displayName: Trigger CodeQL scan immediately (branch name must be root-level)
+  type: boolean
+  default: false
+
+- name: debug
+  displayName: Enable pipeline debug output
+  type: boolean
+  default: false
+
+# ----------------------------------------------------------
+# Global Variables (shared template)
+# ----------------------------------------------------------
+variables:
+- template: templates/common.variables.yml@self
+  parameters:
+    debug: ${{ parameters.debug }}
+    triggerCodeQL: ${{ parameters.triggerCodeQL }}
+
+# ----------------------------------------------------------
+# Resources
+# ----------------------------------------------------------
+resources:
+  repositories:
+    - repository: templates
+      type: git
+      name: OneBranch.Pipelines/GovernedTemplates
+      ref: refs/heads/main
+
+# ----------------------------------------------------------
+# Stages
+# ----------------------------------------------------------
+extends:
+  template: v2/OneBranch.NonOfficial.CrossPlat.yml@templates # https://aka.ms/obpipelines/templates
+  parameters:
+    platform:
+      name: 'windows_undocked'
+
+    featureFlags:
+      EnableCDPxPAT: false
+      WindowsHostVersion: '1ESWindows2022'
+
+    cloudvault: # https://aka.ms/obpipelines/cloudvault
+      enabled: false
+
+    globalSdl: # https://aka.ms/obpipelines/sdl
+      baseline:
+        baselineFile: $(Build.SourcesDirectory)\.gdn\.gdnbaselines
+        suppressionSet: default
+      suppression:
+        suppressionFile: $(Build.SourcesDirectory)\.gdn\.gdnsuppress
+        suppressionSet: default
+      tsa:
+        enabled: false
+      isNativeCode: true
+
+    stages:
+    - template: templates/pipeline.core.stages.yml@self
+      parameters:
+        runTestsOnCloud: ${{ parameters.runTestsOnCloud }}
+        runPreFast: ${{ parameters.runPreFast }}
+        useGitHub: false
