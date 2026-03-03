@@ -1,0 +1,51 @@
+name: Build GACL
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (matrix)
+    runs-on: windows-latest
+    timeout-minutes: 180
+
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+        platform: [x64]
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Setup NuGet
+        uses: nuget/setup-nuget@v2
+
+      - name: Restore packages
+        run: nuget restore packages.config
+
+      - name: Setup MSBuild (VS 2022)
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: '17.0'
+
+      - name: Build gacl.sln
+        run: |
+          msbuild gacl.sln ^
+            /t:Rebuild ^
+            /p:Configuration=${{ matrix.configuration }} ^
+            /p:Platform=${{ matrix.platform }} ^
+            /p:OutDir=${{ github.workspace }}\out\
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gacl-${{ matrix.configuration }}-${{ matrix.platform }}
+          path: out
