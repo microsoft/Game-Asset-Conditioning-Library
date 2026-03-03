@@ -5,7 +5,8 @@
 The Game Asset Conditioning Library (GACL) contains several components that help improve compression of game assets.
 Texture assets are the primary focus, since those make up the largest portion of most games package size.  
 
-In the near future, it is anticipated that we will see optimized CPU offload implementations of Zstd being developed by hardware vendors.  
+In the near future, it is anticipated that we will see optimized CPU offload implementations of Zstd being developed by hardware vendors.
+
 ZStandard (https://github.com/facebook/zstd) support is included in DirectStorage 1.4 as part of this effort.
 
 The GACL starts with zstd compression as a baseline, and then provides several tools for improving compression ratios while ensuring
@@ -29,7 +30,7 @@ The GACL preview is buildable via Visual Studio, version 2022 or newer.
 Install latest Visual Studio 2022 from here:  https://aka.ms/vs/17/release/vs_enterprise.exe
 Enable "Desktop Development with C++" in Workloads
 2. Software dependencies
-   - For ML based implementation:
+   - For non-lossless ML based implementation:
       - For model download (highly suggested), run the CLER set up script Tools\scripts\setupCLER.ps1
       - We currently support CPU-based model inference. Check out other ORT nuget packages and execution providers for GPU support: https://onnxruntime.ai/docs/install/
    - Submodules
@@ -71,7 +72,7 @@ git submodule update
 
 Primary build solution can be found at:
 
-`<root>\\gacl.sln`
+`<root>\gacl.sln`
 
 Gtest-based validation projects can be found in the "tests" folder or solution area, and can be directly launched with F5 within Visual Studio.
 
@@ -163,13 +164,13 @@ Shuffle+Compress requests use zstd compression by default, but can be customized
 
 ```
 typedef HRESULT(*PGACL_COMPRESSION_INITROUTINE)
-    (void** ccContext, size_t* destBytesRequired, const SHUFFLE_COMPRESS_PARAMETERS* params);
-    typedef HRESULT(*PGACL_COMPRESSION_COMPRESSROUTINE) ( void* context, void* dest, size_t* destBytes, const void* src, size_t srcBytes);
-    typedef HRESULT(*PGACL_COMPRESSION_CLEANUPROUTINE) ( void* pContext);
+(void** ccContext, size_t* destBytesRequired, const SHUFFLE_COMPRESS_PARAMETERS* params);
+typedef HRESULT(*PGACL_COMPRESSION_COMPRESSROUTINE) ( void* context, void* dest, size_t* destBytes, const void* src, size_t srcBytes);
+typedef HRESULT(*PGACL_COMPRESSION_CLEANUPROUTINE) ( void* pContext);
 
-    extern PGACL_COMPRESSION_INITROUTINE GACL_Compression_InitRoutine;`
-    extern PGACL_COMPRESSION_COMPRESSROUTINE GACL_Compression_CompressRoutine;
-    extern PGACL_COMPRESSION_CLEANUPROUTINE GACL_Compression_CleanupRoutine;
+extern PGACL_COMPRESSION_INITROUTINE GACL_Compression_InitRoutine;`
+extern PGACL_COMPRESSION_COMPRESSROUTINE GACL_Compression_CompressRoutine;
+extern PGACL_COMPRESSION_CLEANUPROUTINE GACL_Compression_CleanupRoutine;
 ```
 
 ## Space Curves and transforms
@@ -180,8 +181,10 @@ single strip of 1024 4x4 elements would represent 16KB of memory.  i.e. two pixe
 
 Future zstd decompression hardware will not have sufficient internal fast cache to support references across such a large texture, and the GACL 
 limits zstd compression to window and distances of &lt;= 256KB.  For the above 4K BC7 example, 256KB would represent of strip of 64 pixels.  
+
 When compressing a texture into discrete chunks\\blocks, screen adjacent regions typically produce higher compression ratios than strips of a 
 texture.  This is partially from higher chances of repeat byte sequences, and partially from reduced distance and encoding cost to those matches.  
+
 When applying RDO, there is higher chance to finding "near similar" blocks when searching in a screen-adjacent pattern.
 
 To enable these screen adjacency gains, the GACL introduces the concept of curved transforms, _which are currently experimental_.  
