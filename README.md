@@ -269,9 +269,10 @@ enum class RDO_ErrorCode : int
 ---
 
 Before building, or viewing sources in Visual Studio, the std submodule must be initialized by the following git commands:
-`git submodule init`
-`git submodule update`
-
+```
+git submodule init
+git submodule update
+```
 
 Primary build solution can be found at:
 
