@@ -29,13 +29,13 @@ The GACL preview is buildable via Visual Studio, version 2022 or newer.
 Install latest Visual Studio 2022 from here:  https://aka.ms/vs/17/release/vs_enterprise.exe
 Enable "Desktop Development with C++" in Workloads
 2. Software dependencies
-- For ML based implementation:
-   - For model download (highly suggested), run the CLER set up script Tools\scripts\setupCLER.ps1
-   - We currently support CPU-based model inference. Check out other ORT nuget packages and execution providers for GPU support: https://onnxruntime.ai/docs/install/
-- Submodules
-   - zstd is included as a submodule within this repository.  From within your cloned GACL repo, zstd can be pulled down via the folowwing commands:
-     - `git submodule init` 
-     - `git submodule update`
+   - For ML based implementation:
+      - For model download (highly suggested), run the CLER set up script Tools\scripts\setupCLER.ps1
+      - We currently support CPU-based model inference. Check out other ORT nuget packages and execution providers for GPU support: https://onnxruntime.ai/docs/install/
+   - Submodules
+      - zstd is included as a submodule within this repository.  From within your cloned GACL repo, zstd can be pulled down via the folowwing commands:
+         - `git submodule init`
+         - `git submodule update`
 3. The solution file "gacl.sln" can be found in the root folder
 
 
