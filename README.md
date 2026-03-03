@@ -59,6 +59,23 @@ the following setting when compressing content for hardware-based decompression:
 * Tests/... - gtest based projects used for validation.
 
 
+# Build and Test
+
+---
+
+Before building, or viewing sources in Visual Studio, the std submodule must be initialized by the following git commands:
+```
+git submodule init
+git submodule update
+```
+
+Primary build solution can be found at:
+
+`<root>\\gacl.sln`
+
+Gtest-based validation projects can be found in the "tests" folder or solution area, and can be directly launched with F5 within Visual Studio.
+
+
 # Game Asset Conditioning Library Primary APIs
 
 ---
@@ -262,23 +279,6 @@ enum class RDO_ErrorCode : int
 | 50     | UnknownError     | Unknown error    |
 
 
-
-
-# Build and Test
-
----
-
-Before building, or viewing sources in Visual Studio, the std submodule must be initialized by the following git commands:
-```
-git submodule init
-git submodule update
-```
-
-Primary build solution can be found at:
-
-&nbsp;	<root>\\gacl.sln
-
-Gtest-based validation projects can be found in the "tests" folder or solution area, and can be directly launched with F5 within Visual Studio.
 
 
 # Credits
