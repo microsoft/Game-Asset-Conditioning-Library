@@ -53,18 +53,23 @@ jobs:
             /p:Platform=${{ matrix.platform }} `
             /p:OutDir=${{ github.workspace }}\out\
 
-      - name: Setup VSTest
-        uses: darenm/Setup-VSTest@v1.3
-
-      - name: Run native tests (VSTest)
+      - name: Run native tests
         shell: pwsh
         run: |
           $testBins = Get-ChildItem -Path "${{ github.workspace }}\out" `
             -Filter "*tests.exe" -Recurse
-          vstest.console.exe $testBins.FullName `
-            /Platform:x64 `
-            /TestAdapterPath:"${{ github.workspace }}\packages" `
-            /Diag:"${{ github.workspace }}\TestResults\vstest.log"
+          foreach ($test in $testBins) {
+            & $test.FullName `
+              --gtest_output=xml:"${{ github.workspace }}\TestResults\$($test.BaseName).xml"
+          }
+
+      - name: Publish test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Test Results (${{ matrix.configuration }}-${{ matrix.platform }})
+          path: TestResults/*.xml
+          reporter: java-junit
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
