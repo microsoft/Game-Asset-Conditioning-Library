@@ -56,17 +56,15 @@ jobs:
 
       - name: Run native tests
         shell: pwsh
-        working-directory: ${{ github.workspace }}
         run: |
-          Write-Host "CWD: $(Get-Location)"
-          Write-Host "test_assets exists: $(Test-Path 'test_assets')"
-          Get-ChildItem test_assets | Select-Object Name
-          $testBins = Get-ChildItem `
-            -Path "${{ github.workspace }}\out\${{ matrix.configuration }}\${{ matrix.platform }}\bin" `
+          $binDir = "${{ github.workspace }}\out\${{ matrix.configuration }}\${{ matrix.platform }}\bin"
+          $testBins = Get-ChildItem -Path $binDir `
             -Filter "*tests.exe" -Recurse
           foreach ($test in $testBins) {
+            Push-Location $binDir
             & $test.FullName `
               --gtest_output=xml:"${{ github.workspace }}\TestResults\$($test.BaseName).xml"
+            Pop-Location
           }
 
       - name: Publish test results
