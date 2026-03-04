@@ -5,20 +5,26 @@
 The Game Asset Conditioning Library (GACL) contains several components that help improve compression of game assets.
 Texture assets are the primary focus, since those make up the largest portion of most games package size.  
 
-In the near future, it is anticipated that we will see optimized CPU offload implementations of Zstd being developed by hardware vendors.
-
-ZStandard (https://github.com/facebook/zstd) support is included in DirectStorage 1.4 as part of this effort.
+In the near future, it is anticipated that we will see optimized CPU offload implementations of ZStandard (Zstd) being developed by hardware vendors. Zstd (https://github.com/facebook/zstd) support is included in DirectStorage 1.4 as part of this effort.
 
 The GACL starts with zstd compression as a baseline, and then provides several tools for improving compression ratios while ensuring
 high throughput from the anticipated decompression implementations.  Two approaches of lossy texture data rate 
-distortion optimization (RDO) are included, (Block-level and Component-level entropy reduction).  Shuffle transforms can be applied prior 
+distortion optimization (RDO) are included, block-level and component-level entropy reduction.  Shuffle transforms can be applied prior 
 to compression to losslessly further improve compression ratios of [block compressed BCn](https://learn.microsoft.com/en-us/windows/win32/direct3d11/texture-block-compression-in-direct3d-11 "DirectX block compressed formats") data streams, with DirectStorage supporting and 
 implementing the reverse transform at data retrieval time.
 
+# Preview Release 
 
+---
 
+GACL is currently **in preview**. We are actively seeking feedback from the community and welcome contributions to help guide the future development of this library.
 
+As a preview:
 
+- **APIs are subject to change.** Interfaces documented in this release, including those in `gacl.h`, `shuffle.h`, `blockentropy.h`, and `ml_RDO.h`, may be revised based on feedback from the community.
+- **Experimental features** (enabled via `GACL_EXPERIMENTAL`) are particularly likely to evolve or be replaced.
+
+We would love to hear from you — please use [GitHub Issues](https://github.com/microsoft/Game-Asset-Conditioning-Library/issues) to report bugs, share results, or suggest improvements. Pull requests are also welcome; see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 # Getting Started
 
@@ -39,26 +45,23 @@ Enable "Desktop Development with C++" in Workloads
          - `git submodule update`
 3. The solution file "gacl.sln" can be found in the root folder
 
-
 # Description of Components
 
 ---
 
-Ignoring external dependencies, the Game Asset Conditiontioning Library is split into a core functional library designed for 
+Apart from external dependencies, the Game Asset Conditiontioning Library is split into a core functional library designed for 
 integration into content pipelines which import textures, and a front end tool intended for simplified scenarios.
 
 ## Projects within this solution include:
 
-* lbzstd\_p - Project that imports and builds the zstd submodule, but with modified compression settings, clamping to expected zstd hardware limitations, with a 256KB window size.  Builds to static lib form.
+* lbzstd\_p - Project that imports and builds the zstd submodule, but with modified compression settings intended for broader compatibility with future CPU offload implementations of zstd, with a 256KB window size. Builds to static lib form.
 * libzstd\_p-dll - As above, but builds to dll form.
 * zstd\_p - As above, builds a modified version of the zstd.exe command line tool that limits the window size, which cannot be specified at command 
-line.  Note that to correctly target shader based implementations that prefer more blocks that are smaller it is also advised that developers include
-the following setting when compressing content for hardware-based decompression:
+line.  Note that for optimized performance with CPU offload decompression implementations, it is also advised that developers include the following setting when compressing content:
     * --target-compressed-block-size=8192
 * gacl_lib - Core library that contains APIs for RDO and Shuffle transforms, builds into static lib.
 * gacl_exe - Builds the gacl.exe front end tool that loads textures and applies selected transforms.
 * Tests/... - gtest based projects used for validation.
-
 
 # Build and Test
 
@@ -75,7 +78,6 @@ Primary build solution can be found at:
 `<root>\gacl.sln`
 
 Gtest-based validation projects can be found in the "tests" folder or solution area, and can be directly launched with F5 within Visual Studio.
-
 
 # Primary API
 
@@ -130,8 +132,6 @@ ability of RDO to reduce texture sizes, especially for large textures.  Once cur
 in 'curved' space will produce higher quality and compression ratios for the same texture and RDO settings.  The gacl.exe front end tool contains an 
 example of this flow, applying BLER twice (once to linear data, once to curved data) if experimental shuffle+compress is enabled.  Then both streams
 of entropy reduced data are included in the Shuffle+Compress request.
-
-
 
 ## Shuffle and Compression (shuffle.h):
 
@@ -280,9 +280,6 @@ enum class RDO_ErrorCode : int
 | 32     | UnsupportedFormatNotImplemented     |Format is not implemented yet      |
 | 40     | InternalException     | Internal exception occurred during processing     |
 | 50     | UnknownError     | Unknown error    |
-
-
-
 
 # Credits
 
