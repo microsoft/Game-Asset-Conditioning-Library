@@ -39,6 +39,11 @@ jobs:
         with:
           vs-version: '17.0'
 
+      - name: Setup CLER
+        shell: pwsh
+        run: |
+          Tools\scripts\setupCLER.ps1
+
       - name: Build gacl.sln
         run: |
           msbuild gacl.sln ^
