@@ -28,12 +28,13 @@ jobs:
           submodules: recursive
           fetch-depth: 1
           lfs: false
-
+          
       - name: Restore NuGet packages
         run: |
           nuget restore gacl.sln `
             -ConfigFile nuget.config `
-            -PackagesDirectory packages
+            -PackagesDirectory packages `
+            -Source "https://api.nuget.org/v3/index.json" `
 
       - name: Setup MSBuild (VS 2022)
         uses: microsoft/setup-msbuild@v2
