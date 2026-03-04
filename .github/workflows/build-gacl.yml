@@ -7,7 +7,7 @@ on:
   pull_request:
   workflow_dispatch:
   schedule:
-    - cron: "0 10 * * *" # 2:00 AM PST (UTC+4)
+    - cron: "0 10 * * *" # 2:00 AM PST (UTC-8)
 
 jobs:
   build:
@@ -27,16 +27,12 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 1
+          lfs: false
 
       - name: Restore NuGet packages
         run: |
           nuget restore gacl.sln `
-            -PackagesDirectory packages
-
-      - name: Restore packages
-        run: |
-          nuget restore packages.config `
-            -ConfigFile packages.config `
+            -ConfigFile nuget.config `
             -PackagesDirectory packages
 
       - name: Setup MSBuild (VS 2022)
@@ -63,11 +59,12 @@ jobs:
       - name: Run native tests (VSTest)
         shell: pwsh
         run: |
-          vstest.console.exe `
-            "${{ github.workspace }}/out/**/*tests.exe" `
+          $testBins = Get-ChildItem -Path "${{ github.workspace }}\out" `
+            -Filter "*tests.exe" -Recurse
+          vstest.console.exe $testBins.FullName `
             /Platform:x64 `
-            /TestAdapterPath:"${{ github.workspace }}/packages" `
-            /Diag:"${{ github.workspace }}/TestResults\vstest.log"
+            /TestAdapterPath:"${{ github.workspace }}\packages" `
+            /Diag:"${{ github.workspace }}\TestResults\vstest.log"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
