@@ -52,8 +52,8 @@ jobs:
             /t:Rebuild `
             /p:Configuration=${{ matrix.configuration }} `
             /p:Platform=${{ matrix.platform }} `
-            /p:OutDir=${{ github.workspace }}\out\
-
+            /p:OutDir=${{ github.workspace }}\out\${{ matrix.configuration }}\${{ matrix.platform }}\bin\
+      
       - name: Run native tests
         shell: pwsh
         run: |
