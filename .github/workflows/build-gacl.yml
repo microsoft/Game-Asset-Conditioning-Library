@@ -28,8 +28,10 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
-      - name: Setup NuGet
-        uses: nuget/setup-nuget@v2
+      - name: Restore NuGet packages
+        run: |
+          nuget restore gacl.sln `
+            -PackagesDirectory packages
 
       - name: Restore packages
         run: |
@@ -54,6 +56,16 @@ jobs:
             /p:Configuration=${{ matrix.configuration }} `
             /p:Platform=${{ matrix.platform }} `
             /p:OutDir=${{ github.workspace }}\out\
+
+      - name: Run native tests (VSTest)
+        uses: microsoft/vstest-action@v1
+        with:
+          testAssembly: |
+            **\*tests.exe
+          searchFolder: ${{ github.workspace }}/out/
+          vsTestVersion: latest
+          pathtoCustomTestAdapters: ${{ github.workspace }}/packages
+          diagnosticsEnabled: true
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
