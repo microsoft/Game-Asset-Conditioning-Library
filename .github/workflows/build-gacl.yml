@@ -49,10 +49,10 @@ jobs:
 
       - name: Build gacl.sln
         run: |
-          msbuild gacl.sln ^
-            /t:Rebuild ^
-            /p:Configuration=${{ matrix.configuration }} ^
-            /p:Platform=${{ matrix.platform }} ^
+          msbuild gacl.sln `
+            /t:Rebuild `
+            /p:Configuration=${{ matrix.configuration }} `
+            /p:Platform=${{ matrix.platform }} `
             /p:OutDir=${{ github.workspace }}\out\
 
       - name: Upload build artifacts
