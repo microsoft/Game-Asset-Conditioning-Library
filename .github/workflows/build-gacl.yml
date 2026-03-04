@@ -57,15 +57,17 @@ jobs:
             /p:Platform=${{ matrix.platform }} `
             /p:OutDir=${{ github.workspace }}\out\
 
+      - name: Setup VSTest
+        uses: darenm/Setup-VSTest@v1.3
+
       - name: Run native tests (VSTest)
-        uses: microsoft/vstest-action@v1
-        with:
-          testAssembly: |
-            **\*tests.exe
-          searchFolder: ${{ github.workspace }}/out/
-          vsTestVersion: latest
-          pathtoCustomTestAdapters: ${{ github.workspace }}/packages
-          diagnosticsEnabled: true
+        shell: pwsh
+        run: |
+          vstest.console.exe `
+            "${{ github.workspace }}/out/**/*tests.exe" `
+            /Platform:x64 `
+            /TestAdapterPath:"${{ github.workspace }}/packages" `
+            /Diag:"${{ github.workspace }}/TestResults\vstest.log"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
