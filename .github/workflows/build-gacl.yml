@@ -6,6 +6,8 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "0 10 * * *" # 2:00 AM PST (UTC+4)
 
 jobs:
   build:
@@ -30,7 +32,7 @@ jobs:
         uses: nuget/setup-nuget@v2
 
       - name: Restore packages
-        run: nuget restore packages.config
+        run: nuget restore nuget.config
 
       - name: Setup MSBuild (VS 2022)
         uses: microsoft/setup-msbuild@v2
