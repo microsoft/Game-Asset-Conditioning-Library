@@ -56,8 +56,13 @@ jobs:
 
       - name: Run native tests
         shell: pwsh
+        working-directory: ${{ github.workspace }}
         run: |
-          $testBins = Get-ChildItem -Path "${{ github.workspace }}\out" `
+          Write-Host "CWD: $(Get-Location)"
+          Write-Host "test_assets exists: $(Test-Path 'test_assets')"
+          Get-ChildItem test_assets | Select-Object Name
+          $testBins = Get-ChildItem `
+            -Path "${{ github.workspace }}\out\${{ matrix.configuration }}\${{ matrix.platform }}\bin" `
             -Filter "*tests.exe" -Recurse
           foreach ($test in $testBins) {
             & $test.FullName `
