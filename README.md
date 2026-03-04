@@ -168,7 +168,7 @@ typedef HRESULT(*PGACL_COMPRESSION_INITROUTINE)
 typedef HRESULT(*PGACL_COMPRESSION_COMPRESSROUTINE) ( void* context, void* dest, size_t* destBytes, const void* src, size_t srcBytes);
 typedef HRESULT(*PGACL_COMPRESSION_CLEANUPROUTINE) ( void* pContext);
 
-extern PGACL_COMPRESSION_INITROUTINE GACL_Compression_InitRoutine;`
+extern PGACL_COMPRESSION_INITROUTINE GACL_Compression_InitRoutine;
 extern PGACL_COMPRESSION_COMPRESSROUTINE GACL_Compression_CompressRoutine;
 extern PGACL_COMPRESSION_CLEANUPROUTINE GACL_Compression_CleanupRoutine;
 ```
