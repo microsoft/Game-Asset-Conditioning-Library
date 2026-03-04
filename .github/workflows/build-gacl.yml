@@ -32,7 +32,10 @@ jobs:
         uses: nuget/setup-nuget@v2
 
       - name: Restore packages
-        run: nuget restore packages.config
+        run: |
+          nuget restore packages.config `
+            -ConfigFile packages.config `
+            -PackagesDirectory packages
 
       - name: Setup MSBuild (VS 2022)
         uses: microsoft/setup-msbuild@v2
