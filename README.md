@@ -30,7 +30,7 @@ The GACL preview is buildable via Visual Studio, version 2022 or newer.
 Install latest Visual Studio 2022 from here:  https://aka.ms/vs/17/release/vs_enterprise.exe
 Enable "Desktop Development with C++" in Workloads
 2. Software dependencies
-   - For non-lossless ML based implementation:
+   - For lossy ML based implementation:
       - For model download (highly suggested), run the CLER set up script Tools\scripts\setupCLER.ps1
       - We currently support CPU-based model inference. Check out other ORT nuget packages and execution providers for GPU support: https://onnxruntime.ai/docs/install/
    - Submodules
@@ -64,7 +64,7 @@ the following setting when compressing content for hardware-based decompression:
 
 ---
 
-Before building, or viewing sources in Visual Studio, the std submodule must be initialized by the following git commands:
+Before building, or viewing sources in Visual Studio, the zstd submodule must be initialized by the following git commands:
 ```
 git submodule init
 git submodule update
@@ -77,7 +77,7 @@ Primary build solution can be found at:
 Gtest-based validation projects can be found in the "tests" folder or solution area, and can be directly launched with F5 within Visual Studio.
 
 
-# Game Asset Conditioning Library Primary APIs
+# Primary API
 
 ---
 
