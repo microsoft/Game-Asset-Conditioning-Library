@@ -5,7 +5,8 @@
 The Game Asset Conditioning Library (GACL) contains several components that help improve compression of game assets.
 Texture assets are the primary focus, since those make up the largest portion of most games package size.  
 
-In the near future, it is anticipated that we will see optimized CPU offload implementations of Zstd being developed by hardware vendors.  
+In the near future, it is anticipated that we will see optimized CPU offload implementations of Zstd being developed by hardware vendors.
+
 ZStandard (https://github.com/facebook/zstd) support is included in DirectStorage 1.4 as part of this effort.
 
 The GACL starts with zstd compression as a baseline, and then provides several tools for improving compression ratios while ensuring
@@ -29,13 +30,13 @@ The GACL preview is buildable via Visual Studio, version 2022 or newer.
 Install latest Visual Studio 2022 from here:  https://aka.ms/vs/17/release/vs_enterprise.exe
 Enable "Desktop Development with C++" in Workloads
 2. Software dependencies
-- For ML based implementation:
-   - For model download (highly suggested), run the CLER set up script Tools\scripts\setupCLER.ps1
-   - We currently support CPU-based model inference. Check out other ORT nuget packages and execution providers for GPU support: https://onnxruntime.ai/docs/install/
-- Submodules
-   - zstd is included as a submodule within this repository.  From within your cloned GACL repo, zstd can be pulled down via the folowwing commands:
-     - `git submodule init` 
-     - `git submodule update`
+   - For lossy ML based implementation:
+      - For model download (highly suggested), run the CLER set up script Tools\scripts\setupCLER.ps1
+      - We currently support CPU-based model inference. Check out other ORT nuget packages and execution providers for GPU support: https://onnxruntime.ai/docs/install/
+   - Submodules
+      - zstd is included as a submodule within this repository.  From within your cloned GACL repo, zstd can be pulled down via the folowwing commands:
+         - `git submodule init`
+         - `git submodule update`
 3. The solution file "gacl.sln" can be found in the root folder
 
 
@@ -59,7 +60,24 @@ the following setting when compressing content for hardware-based decompression:
 * Tests/... - gtest based projects used for validation.
 
 
-# Game Asset Conditioning Library Primary APIs
+# Build and Test
+
+---
+
+Before building, or viewing sources in Visual Studio, the zstd submodule must be initialized by the following git commands:
+```
+git submodule init
+git submodule update
+```
+
+Primary build solution can be found at:
+
+`<root>\gacl.sln`
+
+Gtest-based validation projects can be found in the "tests" folder or solution area, and can be directly launched with F5 within Visual Studio.
+
+
+# Primary API
 
 ---
 
@@ -79,24 +97,28 @@ each 4x4 block of pixels.  A second API is included to quickly convert linear da
 
 BLER is generally able to reduce the compressed stream size by 50% while maintaining PSNR values of 40dB+.
 
-`void GACL_RDO_BlockLevelEntropyReduce(`   
-&nbsp;&nbsp;&nbsp;&nbsp;`uint32_t numBlocks,`  
-&nbsp;&nbsp;&nbsp;&nbsp;`void* encodedData,`  
-&nbsp;&nbsp;&nbsp;&nbsp;`uint32_t bcElementSizeBytes,`  
-&nbsp;&nbsp;&nbsp;&nbsp;`void* decodedR8G8B8A8,`  
-&nbsp;&nbsp;&nbsp;&nbsp;`float uniqueBlockReduce,`  
-&nbsp;&nbsp;&nbsp;&nbsp;`float maxDistSq = 64.0f * 4.0f,`  
-&nbsp;&nbsp;&nbsp;&nbsp;`float avgDistSq = 64.0f * 0.5f`  
-`);`
+```
+void GACL_RDO_BlockLevelEntropyReduce(  
+    uint32_t numBlocks,
+    void* encodedData,  
+    uint32_t bcElementSizeBytes,  
+    void* decodedR8G8B8A8,  
+    float uniqueBlockReduce,
+    float maxDistSq = 64.0f * 4.0f,  
+    float avgDistSq = 64.0f * 0.5f
+);
+```
 
 
-`void GACL_RDO_R8G8B8A8LinearToBlockGrouped(`
-&nbsp;&nbsp;&nbsp;&nbsp;`uint8_t* blockGroupedData,`  
-&nbsp;&nbsp;&nbsp;&nbsp;`const uint8_t* linearR8G8B8A8Data,`  
-&nbsp;&nbsp;&nbsp;&nbsp;`size_t rowPitch,`  
-&nbsp;&nbsp;&nbsp;&nbsp;`size_t width,`  
-&nbsp;&nbsp;&nbsp;&nbsp;`size_t height`  
-`);`
+```
+void GACL_RDO_R8G8B8A8LinearToBlockGrouped(
+    uint8_t* blockGroupedData,  
+    const uint8_t* linearR8G8B8A8Data,  
+    size_t rowPitch,
+    size_t width,  
+    size_t height  
+);
+```
 
 The Block-Level Entropy Reduction algorithm will only unify blocks within the same 256KB window that anticipated hardware will support at full speed,
 and to which the zstd compression settings are clamped to at the shuffle+compress stage.  For tiles or small textures, maximum distance\\reference 
@@ -124,12 +146,14 @@ included in the GACL, but runtime unshufle support is not yet released.
 Shuffle+Compress will generally yield a relative 10% reduction in compressed stream size, as compared to the same stream compressed with zstd without
 shuffling.  Savings can vary widely by texture.
 
-`HRESULT GACL_ShuffleCompress_BCn(`
-&nbsp;&nbsp;&nbsp;&nbsp;`uint8_t* dest,`  
-&nbsp;&nbsp;&nbsp;&nbsp;`GACL_SHUFFLE_TRANSFORM& destTransformId,`  
-&nbsp;&nbsp;&nbsp;&nbsp;`size_t& destBytesWritten,`  
-&nbsp;&nbsp;&nbsp;&nbsp;`SHUFFLE_COMPRESS_PARAMETERS& params`   
-`);`
+```
+HRESULT GACL_ShuffleCompress_BCn(
+    uint8_t* dest,
+    GACL_SHUFFLE_TRANSFORM& destTransformId,  
+    size_t& destBytesWritten,  
+    SHUFFLE_COMPRESS_PARAMETERS& params   
+);
+```
 
 Returns S_OK if shuffle+compress reduced the size of the data, in which case the compressed stream is written to `dest`. The transform ID 
 in `destTransformID` will be used in Direct Storage read requests for queueing the matching unshuffle transform at runtime.
@@ -138,13 +162,16 @@ Returns S_FALSE if shuffle+compress did not produce any reduction in size.  In t
 
 Shuffle+Compress requests use zstd compression by default, but can be customized by replacing the three global compression function pointers below:
 
-`typedef HRESULT(*PGACL_COMPRESSION_INITROUTINE) ( void** ccContext, size_t* destBytesRequired, const SHUFFLE_COMPRESS_PARAMETERS* params);`
-`typedef HRESULT(*PGACL_COMPRESSION_COMPRESSROUTINE) ( void* context, void* dest, size_t* destBytes, const void* src, size_t srcBytes);`
-`typedef HRESULT(*PGACL_COMPRESSION_CLEANUPROUTINE) ( void* pContext);`
+```
+typedef HRESULT(*PGACL_COMPRESSION_INITROUTINE)
+(void** ccContext, size_t* destBytesRequired, const SHUFFLE_COMPRESS_PARAMETERS* params);
+typedef HRESULT(*PGACL_COMPRESSION_COMPRESSROUTINE) ( void* context, void* dest, size_t* destBytes, const void* src, size_t srcBytes);
+typedef HRESULT(*PGACL_COMPRESSION_CLEANUPROUTINE) ( void* pContext);
 
-`extern PGACL_COMPRESSION_INITROUTINE GACL_Compression_InitRoutine;`
-`extern PGACL_COMPRESSION_COMPRESSROUTINE GACL_Compression_CompressRoutine;`
-`extern PGACL_COMPRESSION_CLEANUPROUTINE GACL_Compression_CleanupRoutine;`
+extern PGACL_COMPRESSION_INITROUTINE GACL_Compression_InitRoutine;
+extern PGACL_COMPRESSION_COMPRESSROUTINE GACL_Compression_CompressRoutine;
+extern PGACL_COMPRESSION_CLEANUPROUTINE GACL_Compression_CleanupRoutine;
+```
 
 ## Space Curves and transforms
 
@@ -154,8 +181,10 @@ single strip of 1024 4x4 elements would represent 16KB of memory.  i.e. two pixe
 
 Future zstd decompression hardware will not have sufficient internal fast cache to support references across such a large texture, and the GACL 
 limits zstd compression to window and distances of &lt;= 256KB.  For the above 4K BC7 example, 256KB would represent of strip of 64 pixels.  
+
 When compressing a texture into discrete chunks\\blocks, screen adjacent regions typically produce higher compression ratios than strips of a 
 texture.  This is partially from higher chances of repeat byte sequences, and partially from reduced distance and encoding cost to those matches.  
+
 When applying RDO, there is higher chance to finding "near similar" blocks when searching in a screen-adjacent pattern.
 
 To enable these screen adjacency gains, the GACL introduces the concept of curved transforms, _which are currently experimental_.  
@@ -176,14 +205,16 @@ adjacent 256KB blocks.  One API allows for converting textures to (forward) or f
 compression-improvement operations can be completed in curved space.  Future releases of DirectStorage will include unshuffle shaders that include
 support for reversing curved data.
 
-`bool GACL_Shuffle_ApplySpaceCurve(`
-&nbsp;&nbsp;&nbsp;&nbsp;`uint8_t* dest,`
-&nbsp;&nbsp;&nbsp;&nbsp;`const uint8_t* src,`
-&nbsp;&nbsp;&nbsp;&nbsp;`size_t size,`
-&nbsp;&nbsp;&nbsp;&nbsp;`size_t elementSizeBytes,`
-&nbsp;&nbsp;&nbsp;&nbsp;`size_t widthInPixels,`
-&nbsp;&nbsp;&nbsp;&nbsp;`bool forward`
-`);`
+```
+bool GACL_Shuffle_ApplySpaceCurve(
+    uint8_t* dest,
+    const uint8_t* src,
+    size_t size,
+    size_t elementSizeBytes,
+    size_t widthInPixels,
+    bool forward
+);
+```
 
 ## Top level Component Entropy Reduction function (Experimental/RDO_ML/ML_RDO.h):
 
@@ -195,39 +226,43 @@ Execution of this function on a single 4k texture may take many seconds dependin
 
 Requires `GACL_EXPERIMENTAL` or `GACL_INCLUDE_CLER` to be defined. See `gacl.h`.
 
-`void GACL_RDO_ComponentLevelEntropyReduce(`   
-&nbsp;&nbsp;&nbsp;&nbsp;`void* encodedData,`  
-&nbsp;&nbsp;&nbsp;&nbsp;`uint32_t imageWidth,`  
-&nbsp;&nbsp;&nbsp;&nbsp;`uint32_t imageHeight,` 
-&nbsp;&nbsp;&nbsp;&nbsp;`void* referenceR8G8B8A8,`  
-&nbsp;&nbsp;&nbsp;&nbsp;`DXGI_FORMAT format`  
-&nbsp;&nbsp;&nbsp;&nbsp;`RDOOptions& options`
-`);`
+```
+void GACL_RDO_ComponentLevelEntropyReduce(
+    void* encodedData,
+    uint32_t imageWidth,  
+    uint32_t imageHeight, 
+    void* referenceR8G8B8A8,  
+    DXGI_FORMAT format
+    RDOOptions& options
+);
+```
 
 This experimental feature supports BC1, performing advanced entropy reduction using color endpoint clustering and ML-based perceptual loss metrics on a modifiable buffer of BC texture data, and also an optional R8B8G8A8 reference image. Below are the supporting types:
 
-`struct RDOOptions {`
-&nbsp;&nbsp;&nbsp;&nbsp;`int maxClusters = -1;`                        - Maximum number of clusters (default: selects based on image size)
-&nbsp;&nbsp;&nbsp;&nbsp;`int minClusters = 1;`                         - Minimum number of clusters
-&nbsp;&nbsp;&nbsp;&nbsp;`int iterations = 7;`                          - Number of clustering iterations
-&nbsp;&nbsp;&nbsp;&nbsp;`RDOLossMetric metric = RDOLossMetric::LPIPS;` - Loss metric to use, see RDOLossMetric
-&nbsp;&nbsp;&nbsp;&nbsp;`float lossMin = 0.05f;`                       - Minimum loss bound
-&nbsp;&nbsp;&nbsp;&nbsp;`float lossMax = 0.1f;`                        - Maximum loss bound
-&nbsp;&nbsp;&nbsp;&nbsp;`int numThreads = 0;`                          - Number of threads (0 = auto)
-&nbsp;&nbsp;&nbsp;&nbsp;`bool usePlusPlus = true;`                     - Use k-means++ initialization
-&nbsp;&nbsp;&nbsp;&nbsp;`bool useClusterRDO = true;`                   - Enable advanced RDO and use of loss metric
-&nbsp;&nbsp;&nbsp;&nbsp;`bool isGammaFormat = false;`                  - Indicates sRGB/gamma format
-&nbsp;&nbsp;&nbsp;&nbsp;`void* onnxModelPtr = nullptr;`                - Internal pointer for ONNX model (managed by library)
-`);`
+```
+struct RDOOptions {
+    int maxClusters = -1;                        - Maximum number of clusters (default: selects based on image size)
+    int minClusters = 1;                         - Minimum number of clusters
+    int iterations = 7;                          - Number of clustering iterations
+    RDOLossMetric metric = RDOLossMetric::LPIPS; - Loss metric to use, see RDOLossMetric
+    float lossMin = 0.05f;                       - Minimum loss bound
+    float lossMax = 0.1f;                        - Maximum loss bound
+    int numThreads = 0;                          - Number of threads (0 = auto)
+    bool usePlusPlus = true;                     - Use k-means++ initialization
+    bool useClusterRDO = true;                   - Enable advanced RDO and use of loss metric
+    bool isGammaFormat = false;                  - Indicates sRGB/gamma format
+    void* onnxModelPtr = nullptr;                - Internal pointer for ONNX model (managed by library)
+);
 
-`enum class RDOLossMetric{`
-&nbsp;&nbsp;&nbsp;&nbsp;`MSE,`      - Mean Squared Error
-&nbsp;&nbsp;&nbsp;&nbsp;`RMSE,`     - Root Mean Squared Error
-&nbsp;&nbsp;&nbsp;&nbsp;`VGG,`      - VGG ml-based perceptual loss
-&nbsp;&nbsp;&nbsp;&nbsp;`LPIPS,`    - LPIPS ml-based perceptual loss
-`);`
+enum class RDOLossMetric{
+    MSE,      - Mean Squared Error
+    RMSE,     - Root Mean Squared Error
+    VGG,      - VGG ml-based perceptual loss
+    LPIPS,    - LPIPS ml-based perceptual loss
+);
 
-`enum class RDO_ErrorCode : int`
+enum class RDO_ErrorCode : int
+```
 
 | Error code | Value | Meaning |
 |-----------------|-----------------|-----------------|
@@ -247,22 +282,6 @@ This experimental feature supports BC1, performing advanced entropy reduction us
 | 50     | UnknownError     | Unknown error    |
 
 
-
-
-# Build and Test
-
----
-
-Before building, or viewing sources in Visual Studio, the std submodule must be initialized by the following git commands:
-`git submodule init`
-`git submodule update`
-
-
-Primary build solution can be found at:
-
-&nbsp;	<root>\\gacl.sln
-
-Gtest-based validation projects can be found in the "tests" folder or solution area, and can be directly launched with F5 within Visual Studio.
 
 
 # Credits
