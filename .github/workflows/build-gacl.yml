@@ -59,3 +59,52 @@ jobs:
         with:
           name: gacl-${{ matrix.configuration }}-${{ matrix.platform }}
           path: out
+
+  test:
+    name: Test (${{ matrix.configuration }}-${{ matrix.platform }})
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      checks: write
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+        platform: [x64]
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+          lfs: false
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: gacl-${{ matrix.configuration }}-${{ matrix.platform }}
+          path: out
+
+      - name: Run native tests
+        shell: pwsh
+        run: |
+          $binDir = "${{ github.workspace }}\out\${{ matrix.configuration }}\${{ matrix.platform }}\bin"
+          $testBins = Get-ChildItem -Path $binDir `
+            -Filter "*tests.exe" -Recurse
+          foreach ($test in $testBins) {
+            Push-Location $binDir
+            & $test.FullName `
+              --gtest_output=xml:"${{ github.workspace }}\TestResults\$($test.BaseName).xml"
+            Pop-Location
+          }
+
+      - name: Publish test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Test Results (${{ matrix.configuration }}-${{ matrix.platform }})
+          path: TestResults/*.xml
+          reporter: java-junit
