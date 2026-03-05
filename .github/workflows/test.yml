@@ -12,7 +12,7 @@ on:
 
 jobs:
   test:
-    name: Test (matrix)
+    name: Test (${{ matrix.configuration }}-${{ matrix.platform }})
     runs-on: windows-latest
     timeout-minutes: 180
     permissions:
@@ -26,38 +26,11 @@ jobs:
         platform: [x64]
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: ./.github/actions/build-core
         with:
-          submodules: recursive
-          fetch-depth: 1
-          lfs: false
-          
-      - name: Restore NuGet packages
-        run: |
-          nuget restore gacl.sln `
-            -ConfigFile nuget.config `
-            -PackagesDirectory packages `
-            -Source "https://api.nuget.org/v3/index.json" `
+          configuration: ${{ matrix.configuration }}
+          platform: ${{ matrix.platform }}
 
-      - name: Setup MSBuild (VS 2022)
-        uses: microsoft/setup-msbuild@v2
-        with:
-          vs-version: '17.0'
-
-      - name: Setup CLER
-        shell: pwsh
-        run: |
-          Tools\scripts\setupCLER.ps1
-
-      - name: Build gacl.sln
-        run: |
-          msbuild gacl.sln `
-            /t:Rebuild `
-            /p:Configuration=${{ matrix.configuration }} `
-            /p:Platform=${{ matrix.platform }} `
-            /p:OutDir=${{ github.workspace }}\out\${{ matrix.configuration }}\${{ matrix.platform }}\bin\
-      
       - name: Run native tests
         shell: pwsh
         run: |
