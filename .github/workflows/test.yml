@@ -12,7 +12,7 @@ on:
 
 jobs:
   test:
-    name: Tuild (matrix)
+    name: Test (matrix)
     runs-on: windows-latest
     timeout-minutes: 180
     permissions:
