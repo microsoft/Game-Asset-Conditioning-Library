@@ -108,3 +108,4 @@ jobs:
           name: Test Results (${{ matrix.configuration }}-${{ matrix.platform }})
           path: TestResults/*.xml
           reporter: java-junit
+
