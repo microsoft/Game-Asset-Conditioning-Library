@@ -122,8 +122,8 @@ void GACL_RDO_R8G8B8A8LinearToBlockGrouped(
 );
 ```
 
-BLER will only unify blocks within the same 256KB window, consistent with the zstd compression settings applied 
-at the shuffle+compress stage.  For tiles or small textures, maximum distance\\reference limit does not have any compression ratio implications.
+BLER will only unify blocks within the same 256KB window, consistent with the zstd compression settings applied at the shuffle+compress stage. For
+tiles or small textures, maximum distance\\reference limit does not have any compression ratio implications.
 
 For large textures, 256KB may only represent a narrow strip of the texture in linear layout.  Experimental curved shuffle transforms (discussed below) 
 move data within a stream into z-ordered 16KB micro-tiles, ensuring each 16KB\\64KB\\256KB blocks of memory is screen-adjacent.  This maximizes the 
