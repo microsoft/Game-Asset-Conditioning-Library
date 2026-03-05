@@ -10,13 +10,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Checkout repo
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
-        fetch-depth: 1
-        lfs: false
-
     - name: Restore NuGet packages
       shell: pwsh
       run: |
