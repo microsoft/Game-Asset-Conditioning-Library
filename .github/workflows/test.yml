@@ -7,12 +7,17 @@ on:
       - github-actions
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "0 10 * * *" # 2:00 AM PST (UTC-8)
 
 jobs:
   build:
-    name: Build (${{ matrix.configuration }}-${{ matrix.platform }})
+    name: Build (matrix)
     runs-on: windows-latest
     timeout-minutes: 180
+    permissions:
+      checks: write
+      contents: read
 
     strategy:
       fail-fast: false
@@ -27,7 +32,7 @@ jobs:
           submodules: recursive
           fetch-depth: 1
           lfs: false
-
+          
       - name: Restore NuGet packages
         run: |
           nuget restore gacl.sln `
@@ -52,41 +57,7 @@ jobs:
             /p:Configuration=${{ matrix.configuration }} `
             /p:Platform=${{ matrix.platform }} `
             /p:OutDir=${{ github.workspace }}\out\${{ matrix.configuration }}\${{ matrix.platform }}\bin\
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: gacl-${{ matrix.configuration }}-${{ matrix.platform }}
-          path: out
-
-  test:
-    name: Test (${{ matrix.configuration }}-${{ matrix.platform }})
-    needs: build
-    runs-on: windows-latest
-    permissions:
-      checks: write
-      contents: read
-
-    strategy:
-      fail-fast: false
-      matrix:
-        configuration: [Debug, Release]
-        platform: [x64]
-
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          fetch-depth: 1
-          lfs: false
-
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: gacl-${{ matrix.configuration }}-${{ matrix.platform }}
-          path: out
-
+      
       - name: Run native tests
         shell: pwsh
         run: |
