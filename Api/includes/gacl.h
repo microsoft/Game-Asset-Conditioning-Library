@@ -90,7 +90,7 @@
 			  V                                   |
 	compressed asset stream                       |
 			  |                                   V
-			  |    <----------------    hardware zstd decompress
+			  |    <----------------      zstd decompress
 			  |                                   |                                                    
 			  V                                   |                                                    
 	   Shuffled asset                             |
