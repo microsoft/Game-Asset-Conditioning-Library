@@ -1,0 +1,45 @@
+name: Build Core
+description: Checkout, restore, and build GACL
+
+inputs:
+  configuration:
+    required: true
+  platform:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 1
+        lfs: false
+
+    - name: Restore NuGet packages
+      shell: pwsh
+      run: |
+        nuget restore gacl.sln `
+          -ConfigFile nuget.config `
+          -PackagesDirectory packages `
+          -Source "https://api.nuget.org/v3/index.json" `
+
+    - name: Setup MSBuild (VS 2022)
+      uses: microsoft/setup-msbuild@v2
+      with:
+        vs-version: '17.0'
+
+    - name: Setup CLER
+      shell: pwsh
+      run: |
+        Tools\scripts\setupCLER.ps1
+
+    - name: Build gacl.sln
+      shell: pwsh
+      run: |
+        msbuild gacl.sln `
+          /t:Rebuild `
+          /p:Configuration=${{ inputs.configuration }} `
+          /p:Platform=${{ inputs.platform }} `
+          /p:OutDir=${{ github.workspace }}\out\${{ inputs.configuration }}\${{ inputs.platform }}\bin\
