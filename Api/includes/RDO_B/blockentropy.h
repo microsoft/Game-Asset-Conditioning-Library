@@ -19,8 +19,8 @@ struct Vec64u8;
 /// <summary>
 /// Reduces the number of unique block compressed elements within a texture by finding 4x4 groups of pixels that are
 /// nearly identical, and replacing the BC-encoded and RGB[A] data in one of the two regions so that the two elements
-/// have the same encoding.  Near-matches are only unified within a sliding window of the size defined by anticipated
-/// future zstd decompression hardware.
+/// have the same encoding.  Near-matches are only unified within a sliding window consistent with the zstd compression
+/// window size used for CPU offload compatibility.
 /// 
 /// Performance:  3-5 second per 4K*4K texture, measured on a Threadripper pro 3975WX 
 /// 

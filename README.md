@@ -5,20 +5,26 @@
 The Game Asset Conditioning Library (GACL) contains several components that help improve compression of game assets.
 Texture assets are the primary focus, since those make up the largest portion of most games package size.  
 
-In the near future, it is anticipated that we will see optimized CPU offload implementations of Zstd being developed by hardware vendors.
-
-ZStandard (https://github.com/facebook/zstd) support is included in DirectStorage 1.4 as part of this effort.
+In the near future, it is anticipated that we will see optimized CPU offload implementations of ZStandard (Zstd) being developed by hardware vendors. Zstd (https://github.com/facebook/zstd) support is included in DirectStorage 1.4 as part of this effort.
 
 The GACL starts with zstd compression as a baseline, and then provides several tools for improving compression ratios while ensuring
 high throughput from the anticipated decompression implementations.  Two approaches of lossy texture data rate 
-distortion optimization (RDO) are included, (Block-level and Component-level entropy reduction).  Shuffle transforms can be applied prior 
+distortion optimization (RDO) are included, block-level and component-level entropy reduction.  Shuffle transforms can be applied prior 
 to compression to losslessly further improve compression ratios of [block compressed BCn](https://learn.microsoft.com/en-us/windows/win32/direct3d11/texture-block-compression-in-direct3d-11 "DirectX block compressed formats") data streams, with DirectStorage supporting and 
 implementing the reverse transform at data retrieval time.
 
+# Preview Release 
 
+---
 
+GACL is currently **in preview**. We are actively seeking feedback from the community and welcome contributions to help guide the future development of this library.
 
+As a preview:
 
+- **APIs are subject to change.** Interfaces documented in this release, including those in `gacl.h`, `shuffle.h`, `blockentropy.h`, and `ml_RDO.h`, may be revised based on feedback from the community.
+- **Experimental features** (enabled via `GACL_EXPERIMENTAL`) are particularly likely to evolve or be replaced.
+
+We would love to hear from you - please use [GitHub Issues](https://github.com/microsoft/Game-Asset-Conditioning-Library/issues) to report bugs, share results, or suggest improvements. Pull requests are also welcome; see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 # Getting Started
 
@@ -39,26 +45,23 @@ Enable "Desktop Development with C++" in Workloads
          - `git submodule update`
 3. The solution file "gacl.sln" can be found in the root folder
 
-
 # Description of Components
 
 ---
 
-Ignoring external dependencies, the Game Asset Conditiontioning Library is split into a core functional library designed for 
+Apart from external dependencies, the Game Asset Conditiontioning Library is split into a core functional library designed for 
 integration into content pipelines which import textures, and a front end tool intended for simplified scenarios.
 
 ## Projects within this solution include:
 
-* lbzstd\_p - Project that imports and builds the zstd submodule, but with modified compression settings, clamping to expected zstd hardware limitations, with a 256KB window size.  Builds to static lib form.
+* lbzstd\_p - Project that imports and builds the zstd submodule, but with modified compression settings intended for broader compatibility with future CPU offload implementations of zstd, with a 256KB window size. Builds to static lib form.
 * libzstd\_p-dll - As above, but builds to dll form.
 * zstd\_p - As above, builds a modified version of the zstd.exe command line tool that limits the window size, which cannot be specified at command 
-line.  Note that to correctly target shader based implementations that prefer more blocks that are smaller it is also advised that developers include
-the following setting when compressing content for hardware-based decompression:
+line.  Note that for optimized performance with CPU offload decompression implementations, it is also advised that developers include the following setting when compressing content:
     * --target-compressed-block-size=8192
 * gacl_lib - Core library that contains APIs for RDO and Shuffle transforms, builds into static lib.
 * gacl_exe - Builds the gacl.exe front end tool that loads textures and applies selected transforms.
 * Tests/... - gtest based projects used for validation.
-
 
 # Build and Test
 
@@ -75,7 +78,6 @@ Primary build solution can be found at:
 `<root>\gacl.sln`
 
 Gtest-based validation projects can be found in the "tests" folder or solution area, and can be directly launched with F5 within Visual Studio.
-
 
 # Primary API
 
@@ -95,7 +97,7 @@ BLER is a lossy RDO algorithm that reduces entropy within a texture by unifying 
 It currently supports BC1-5 & BC7.  To guide the replacement of encoded BCn data, it examines the decoded R8G8B8A8 representation of 
 each 4x4 block of pixels.  A second API is included to quickly convert linear data into the required format.
 
-BLER is generally able to reduce the compressed stream size by 50% while maintaining PSNR values of 40dB+.
+BLER is generally able to reduce the compressed stream size by up to 50% while maintaining PSNR values of 40dB+.
 
 ```
 void GACL_RDO_BlockLevelEntropyReduce(  
@@ -120,9 +122,8 @@ void GACL_RDO_R8G8B8A8LinearToBlockGrouped(
 );
 ```
 
-The Block-Level Entropy Reduction algorithm will only unify blocks within the same 256KB window that anticipated hardware will support at full speed,
-and to which the zstd compression settings are clamped to at the shuffle+compress stage.  For tiles or small textures, maximum distance\\reference 
-limit does not have any compression ratio implications.  
+BLER will only unify blocks within the same 256KB window, consistent with the zstd compression settings applied at the shuffle+compress stage. For
+tiles or small textures, maximum distance\\reference limit does not have any compression ratio implications.
 
 For large textures, 256KB may only represent a narrow strip of the texture in linear layout.  Experimental curved shuffle transforms (discussed below) 
 move data within a stream into z-ordered 16KB micro-tiles, ensuring each 16KB\\64KB\\256KB blocks of memory is screen-adjacent.  This maximizes the 
@@ -131,19 +132,17 @@ in 'curved' space will produce higher quality and compression ratios for the sam
 example of this flow, applying BLER twice (once to linear data, once to curved data) if experimental shuffle+compress is enabled.  Then both streams
 of entropy reduced data are included in the Shuffle+Compress request.
 
-
-
 ## Shuffle and Compression (shuffle.h):
 
-Shuffle+Compress are two lossless processing stages that are handled as a single request for a given texture data stream.  The api will attempt 
+Shuffle+Compress are two lossless processing stages that are handled as a single request for a given texture data stream.  The API will attempt 
 multiple different shuffle transforms based upon `destTransformId` and `params`, returning the shuffled+compressed data stream for the 
 shuffle transform that compressed the smallest.  Streams may be individual tiles, groups of tiles, mips, or any other scope of texture data.  At
 runtime, the reverse stages (decompression + unshuffle) are required to restore the original data stream.
 
 Currently shuffles for BC1\3\4\5 are supported, with unshuffle operations supported within DirectStorage 1.4.  Experimental BC7 support is
-included in the GACL, but runtime unshufle support is not yet released.
+included in the GACL, but runtime unshuffle support is not currently available.
 
-Shuffle+Compress will generally yield a relative 10% reduction in compressed stream size, as compared to the same stream compressed with zstd without
+Shuffle+Compress will generally yield up to a relative 10% reduction in compressed stream size, as compared to the same stream compressed with zstd without
 shuffling.  Savings can vary widely by texture.
 
 ```
@@ -155,10 +154,10 @@ HRESULT GACL_ShuffleCompress_BCn(
 );
 ```
 
-Returns S_OK if shuffle+compress reduced the size of the data, in which case the compressed stream is written to `dest`. The transform ID 
+Returns `S_OK` if shuffle+compress reduced the size of the data, in which case the compressed stream is written to `dest`. The transform ID 
 in `destTransformID` will be used in Direct Storage read requests for queueing the matching unshuffle transform at runtime.
 
-Returns S_FALSE if shuffle+compress did not produce any reduction in size.  In this case a title should package the asset in uncompressed form.
+Returns `S_FALSE` if shuffle+compress did not produce any reduction in size.  In this case a title should package the asset in uncompressed form.
 
 Shuffle+Compress requests use zstd compression by default, but can be customized by replacing the three global compression function pointers below:
 
@@ -179,8 +178,8 @@ Texture data typically exists in linear (row-major) form until it is uploaded to
 may be near\\adjacent in screen space may be a far distance in memory layout.  For example, a 4K*4K BC7 mip would require 16MB of memory, and a 
 single strip of 1024 4x4 elements would represent 16KB of memory.  i.e. two pixels that are adjacent vertically might be 16KB away in memory.
 
-Future zstd decompression hardware will not have sufficient internal fast cache to support references across such a large texture, and the GACL 
-limits zstd compression to window and distances of &lt;= 256KB.  For the above 4K BC7 example, 256KB would represent of strip of 64 pixels.  
+Future CPU offload implementations for zstd decompression may not support references across such a large texture, and the GACL limits zstd compression 
+to window and distances of &lt;= 256KB.  For the above 4K BC7 example, 256KB would represent of strip of 64 pixels. 
 
 When compressing a texture into discrete chunks\\blocks, screen adjacent regions typically produce higher compression ratios than strips of a 
 texture.  This is partially from higher chances of repeat byte sequences, and partially from reduced distance and encoding cost to those matches.  
@@ -216,7 +215,7 @@ bool GACL_Shuffle_ApplySpaceCurve(
 );
 ```
 
-## Top level Component Entropy Reduction function (Experimental/RDO_ML/ML_RDO.h):
+## Component-level Entropy Reduction (Experimental/RDO_ML/ML_RDO.h):
 
 Component-Level Entropy Reduction (CLER) is a lossy RDO algorithm that will attempt to reduce the number of unique values for certain fields within
 the block compressed (BCn) data, while using perceptual quality measurement models to minimize loss of detail.  Currently CLER supports BC1 textures.
@@ -280,9 +279,6 @@ enum class RDO_ErrorCode : int
 | 32     | UnsupportedFormatNotImplemented     |Format is not implemented yet      |
 | 40     | InternalException     | Internal exception occurred during processing     |
 | 50     | UnknownError     | Unknown error    |
-
-
-
 
 # Credits
 

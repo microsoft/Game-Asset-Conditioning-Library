@@ -174,8 +174,8 @@ GACL_API extern PGACL_COMPRESSION_CLEANUPROUTINE GACL_Compression_CleanupRoutine
 /// Default compression init routine.
 /// 
 /// This function will initialize a zstd compression context that will enforce the following settings 
-/// to maintain compression ratios while enabling future hardware-accelerated implementations (i.e., GPU)  
-/// of decompression to achieve higher throughput.
+/// to maintain compression ratios while enabling future cpu offload implementations of decompression
+/// to achieve higher throughput.
 /// 256KB max window size(enforced via the zstd_p variant lib)
 /// Strategy >= btopt(to allow for 3 byte matching)
 /// Min match size = 3
@@ -239,7 +239,7 @@ GACL_API HRESULT GACL_Compression_DefaultCleanupRoutine(
 /// experimental or proposed for future support.
 /// 
 /// Default compression is zstd, with some specific setting intended to balance compression ratio and
-/// throughput on anticipated future hardware and gpu implementations of zstd decompression.
+/// throughput on anticipated future cpu offload implementations of zstd decompression.
 /// </summary>
 /// <param name="dest">Destination buffer for compressed data. It's size must be equal to the input data stream.</param>
 /// <param name="destTransformId">On entry, either a functional support level like GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED, or a specific transform ID.  On exit, indicated the transform selected.</param>
