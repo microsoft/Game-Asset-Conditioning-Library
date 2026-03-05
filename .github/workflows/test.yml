@@ -11,8 +11,8 @@ on:
     - cron: "0 10 * * *" # 2:00 AM PST (UTC-8)
 
 jobs:
-  build:
-    name: Build (matrix)
+  test:
+    name: Tuild (matrix)
     runs-on: windows-latest
     timeout-minutes: 180
     permissions:
