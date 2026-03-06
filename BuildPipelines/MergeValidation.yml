@@ -1,0 +1,66 @@
+name: $(date:yyMM).$(date:dd)$(rev:rr) - MergeCheck
+
+# Trigger on commits to main
+trigger:
+  batch: true
+  branches:
+    include:
+      - main
+
+# Daily 2:00am PST == 10:00 UTC
+schedules:
+  - cron: "0 10 * * *"
+    displayName: "Nightly GitIgnore Validation"
+    branches:
+      include:
+        - main
+    always: true
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - checkout: self
+    fetchDepth: 1
+    lfs: false
+    clean: true
+    sparseCheckoutPatterns: |
+      .gitignore
+    displayName: 'Sparse checkout .gitignore only'
+
+  - pwsh: |
+      $gitignorePath = "$(Build.SourcesDirectory)/.gitignore"
+      
+      if (-not (Test-Path $gitignorePath)) {
+        Write-Host "##vso[task.logissue type=error] target file not found"
+        exit 1
+      }
+      
+      Write-Host "Reading .gitignore from $gitignorePath"
+      
+      # Define forbidden patterns
+      $forbiddenPatterns = @(
+        "[Ii]nternal/",
+        "[Ee]s-metadata.yml"
+      )
+      
+      $gitignoreContent = Get-Content $gitignorePath
+      $foundIssues = @()
+      
+      foreach ($pattern in $forbiddenPatterns) {
+        if ($gitignoreContent -contains $pattern) {
+          $foundIssues += $pattern
+          Write-Host "##vso[task.logissue type=error]FORBIDDEN PATTERN found: $pattern"
+        } else {
+          Write-Host "✓ Pattern NOT found (good): $pattern"
+        }
+      }
+      
+      if ($foundIssues.Count -gt 0) {
+        Write-Host "##vso[task.complete result=Failed;]VALIDATION FAILED: Found $($foundIssues.Count) forbidden pattern(s)"
+        exit 1
+      }
+      
+      Write-Host "✓ VALIDATION PASSED: forbidden patterns not found"
+    displayName: 'Validate .gitignore for forbidden patterns'
+    failOnStderr: false
