@@ -48,7 +48,8 @@ jobs:
           msbuild .\Samples\GameAssetConditioningDemo\GameAssetConditioningDemo.sln `
             /p:Configuration=${{ matrix.configuration }} `
             /p:Platform=${{ matrix.platform }} `
-            /p:OutDir=${{ github.workspace }}\out\${{ matrix.configuration }}\${{ matrix.platform }}\bin\
+            /p:OutDir=${{ github.workspace }}\out\${{ matrix.configuration }}\${{ matrix.platform }}\bin\ `
+            /p:AdditionalLibraryDirectories=${{ github.workspace }}\out\${{ matrix.configuration }}\${{ matrix.platform }}\bin\;$(AdditionalLibraryDirectories)
             
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
