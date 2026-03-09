@@ -46,13 +46,12 @@ jobs:
         shell: pwsh
         run: |
           $out = "${{ github.workspace }}\out\${{ matrix.configuration }}\${{ matrix.platform }}\bin\"
-          $libDirs = "$out%3B`$(AdditionalLibraryDirectories)"
+          $env:LIB = "$out;$env:LIB"
       
           msbuild .\Samples\GameAssetConditioningDemo\GameAssetConditioningDemo.sln `
             /p:Configuration=${{ matrix.configuration }} `
             /p:Platform=${{ matrix.platform }} `
-            /p:OutDir="$out" `
-            /p:AdditionalLibraryDirectories="$libDirs"
+            /p:OutDir="$out"
         
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
