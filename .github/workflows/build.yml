@@ -1,0 +1,41 @@
+name: Build GACL
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 10 * * *" # 2:00 AM PST (UTC-8)
+
+jobs:
+  build:
+    name: Build (${{ matrix.configuration }}-${{ matrix.platform }})
+    runs-on: windows-latest
+    timeout-minutes: 180
+
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+        platform: [x64]
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+          lfs: false
+          
+      - uses: ./.github/actions/build-core
+        with:
+          configuration: ${{ matrix.configuration }}
+          platform: ${{ matrix.platform }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gacl-${{ matrix.configuration }}-${{ matrix.platform }}
+          path: out
