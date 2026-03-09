@@ -17,7 +17,7 @@ schedules:
     always: true
 
 pool:
-  vmImage: ubuntu-latest
+  vmImage: windows-latest
 
 steps:
   - checkout: self
@@ -25,42 +25,42 @@ steps:
     lfs: false
     clean: true
     sparseCheckoutPatterns: |
-      .gitignore
+      /.gitignore
     displayName: 'Sparse checkout .gitignore only'
 
   - pwsh: |
-      $gitignorePath = "$(Build.SourcesDirectory)/.gitignore"
-      
+      $gitignorePath = "$(Build.SourcesDirectory)\.gitignore"
+
       if (-not (Test-Path $gitignorePath)) {
-        Write-Host "##vso[task.logissue type=error] target file not found"
+        Write-Host "##[error] .gitignore file not found at $gitignorePath"
         exit 1
       }
-      
+
       Write-Host "Reading .gitignore from $gitignorePath"
-      
-      # Define forbidden patterns
+
       $forbiddenPatterns = @(
         "[Ii]nternal/",
         "[Ee]s-metadata.yml"
       )
-      
+
       $gitignoreContent = Get-Content $gitignorePath
       $foundIssues = @()
-      
+
       foreach ($pattern in $forbiddenPatterns) {
         if ($gitignoreContent -contains $pattern) {
           $foundIssues += $pattern
-          Write-Host "##vso[task.logissue type=error]FORBIDDEN PATTERN found: $pattern"
-        } else {
-          Write-Host "✓ Pattern NOT found (good): $pattern"
+          Write-Host "##[error] FORBIDDEN PATTERN found in .gitignore: $pattern"
+        }
+        else {
+          Write-Host "OK - Pattern not found (good): $pattern"
         }
       }
-      
+
       if ($foundIssues.Count -gt 0) {
-        Write-Host "##vso[task.complete result=Failed;]VALIDATION FAILED: Found $($foundIssues.Count) forbidden pattern(s)"
+        Write-Host "##vso[task.complete result=Failed] VALIDATION FAILED: Found $($foundIssues.Count) forbidden pattern(s) in .gitignore"
         exit 1
       }
-      
-      Write-Host "✓ VALIDATION PASSED: forbidden patterns not found"
-    displayName: 'Validate .gitignore for forbidden patterns'
+
+      Write-Host "VALIDATION PASSED: .gitignore does not contain forbidden patterns"
+    displayName: 'Validate .gitignore forbidden patterns'
     failOnStderr: false
