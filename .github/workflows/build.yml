@@ -45,12 +45,13 @@ jobs:
       - name: Build Sample
         shell: pwsh
         run: |
+          $out = "${{ github.workspace }}\out\${{ matrix.configuration }}\${{ matrix.platform }}\bin\"
           msbuild .\Samples\GameAssetConditioningDemo\GameAssetConditioningDemo.sln `
             /p:Configuration=${{ matrix.configuration }} `
             /p:Platform=${{ matrix.platform }} `
             /p:OutDir=${{ github.workspace }}\out\${{ matrix.configuration }}\${{ matrix.platform }}\bin\ `
-            /p:AdditionalLibraryDirectories=${{ github.workspace }}\out\${{ matrix.configuration }}\${{ matrix.platform }}\bin\;$(AdditionalLibraryDirectories)
-            
+            /p:AdditionalLibraryDirectories="$out;$(AdditionalLibraryDirectories)"
+      
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
