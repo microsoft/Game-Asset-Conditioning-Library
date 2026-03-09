@@ -76,7 +76,7 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>$(CoreLibraryDependencies);%(AdditionalDependencies);RuntimeObject.lib;gacl_lib.lib;libzstd_p_static.lib</AdditionalDependencies>
+      <AdditionalDependencies>$(CoreLibraryDependencies);%(AdditionalDependencies);RuntimeObject.lib;$(OutDir)gacl_lib.lib;libzstd_p_static.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(directxtex-LibPath);%(AdditionalLibraryDirectories);..\..\..\bin\x64\$(Configuration)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
@@ -97,7 +97,7 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>$(CoreLibraryDependencies);%(AdditionalDependencies);RuntimeObject.lib;gacl_lib.lib;libzstd_p_static.lib</AdditionalDependencies>
+      <AdditionalDependencies>$(CoreLibraryDependencies);%(AdditionalDependencies);RuntimeObject.lib;$(OutDir)gacl_lib.lib;libzstd_p_static.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(directxtex-LibPath);%(AdditionalLibraryDirectories);..\..\..\bin\x64\$(Configuration)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
