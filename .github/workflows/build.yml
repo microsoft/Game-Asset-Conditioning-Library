@@ -34,6 +34,22 @@ jobs:
           configuration: ${{ matrix.configuration }}
           platform: ${{ matrix.platform }}
 
+      - name: Restore NuGet packages for Sample
+        shell: pwsh
+        run: |
+          nuget restore .\Samples\GameAssetConditioningDemo\GameAssetConditioningDemo.sln `
+            -ConfigFile nuget.config `
+            -PackagesDirectory packages `
+            -Source "https://api.nuget.org/v3/index.json" `
+  
+      - name: Build Sample
+        shell: pwsh
+        run: |
+          msbuild .\Samples\GameAssetConditioningDemo\GameAssetConditioningDemo.sln `
+            /p:Configuration=${{ matrix.configuration }} `
+            /p:Platform=${{ matrix.platform }} `
+            /p:OutDir=${{ github.workspace }}\out\${{ matrix.configuration }}\${{ matrix.platform }}\bin\
+            
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
