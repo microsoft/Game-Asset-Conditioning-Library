@@ -36,9 +36,9 @@
   <ImportGroup Label="ExtensionSettings">
   </ImportGroup>
   <ImportGroup Label="Shared">
-    <Import Project="..\packages\Microsoft.Direct3D.DirectStorage.1.4.0-preview1-2512.1002\build\native\targets\Microsoft.Direct3D.DirectStorage.targets" Condition="Exists('..\packages\Microsoft.Direct3D.DirectStorage.1.4.0-preview1-2512.1002\build\native\targets\Microsoft.Direct3D.DirectStorage.targets')" />
     <Import Project="..\packages\directxtex_desktop_win10.2025.10.28.1\build\native\directxtex_desktop_win10.targets" Condition="Exists('..\packages\directxtex_desktop_win10.2025.10.28.1\build\native\directxtex_desktop_win10.targets')" />
     <Import Project="..\..\..\packages\directxtex_desktop_win10.2025.7.10.1\build\native\directxtex_desktop_win10.targets" Condition="Exists('..\..\..\packages\directxtex_desktop_win10.2025.7.10.1\build\native\directxtex_desktop_win10.targets')" />
+    <Import Project="..\..\..\packages\Microsoft.Direct3D.DirectStorage.1.4.0-preview1-2603.504\build\native\targets\Microsoft.Direct3D.DirectStorage.targets" Condition="Exists('..\..\..\packages\Microsoft.Direct3D.DirectStorage.1.4.0-preview1-2603.504\build\native\targets\Microsoft.Direct3D.DirectStorage.targets')" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
@@ -129,5 +129,6 @@
     </ErrorText>
     </PropertyGroup>
     <Error Condition="!Exists('..\..\..\packages\directxtex_desktop_win10.2025.7.10.1\build\native\directxtex_desktop_win10.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\..\..\packages\directxtex_desktop_win10.2025.7.10.1\build\native\directxtex_desktop_win10.targets'))" />
+    <Error Condition="!Exists('..\..\..\packages\Microsoft.Direct3D.DirectStorage.1.4.0-preview1-2603.504\build\native\targets\Microsoft.Direct3D.DirectStorage.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\..\..\packages\Microsoft.Direct3D.DirectStorage.1.4.0-preview1-2603.504\build\native\targets\Microsoft.Direct3D.DirectStorage.targets'))" />
   </Target>
 </Project>
