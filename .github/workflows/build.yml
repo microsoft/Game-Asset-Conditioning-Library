@@ -1,0 +1,59 @@
+name: Build GACL
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 10 * * *" # 2:00 AM PST (UTC-8)
+
+jobs:
+  build:
+    name: Build (${{ matrix.configuration }}-${{ matrix.platform }})
+    runs-on: windows-latest
+    timeout-minutes: 180
+
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+        platform: [x64]
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+          lfs: false
+          
+      - uses: ./.github/actions/build-core
+        with:
+          configuration: ${{ matrix.configuration }}
+          platform: ${{ matrix.platform }}
+
+      - name: Restore NuGet packages for Sample
+        shell: pwsh
+        run: |
+          nuget restore .\Samples\GameAssetConditioningDemo\GameAssetConditioningDemo.sln `
+            -ConfigFile nuget.config `
+            -PackagesDirectory packages `
+            -Source "https://api.nuget.org/v3/index.json" `
+                  
+      - name: Build Sample
+        shell: pwsh
+        run: |
+          $out = "${{ github.workspace }}\out\${{ matrix.configuration }}\${{ matrix.platform }}\bin\"
+
+          msbuild .\Samples\GameAssetConditioningDemo\GameAssetConditioningDemo.sln `
+            /p:Configuration=${{ matrix.configuration }} `
+            /p:Platform=${{ matrix.platform }} `
+            /p:OutDir="$out"
+        
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gacl-${{ matrix.configuration }}-${{ matrix.platform }}
+          path: out
