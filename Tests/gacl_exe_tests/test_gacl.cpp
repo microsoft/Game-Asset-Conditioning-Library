@@ -14,5 +14,5 @@
 
 // Basic sanity test
 TEST(HelloWorld, BasicEquality) {
-    EXPECT_EQ(43, 40 + 2);
+    EXPECT_EQ(42, 40 + 2);
 }
