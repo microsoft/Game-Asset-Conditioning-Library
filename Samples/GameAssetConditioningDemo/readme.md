@@ -13,8 +13,9 @@ You need to build GACL first before building the demo.
 1. Build [gacl.sln](../../gacl.sln) at first (debug/release).
 2. Open [GameAssetConditioningDemo.sln](GameAssetConditioningDemo.sln)
 3. Confirm NuGet DirectStorage version >= 1.4 in Runtime project.
-4. Build and run Condition project to create archive files.
-5. Build and run Runtime project to load archive files and render them.
+4. Run `nuget restore GameAssetConditioningDemo.sln` to ensure that nuget dependencies are fetched for the project.
+5. Build and run Condition project to create archive files.
+6. Build and run Runtime project to load archive files and render them.
 
 # Usage
 
