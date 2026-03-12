@@ -18,9 +18,6 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="test_gacl.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="test_gacl_exe.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
