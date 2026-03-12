@@ -1,3 +1,6 @@
+[![Build](https://github.com/microsoft/Game-Asset-Conditioning-Library/actions/workflows/build.yml/badge.svg)](https://github.com/microsoft/Game-Asset-Conditioning-Library/actions/workflows/build.yml)
+[![Test](https://github.com/microsoft/Game-Asset-Conditioning-Library/actions/workflows/test.yml/badge.svg)](https://github.com/microsoft/Game-Asset-Conditioning-Library/actions/workflows/test.yml)
+
 # Introduction
 
 ---
