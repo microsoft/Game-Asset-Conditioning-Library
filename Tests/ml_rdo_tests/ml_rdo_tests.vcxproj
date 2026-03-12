@@ -131,7 +131,6 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="test_cler_api.cpp" />
-    <ClCompile Include="test_gacl_exe.cpp" />
     <ClCompile Include="test_loss_metrics.cpp" />
     <ClCompile Include="..\..\Helpers\FormatHelper.cpp" />
   </ItemGroup>
