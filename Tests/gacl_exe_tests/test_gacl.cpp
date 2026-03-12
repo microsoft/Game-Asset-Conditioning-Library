@@ -11,8 +11,3 @@
 #include <vector>
 #include <cstdint>
 #include <windows.h>
-
-// Basic sanity test
-TEST(HelloWorld, BasicEquality) {
-    EXPECT_EQ(42, 40 + 2);
-}
