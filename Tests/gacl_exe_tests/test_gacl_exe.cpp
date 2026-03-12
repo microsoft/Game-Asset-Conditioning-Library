@@ -8,8 +8,6 @@
 //
 //-------------------------------------------------------------------------------------
 
-#if GACL_INCLUDE_CLER
-
 #include <gtest/gtest.h>
 #include <vector>
 #include <cstdint>
@@ -22,21 +20,21 @@
 
 //tests just pertaining to the gacl exe call for CLER
 namespace gacl_exe_tests_with_real_images {
-	
-    struct ClerTestParam 
+
+    struct ClerTestParam
     {
         const int width;
         const int height;
         const std::wstring filename;
 
-        friend std::ostream& operator<<(std::ostream& os, const ClerTestParam& param) 
+        friend std::ostream& operator<<(std::ostream& os, const ClerTestParam& param)
         {
             return os << param.width << "x" << param.height;
         }
     };
 
     //helper functions for testing api
-    class CLERTest : public ::testing::TestWithParam<ClerTestParam> 
+    class CLERTest : public ::testing::TestWithParam<ClerTestParam>
     {
     protected:
 
@@ -55,16 +53,16 @@ namespace gacl_exe_tests_with_real_images {
             return outputDir;
         }
 
-        static std::filesystem::path GetGaclExePath() 
+        static std::filesystem::path GetGaclExePath()
         {
             wchar_t exePath[MAX_PATH];
             GetModuleFileNameW(NULL, exePath, MAX_PATH);
             std::filesystem::path exeDir = std::filesystem::path(exePath).parent_path();
             return exeDir / "gacl.exe";
         }
-        
+
         //run given command -- for running gacl CLI
-        static int RunCommand(const std::wstring& command) 
+        static int RunCommand(const std::wstring& command)
         {
             STARTUPINFOW si = {};
             PROCESS_INFORMATION pi = {};
@@ -77,7 +75,7 @@ namespace gacl_exe_tests_with_real_images {
                 NULL, cmdLine.data(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi
             );
 
-            if (!result) 
+            if (!result)
             {
                 std::wcerr << L"CreateProcess failed: " << GetLastError() << std::endl;
                 return -1;
@@ -128,7 +126,7 @@ namespace gacl_exe_tests_with_real_images {
         std::wstring command = L"\"" + gaclExe.wstring() + L"\" \"" + inputDdsPath.wstring() + L"\" " + L"-cler " + L"--cmaxclusters " + L"128 " + L"-o \"" + outputDdsPath.wstring() + L"\"";
 
 		//delete output file if it exists already
-        if (std::filesystem::exists(outputDdsPath)) 
+        if (std::filesystem::exists(outputDdsPath))
         {
             std::filesystem::remove(outputDdsPath);
         }
@@ -139,20 +137,20 @@ namespace gacl_exe_tests_with_real_images {
         ASSERT_TRUE(std::filesystem::exists(outputDdsPath)) << "Output DDS file not created: " << outputDdsPath.string();
         auto fileSize = std::filesystem::file_size(outputDdsPath);
         ASSERT_GT(fileSize, 0) << "Output file is empty";
-        
+
         //verify output is a valid dds file
         DirectX::ScratchImage image;
         HRESULT hr = DirectX::LoadFromDDSFile(outputDdsPath.c_str(), DirectX::DDS_FLAGS_NONE, nullptr, image);
         ASSERT_TRUE(SUCCEEDED(hr)) << "Failed to load DDS file: " << outputDdsPath.string();
-		
+
         //verify number of mips
 		DirectX::ScratchImage originalImage;
         hr = DirectX::LoadFromDDSFile(inputDdsPath.c_str(), DirectX::DDS_FLAGS_NONE, nullptr, originalImage);
         ASSERT_EQ(originalImage.GetMetadata().mipLevels, image.GetMetadata().mipLevels) << "Output DDS file has wrong number of mip levels";
-		
+
         //verify output is the same format
         ASSERT_EQ(image.GetMetadata().format, originalImage.GetMetadata().format) << "Output DDS file has wrong format";
-        
+
         //verify output is the same size
         ASSERT_EQ(image.GetMetadata().width, originalImage.GetMetadata().width) << "Output DDS file has wrong width";
 		ASSERT_EQ(image.GetMetadata().height, originalImage.GetMetadata().height) << "Output DDS file has wrong height";
@@ -325,4 +323,3 @@ namespace gacl_exe_tests_with_real_images {
         ASSERT_TRUE(SUCCEEDED(hr)) << "Failed to load output DDS file";
     }
 }  // namespace gacl_exe_tests_with_real_images
-#endif
