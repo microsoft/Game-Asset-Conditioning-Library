@@ -129,18 +129,18 @@ std::vector<std::vector<uint8_t>> KMeansRDO::ClusterRDOWithLoss(
         }
     }
 
-	// ONNX tensor wrappers for perceptual losses
-    Ort::Value referenceTensor(nullptr);
+	// ONNX reference tensor only created for perceptual metrics
+    std::unique_ptr<Ort::Value> referenceTensorPtr;
     if (useOrtTensors)
     {
         Ort::AllocatorWithDefaultOptions allocator;
         std::array<int64_t, 4> referenceShape{ 1, 3, (int64_t)imageHeight, (int64_t)imageWidth };
-        referenceTensor = Ort::Value::CreateTensor<float>(
+        referenceTensorPtr = std::make_unique<Ort::Value>(Ort::Value::CreateTensor<float>(
             allocator.GetInfo(),
             referenceTensorData.data(),
             referenceTensorData.size(),
             referenceShape.data(),
-            referenceShape.size());
+            referenceShape.size()));
     }
     const uint32_t widthInBlocks = (imageWidth + 3) / 4;
 
@@ -275,7 +275,7 @@ std::vector<std::vector<uint8_t>> KMeansRDO::ClusterRDOWithLoss(
             std::memcpy(dst, decodedData.data(), decodedData.size() * sizeof(float));
 
             auto decTensorShape = decodedTensor.GetTensorTypeAndShapeInfo().GetShape();
-            auto refTensorShape = referenceTensor.GetTensorTypeAndShapeInfo().GetShape();
+            auto refTensorShape = referenceTensorPtr->GetTensorTypeAndShapeInfo().GetShape();
 
             if (decTensorShape.size() != 4 || refTensorShape.size() != 4 ||
                 decTensorShape[1] != 3 || refTensorShape[1] != 3)
@@ -289,7 +289,7 @@ std::vector<std::vector<uint8_t>> KMeansRDO::ClusterRDOWithLoss(
                 continue;
             }
 
-            loss = LossMetrics::CalculateLoss(decodedTensor, referenceTensor, lossMetric, onnxModelPtr);
+            loss = LossMetrics::CalculateLoss(decodedTensor, *referenceTensorPtr, lossMetric, onnxModelPtr);
         }
         else
         {
