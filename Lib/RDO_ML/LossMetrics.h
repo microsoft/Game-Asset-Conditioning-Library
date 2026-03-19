@@ -26,24 +26,28 @@ public:
         LPIPS
     };
 
-    // Calculate loss between bc and reference image
+    // Returns true if the metric requires ONNX Runtime
+    static bool requiresOnnx(Metric metric);
+
+    // Calculate loss using ONNX tensors (required for perceptual metrics)
     static float CalculateLoss(
         const Ort::Value& bcTensor,
         const Ort::Value& referenceTensor,
         Metric metric,
 		Ort::Session* onnxModelPtr = nullptr);
 
+    // Calculate loss using raw float, no ORT needed
+    static float CalculateLoss(
+        const float* decodedData,
+        const float* referenceData,
+        size_t numel,
+        Metric metric);
+
     static std::wstring ToString(Metric metric);
         
 private:
-    // Internal loss calculation methods
-    static float CalculateMSE(
-        const Ort::Value& bcTensor,
-        const Ort::Value& referenceTensor);
-    
-    static float CalculateRMSE(
-        const Ort::Value& bcTensor,
-		const Ort::Value& referenceTensor);
+    static float CalculateMSE(const float* dataA, const float* dataB, size_t numel);
+    static float CalculateRMSE(const float* dataA, const float* dataB, size_t numel);
 
     static float CalculateUsingModel(
     //can be used for LPIPS or VGG

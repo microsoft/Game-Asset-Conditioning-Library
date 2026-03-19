@@ -108,7 +108,9 @@ std::vector<std::vector<uint8_t>> KMeansRDO::ClusterRDOWithLoss(
         lossMetric = LossMetrics::Metric::MSE;
     }
 
-    //create reference tensor in NCHW format
+    const bool useOrtTensors = LossMetrics::requiresOnnx(lossMetric);
+
+    //create reference data
     std::vector<float> referenceTensorData(static_cast<size_t>(imageHeight) * imageWidth * 3);
     const uint8_t* src = static_cast<const uint8_t*>(referenceR8G8B8A8);
     const size_t H = imageHeight;
@@ -127,15 +129,19 @@ std::vector<std::vector<uint8_t>> KMeansRDO::ClusterRDOWithLoss(
         }
     }
 
-    //convert to onnx tensor
-    Ort::AllocatorWithDefaultOptions allocator;
-    std::array<int64_t, 4> referenceShape{ 1, 3, (int64_t)imageHeight, (int64_t)imageWidth };
-    Ort::Value referenceTensor = Ort::Value::CreateTensor<float>(
-        allocator.GetInfo(),
-        referenceTensorData.data(),
-        referenceTensorData.size(),
-        referenceShape.data(),
-        referenceShape.size());
+	// ONNX tensor wrappers for perceptual losses
+    Ort::Value referenceTensor(nullptr);
+    if (useOrtTensors)
+    {
+        Ort::AllocatorWithDefaultOptions allocator;
+        std::array<int64_t, 4> referenceShape{ 1, 3, (int64_t)imageHeight, (int64_t)imageWidth };
+        referenceTensor = Ort::Value::CreateTensor<float>(
+            allocator.GetInfo(),
+            referenceTensorData.data(),
+            referenceTensorData.size(),
+            referenceShape.data(),
+            referenceShape.size());
+    }
     const uint32_t widthInBlocks = (imageWidth + 3) / 4;
 
     DirectX::TexMetadata meta{};
@@ -156,8 +162,10 @@ std::vector<std::vector<uint8_t>> KMeansRDO::ClusterRDOWithLoss(
     DirectX::ScratchImage decompressed;
 
     std::vector<uint8_t> tempBC(numBlocks * 8);
-    auto save_load_decompress_to_tensor =
-        [&](const std::vector<std::vector<uint8_t>>& clustered, Ort::AllocatorWithDefaultOptions allocator) -> Ort::Value
+
+    // Decompress clustered BC data to NCHW float buffer
+    auto decompress_to_float_buffer =
+        [&](const std::vector<std::vector<uint8_t>>& clustered) -> std::vector<float>
         {
             std::memcpy(tempBC.data(), encodedData, tempBC.size());
             ApplyBC1Endpoints(tempBC.data(), numBlocks, clustered, modes);
@@ -176,7 +184,7 @@ std::vector<std::vector<uint8_t>> KMeansRDO::ClusterRDOWithLoss(
             if (FAILED(hr))
             {
                 Utility::Printf(GACL_Logging_Priority_Medium, L"Warning: SaveToDDSMemory failed while attempting to decompress BC image for loss calculation (0x%08X)\n", hr);
-                return Ort::Value(nullptr);
+                return {};
             }
 
             //read from mem buffer
@@ -185,7 +193,7 @@ std::vector<std::vector<uint8_t>> KMeansRDO::ClusterRDOWithLoss(
             if (FAILED(hr))
             {
                 Utility::Printf(GACL_Logging_Priority_Medium, L"Warning: LoadFromDDSMemory failed while attempting to decompress BC image for loss calculation (0x%08X)\n", hr);
-                return Ort::Value(nullptr);
+                return {};
             }
 
             //decompress
@@ -194,25 +202,25 @@ std::vector<std::vector<uint8_t>> KMeansRDO::ClusterRDOWithLoss(
             if (FAILED(hr))
             {
                 Utility::Printf(GACL_Logging_Priority_Medium, L"Warning: Decompress failed while attempting to decompress BC image for loss calculation (0x%08X)\n", hr);
-                return Ort::Value(nullptr);
+                return {};
             }
 
             const DirectX::Image* img = decompressed.GetImage(0, 0, 0);
             if (!img || !img->pixels)
             {
                 Utility::Printf(GACL_Logging_Priority_Medium, L"Warning: Invalid decoded image while attempting to decompress BC image for loss calculation\n");
-                return Ort::Value(nullptr);
+                return {};
             }
 
             //conv decompressed RGBA to RGB, NCHW
-            std::vector<float> decTensorData(imageHeight * imageWidth * 3);
+            std::vector<float> decData(imageHeight * imageWidth * 3);
             const uint8_t* decSrc = static_cast<const uint8_t*>(img->pixels);
             const size_t H = imageHeight;
             const size_t W = imageWidth;
             const size_t HW = H * W;
-            float* R = decTensorData.data() + 0 * HW;
-            float* G = decTensorData.data() + 1 * HW;
-            float* B = decTensorData.data() + 2 * HW;
+            float* R = decData.data() + 0 * HW;
+            float* G = decData.data() + 1 * HW;
+            float* B = decData.data() + 2 * HW;
             for (uint32_t h = 0; h < imageHeight; ++h) {
                 for (uint32_t w = 0; w < imageWidth; ++w) {
                     const size_t i = static_cast<size_t>(h) * W + w; 
@@ -223,20 +231,7 @@ std::vector<std::vector<uint8_t>> KMeansRDO::ClusterRDOWithLoss(
                 }
             }
 
-             std::array<int64_t, 4> decShape{ 1, 3, (int64_t)imageHeight, (int64_t)imageWidth };
-
-            // allocate tensor memory with allocator
-            Ort::Value decodedOnnxTensor = Ort::Value::CreateTensor<float>(
-                allocator,            
-                decShape.data(),
-                decShape.size());
-
-            float* dst = decodedOnnxTensor.GetTensorMutableData<float>();
-            std::memcpy(dst,
-                decTensorData.data(),
-                decTensorData.size() * sizeof(float));
-
-            return decodedOnnxTensor;
+            return decData;
         };
 
     int kLow = std::max(1, minK);
@@ -259,46 +254,52 @@ std::vector<std::vector<uint8_t>> KMeansRDO::ClusterRDOWithLoss(
             continue;
         }
 
-        auto decodedTensor = save_load_decompress_to_tensor(clustered, allocator);
-        if (!decodedTensor.IsTensor() || decodedTensor.GetTensorTypeAndShapeInfo().GetElementCount() == 0)
+        auto decodedData = decompress_to_float_buffer(clustered);
+        if (decodedData.empty())
         {
             kLow = k + 1; k = (kLow + kHigh) / 2;
             continue;
         }
 
-        auto& decForLoss = decodedTensor;
-        auto& refForLoss = referenceTensor;
-
-        auto decShape = decForLoss.GetTensorTypeAndShapeInfo().GetShape();
-        auto refShape = refForLoss.GetTensorTypeAndShapeInfo().GetShape();
-
-        if (decShape.size() != 4 || refShape.size() != 4 ||
-            decShape[1] != 3 || refShape[1] != 3)
+        float loss;
+        if (useOrtTensors)
         {
-            Utility::Printf(GACL_Logging_Priority_Medium, L"Warning: tensor shapes not NCHW(3): dec=[");
-            for (auto s : decShape)
-            {
-                Utility::Printf(GACL_Logging_Priority_Medium, L"%ld ", (long)s);
-            }
-            Utility::Printf(GACL_Logging_Priority_Medium, L"] ref=[");
-            for (auto s : refShape)
-            {
-                Utility::Printf(GACL_Logging_Priority_Medium, L"%ld ", (long)s);
-            }
-            Utility::Printf(GACL_Logging_Priority_Medium, L"]\n");
+            // Perceptual metrics require float buffers to be wrapped in Ort::Value tensors
+            Ort::AllocatorWithDefaultOptions allocator;
+            std::array<int64_t, 4> decShape{ 1, 3, (int64_t)imageHeight, (int64_t)imageWidth };
+            Ort::Value decodedTensor = Ort::Value::CreateTensor<float>(
+                allocator,
+                decShape.data(),
+                decShape.size());
+            float* dst = decodedTensor.GetTensorMutableData<float>();
+            std::memcpy(dst, decodedData.data(), decodedData.size() * sizeof(float));
 
-            kLow = k + 1; 
-            k = (kLow + kHigh) / 2;
+            auto decTensorShape = decodedTensor.GetTensorTypeAndShapeInfo().GetShape();
+            auto refTensorShape = referenceTensor.GetTensorTypeAndShapeInfo().GetShape();
 
-            continue;
+            if (decTensorShape.size() != 4 || refTensorShape.size() != 4 ||
+                decTensorShape[1] != 3 || refTensorShape[1] != 3)
+            {
+                Utility::Printf(GACL_Logging_Priority_Medium, L"Warning: tensor shapes not NCHW(3): dec=[");
+                for (auto s : decTensorShape) Utility::Printf(GACL_Logging_Priority_Medium, L"%ld ", (long)s);
+                Utility::Printf(GACL_Logging_Priority_Medium, L"] ref=[");
+                for (auto s : refTensorShape) Utility::Printf(GACL_Logging_Priority_Medium, L"%ld ", (long)s);
+                Utility::Printf(GACL_Logging_Priority_Medium, L"]\n");
+                kLow = k + 1; k = (kLow + kHigh) / 2;
+                continue;
+            }
+
+            loss = LossMetrics::CalculateLoss(decodedTensor, referenceTensor, lossMetric, onnxModelPtr);
         }
-
-        float loss = LossMetrics::CalculateLoss(
-            decForLoss,
-            refForLoss,
-            lossMetric,
-            onnxModelPtr
-        );
+        else
+        {
+            // classic metrics can be computed with no ORT needed
+            loss = LossMetrics::CalculateLoss(
+                decodedData.data(),
+                referenceTensorData.data(),
+                decodedData.size(),
+                lossMetric);
+        }
 
         Utility::Printf(GACL_Logging_Priority_Medium, L"Loss: %.6f\n", loss);
 
