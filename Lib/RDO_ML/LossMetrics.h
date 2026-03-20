@@ -32,22 +32,22 @@ public:
     // Calculate loss using ONNX tensors (required for perceptual metrics)
     static float CalculateLoss(
         const Ort::Value& bcTensor,
-        const Ort::Value& referenceTensor,
+        const Ort::Value& refTensor,
         Metric metric,
 		Ort::Session* onnxModelPtr = nullptr);
 
     // Calculate loss using raw float, no ORT needed
     static float CalculateLoss(
-        const float* decodedData,
-        const float* referenceData,
+        const float* bcData,
+        const float* refData,
         size_t numel,
         Metric metric);
 
     static std::wstring ToString(Metric metric);
         
 private:
-    static float CalculateMSE(const float* dataA, const float* dataB, size_t numel);
-    static float CalculateRMSE(const float* dataA, const float* dataB, size_t numel);
+    static float CalculateMSE(const float* bcData, const float* refData, size_t numel);
+    static float CalculateRMSE(const float* bcData, const float* refData, size_t numel);
 
     static float CalculateUsingModel(
     //can be used for LPIPS or VGG

@@ -250,14 +250,16 @@ std::vector<std::vector<uint8_t>> KMeansRDO::ClusterRDOWithLoss(
         if (clustered.size() != size_t(numBlocks) * 2 || (!clustered.empty() && clustered[0].size() < 3))
         {
             Utility::Printf(GACL_Logging_Priority_Medium, L"Warning: clustered.size()=%zu (expected %u*2) or endpoint dim < 3\n", clustered.size(), numBlocks);
-            kLow = k + 1; k = (kLow + kHigh) / 2;
+            kLow = k + 1; 
+            k = (kLow + kHigh) / 2;
             continue;
         }
 
         auto decodedData = decompress_to_float_buffer(clustered);
         if (decodedData.empty())
         {
-            kLow = k + 1; k = (kLow + kHigh) / 2;
+            kLow = k + 1;
+            k = (kLow + kHigh) / 2;
             continue;
         }
 
@@ -285,7 +287,8 @@ std::vector<std::vector<uint8_t>> KMeansRDO::ClusterRDOWithLoss(
                 Utility::Printf(GACL_Logging_Priority_Medium, L"] ref=[");
                 for (auto s : refTensorShape) Utility::Printf(GACL_Logging_Priority_Medium, L"%ld ", (long)s);
                 Utility::Printf(GACL_Logging_Priority_Medium, L"]\n");
-                kLow = k + 1; k = (kLow + kHigh) / 2;
+                kLow = k + 1; 
+                k = (kLow + kHigh) / 2;
                 continue;
             }
 
