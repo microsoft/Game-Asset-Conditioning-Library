@@ -17,24 +17,53 @@
 #include <vector>
 #include <string>
 #include <iostream>
+#include <cassert>
+
+bool LossMetrics::requiresOnnx(Metric metric)
+{
+    return metric != Metric::MSE && metric != Metric::RMSE;
+}
 
 float LossMetrics::CalculateLoss(
     const Ort::Value& bcTensor,
-    const Ort::Value& referenceTensor,
+    const Ort::Value& refTensor,
     Metric metric,
     Ort::Session* onnxModelPtr)
 {
+    if (!requiresOnnx(metric))
+    {
+        auto bcShape = bcTensor.GetTensorTypeAndShapeInfo().GetShape();
+        auto refShape = refTensor.GetTensorTypeAndShapeInfo().GetShape();
+        if (bcShape != refShape) {
+            throw std::runtime_error("Input tensors must have the same shape.");
+        }
+        size_t numel = 1;
+        for (auto d : bcShape) numel *= static_cast<size_t>(d);
+        return CalculateLoss(
+            bcTensor.GetTensorData<float>(),
+            refTensor.GetTensorData<float>(),
+            numel,
+            metric);
+    }
+    else
+    {
+        return CalculateUsingModel(bcTensor, refTensor, onnxModelPtr);
+    }
+}
+
+float LossMetrics::CalculateLoss(
+    const float* bcData,
+    const float* refData,
+    size_t numel,
+    Metric metric)
+{
     switch (metric) {
-        case Metric::MSE:
-            return CalculateMSE(bcTensor, referenceTensor);
         case Metric::RMSE:
-            return CalculateRMSE(bcTensor, referenceTensor);
-        case Metric::VGG:
-            return CalculateUsingModel(bcTensor, referenceTensor, onnxModelPtr);
-        case Metric::LPIPS:
-            return CalculateUsingModel(bcTensor, referenceTensor, onnxModelPtr);
+            return CalculateRMSE(bcData, refData, numel);
+        case Metric::MSE:
+            return CalculateMSE(bcData, refData, numel);
         default:
-            return CalculateMSE(bcTensor, referenceTensor);
+            throw std::runtime_error("Only buffer-compatible metrics (MSE, RMSE) are valid here");
     }
 }
 
@@ -55,7 +84,7 @@ std::wstring LossMetrics::ToString(Metric metric) {
 
 float LossMetrics::CalculateUsingModel(
     const Ort::Value& bcTensorOnDevice,
-    const Ort::Value& referenceTensorOnDevice,
+    const Ort::Value& refTensorOnDevice,
     Ort::Session* onnxModel)
 {
     //Can be used for LPIPS or VGG
@@ -104,13 +133,13 @@ float LossMetrics::CalculateUsingModel(
 
     //normalize the two input tensors
     Ort::Value bcTensorNorm = normalizeOnnxTensor(bcTensorOnDevice);
-    Ort::Value referenceTensorNorm = normalizeOnnxTensor(referenceTensorOnDevice);
+    Ort::Value refTensorNorm = normalizeOnnxTensor(refTensorOnDevice);
 
     //create a ONNX Runtime allocator for memory management
     Ort::AllocatorWithDefaultOptions allocator;
 
     // set "input" and "target" input names
-    std::array<Ort::Value, 2> input_tensors = { std::move(bcTensorNorm), std::move(referenceTensorNorm) };
+    std::array<Ort::Value, 2> input_tensors = { std::move(bcTensorNorm), std::move(refTensorNorm) };
     std::array<const char*, 2> input_names = { "input", "target" };
 
     //set output name "loss"
@@ -137,27 +166,10 @@ float LossMetrics::CalculateUsingModel(
 }
 
 float LossMetrics::CalculateMSE(
-    const Ort::Value& bcTensor,
-    const Ort::Value& referenceTensor)
+    const float* bcData,
+    const float* refData,
+    size_t numel)
 {
-    //get shape
-    auto bcShape = bcTensor.GetTensorTypeAndShapeInfo().GetShape();
-    auto refShape = referenceTensor.GetTensorTypeAndShapeInfo().GetShape();
-
-    //check shapes match
-    if (bcShape != refShape) {
-        throw std::runtime_error("Input tensors must have the same shape for MSE calculation.");
-    }
-
-    //get numel
-    size_t numel = 1;
-    for (auto d : bcShape) numel *= static_cast<size_t>(d);
-
-    // get data pointers
-    const float* bcData = bcTensor.GetTensorData<float>();
-    const float* refData = referenceTensor.GetTensorData<float>();
-
-    // compute MSE
     double sum = 0.0;
     for (size_t i = 0; i < numel; ++i) {
         double error = static_cast<double>(bcData[i]) - static_cast<double>(refData[i]);
@@ -167,9 +179,10 @@ float LossMetrics::CalculateMSE(
 }
 
 float LossMetrics::CalculateRMSE(
-    const Ort::Value& bcTensor,
-    const Ort::Value& referenceTensor)
+    const float* bcData,
+    const float* refData,
+    size_t numel)
 {
-	return std::sqrt(CalculateMSE(bcTensor, referenceTensor));
+    return std::sqrt(CalculateMSE(bcData, refData, numel));
 }
 #endif

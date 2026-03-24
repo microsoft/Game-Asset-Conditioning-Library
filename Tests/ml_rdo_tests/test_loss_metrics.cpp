@@ -779,6 +779,66 @@ namespace loss_metrics_tests {
         EXPECT_EQ(LossMetrics::ToString(LossMetrics::Metric::LPIPS), L"LPIPS");
     }
 
+    //---------------------------------------------------------------------
+    // Raw float buffer CalculateLoss overload Tests
+    //---------------------------------------------------------------------
+
+    TEST(LossMetrics, BufferMSE_IdenticalData)
+    {
+        std::vector<float> data = {0.5f, 0.6f, 0.7f, 0.8f};
+        float mse = LossMetrics::CalculateLoss(data.data(), data.data(), data.size(), LossMetrics::Metric::MSE);
+        EXPECT_FLOAT_EQ(mse, 0.0f);
+    }
+
+    TEST(LossMetrics, BufferMSE_KnownDifference)
+    {
+        std::vector<float> data1 = {0.5f, 0.5f, 0.5f, 0.5f};
+        std::vector<float> data2 = {0.6f, 0.5f, 0.5f, 0.5f};
+        // Difference: [0.1, 0, 0, 0], Squared: [0.01, 0, 0, 0], MSE = 0.01/4 = 0.0025
+        float mse = LossMetrics::CalculateLoss(data1.data(), data2.data(), data1.size(), LossMetrics::Metric::MSE);
+        EXPECT_NEAR(mse, 0.0025f, 1e-7f);
+    }
+
+    TEST(LossMetrics, BufferRMSE_KnownDifference)
+    {
+        std::vector<float> data1(64, 0.5f);
+        std::vector<float> data2(64, 0.7f);
+        // MSE = 0.04, RMSE = 0.2
+        float rmse = LossMetrics::CalculateLoss(data1.data(), data2.data(), data1.size(), LossMetrics::Metric::RMSE);
+        EXPECT_NEAR(rmse, 0.2f, 1e-6f);
+    }
+
+    TEST(LossMetrics, BufferMSE_MatchesTensorMSE)
+    {
+        // Verify that the raw buffer overload produces the same result as the Ort::Value overload
+        std::vector<float> data1 = {0.1f, 0.2f, 0.3f, 0.4f};
+        std::vector<float> data2 = {0.15f, 0.25f, 0.35f, 0.45f};
+        std::vector<int64_t> shape = {1, 1, 2, 2};
+
+        Ort::Value tensor1 = CreateTestTensor(data1, shape);
+        Ort::Value tensor2 = CreateTestTensor(data2, shape);
+
+        float tensor_mse = LossMetrics::CalculateLoss(tensor1, tensor2, LossMetrics::Metric::MSE);
+        float buffer_mse = LossMetrics::CalculateLoss(data1.data(), data2.data(), data1.size(), LossMetrics::Metric::MSE);
+
+        EXPECT_FLOAT_EQ(tensor_mse, buffer_mse);
+    }
+
+    TEST(LossMetrics, BufferRMSE_MatchesTensorRMSE)
+    {
+        std::vector<float> data1 = {0.1f, 0.2f, 0.3f, 0.4f};
+        std::vector<float> data2 = {0.15f, 0.25f, 0.35f, 0.45f};
+        std::vector<int64_t> shape = {1, 1, 2, 2};
+
+        Ort::Value tensor1 = CreateTestTensor(data1, shape);
+        Ort::Value tensor2 = CreateTestTensor(data2, shape);
+
+        float tensor_rmse = LossMetrics::CalculateLoss(tensor1, tensor2, LossMetrics::Metric::RMSE);
+        float buffer_rmse = LossMetrics::CalculateLoss(data1.data(), data2.data(), data1.size(), LossMetrics::Metric::RMSE);
+
+        EXPECT_FLOAT_EQ(tensor_rmse, buffer_rmse);
+    }
+
 } // namespace loss_metrics_tests
 
 #endif // GACL_INCLUDE_CLER
