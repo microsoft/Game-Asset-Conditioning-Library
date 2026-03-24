@@ -17,6 +17,7 @@
 #include <vector>
 #include <string>
 #include <iostream>
+#include <cassert>
 
 bool LossMetrics::requiresOnnx(Metric metric)
 {
@@ -60,8 +61,9 @@ float LossMetrics::CalculateLoss(
         case Metric::RMSE:
             return CalculateRMSE(bcData, refData, numel);
         case Metric::MSE:
-        default:
             return CalculateMSE(bcData, refData, numel);
+        default:
+            throw std::runtime_error("Only buffer-compatible metrics (MSE, RMSE) are valid here");
     }
 }
 
