@@ -143,7 +143,7 @@ static void PrintHelp(void)
     printf("                            Not required if source file is a dds.\n");
     printf("\n");
     printf("  -o, --output [filename]   Output dds file name.\n");
-    printf("                            Should only be used in conjuction with Shuffle+Compress, so that acl\n");
+    printf("                            Should only be used in conjuction with Shuffle+Compress, so that gacl\n");
     printf("                            can correctly identify mips\\slices that do not benefit from shuffle,\n");
     printf("                            allowing for the correct (linear vs screen space) application of\n");
     printf("                            entropy reduction.\n");
