@@ -1351,7 +1351,7 @@ void GetBC_ModeSplit_CopyBitsOrderMode4(CopyBitsSequence& sequence, BC7ModeSplit
         // 7   0  1  2  3  4  0  1  2- 3  4  0  1  2  3  4  0- 1  2  3  4  0  1  2  3- 4  0  1  2  3  4  0  1- 2  3  4  *  *  *  *  *        1                                    5
         // 8   0  1  2  3  4  5  6  0- 1  2  3  4  5  6  0  1- 2  3  4  5  6  0  1  2- 3  4  5  6  0  1  2  3- 4  5  6  0  1  2  3  4        0  
 
-        static CopyBitsOrder ops[60] = {
+        CopyBitsOrder ops[60] = {
             {   //  Mode (10000)
                CopyBitDestination::Mode,
                0,
@@ -1647,7 +1647,7 @@ void GetBC_ModeSplit_CopyBitsOrderMode5(CopyBitsSequence& sequence, BC7ModeSplit
         // 8   0  1  2  3  4  5  6  0- 1  2  3  4  5  6  0  1- 2  3  4  5  6  0  1  2- 3  4  5  6  0  1  2  3- 4  5  6  0  1  2  3  4_ 5  6  0  1  2  3  4  5- 6  0  1  2  3  4  5  6        0  
 
 
-        static CopyBitsOrder ops[70] = {
+        CopyBitsOrder ops[70] = {
              {   //  Mode (100000)
                 CopyBitDestination::Mode,
                 0,
@@ -1930,7 +1930,7 @@ void GetBC_ModeSplit_CopyBitsOrderMode6(CopyBitsSequence& sequence, BC7ModeSplit
         // 8   0  1  2  3  4  5  6  0- 1  2  3  4  5  6  0  1- 2  3  4  5  6  0  1  2- 3  4  5  6  0  1  2  3- 4  5  6  0  1  2  3  4_ 5  6  0  1  2  3  4  5- 6  0  1  2  3  4  5  6        0  
 
 
-        static CopyBitsOrder ops[70] = {
+        CopyBitsOrder ops[70] = {
              {   //  Mode (1000000)
                 CopyBitDestination::Mode,
                 0,
