@@ -624,7 +624,7 @@ bool gacl::ProcessTexture(
                                 // Short circuit here, and skip all further mips.  But, later we need to copy across the data from the texture that had linear RDO.
                                 if (!curvedMipLevelReported)
                                 {
-                                    Utility::Printf(GACL_Logging_Priority_Medium, L"Space curve (16KB Z-order micro-tile) applied to largest %d mips.\n", mip);
+                                    Utility::Printf(GACL_Logging_Priority_Medium, L"Space curve (16KB Z-order micro-tile) applied to largest %zu mips.\n", mip);
                                     lastCurvedRdoMip = mip - 1;
                                     curvedMipLevelReported = true;
                                 }
