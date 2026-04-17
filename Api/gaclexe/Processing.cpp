@@ -161,7 +161,7 @@ bool gacl::ProcessTexture(
 
     const DXGI_FORMAT baseFormat = GetBaseFormat(siMeta.format);
     const uint32_t elementSize = uint32_t(GetElementSize(siMeta.format));
-    const bool isSpaceCurveEligable = GACL_Shuffle_ApplySpaceCurve(nullptr, nullptr, 
+    const bool isSpaceCurveEligible = GACL_Shuffle_ApplySpaceCurve(nullptr, nullptr, 
         ((siMeta.width + 3) / 4) * ((siMeta.height + 3) / 4) * elementSize, elementSize, (siMeta.width + 3) & ~3ull, true);
 
     if (verbosity >= Verbosity::eVerbose)
@@ -171,7 +171,7 @@ bool gacl::ProcessTexture(
 
     if (options.CurveOptions.ReverseSpaceCurve || options.CurveOptions.ForwardSpaceCurve)
     {
-        if (!isSpaceCurveEligable)
+        if (!isSpaceCurveEligible)
         {
             Utility::Printf(GACL_Logging_Priority_High, L"Error: image is not of dimensions that are eligible for space curves.\n");
             Utility::Printf(GACL_Logging_Priority_High, L"Images must be a power of 2 micro tiles in both width and height.\n");
@@ -561,13 +561,13 @@ bool gacl::ProcessTexture(
 
     bool genBlerScreenSpace = 
         options.BlerOptions.Enabled && 
-        isSpaceCurveEligable && 
+        isSpaceCurveEligible && 
         !options.CurveOptions.DisableSpaceCurve && 
         options.ShuffleOptions.Enabled &&
         options.ShuffleOptions.Transform == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL &&
         (baseFormat == DXGI_FORMAT_BC1_TYPELESS || baseFormat == DXGI_FORMAT_BC3_TYPELESS || baseFormat == DXGI_FORMAT_BC4_TYPELESS || baseFormat == DXGI_FORMAT_BC5_TYPELESS || baseFormat == DXGI_FORMAT_BC7_TYPELESS);
 
-    size_t lastCurvedRdoMip = 0;
+    size_t lastCurvedRdoMip = genBlerScreenSpace ? siMeta.mipLevels - 1 : 0;
 
     if (options.BlerOptions.Enabled)
     {
