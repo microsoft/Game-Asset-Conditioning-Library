@@ -620,7 +620,7 @@ bool gacl::ProcessTexture(
                             std::vector<uint8_t> curvedData(numBlocks* elementSize);
                             if (!GACL_Shuffle_ApplySpaceCurve(curvedData.data(), src->pixels, numBlocks * elementSize, elementSize, blocksX * 4, true))
                             {
-                                // If a given mip isn't eligable for curved transforms, smaller mips won't be either
+                                // If a given mip isn't eligible for curved transforms, smaller mips won't be either
                                 // Short circuit here, and skip all further mips.  But, later we need to copy across the data from the texture that had linear RDO.
                                 if (!curvedMipLevelReported)
                                 {
