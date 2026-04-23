@@ -1351,7 +1351,7 @@ void GetBC_ModeSplit_CopyBitsOrderMode4(CopyBitsSequence& sequence, BC7ModeSplit
         // 7   0  1  2  3  4  0  1  2- 3  4  0  1  2  3  4  0- 1  2  3  4  0  1  2  3- 4  0  1  2  3  4  0  1- 2  3  4  *  *  *  *  *        1                                    5
         // 8   0  1  2  3  4  5  6  0- 1  2  3  4  5  6  0  1- 2  3  4  5  6  0  1  2- 3  4  5  6  0  1  2  3- 4  5  6  0  1  2  3  4        0  
 
-        static CopyBitsOrder ops[60] = {
+        CopyBitsOrder ops[60] = {
             {   //  Mode (10000)
                CopyBitDestination::Mode,
                0,
@@ -1647,7 +1647,7 @@ void GetBC_ModeSplit_CopyBitsOrderMode5(CopyBitsSequence& sequence, BC7ModeSplit
         // 8   0  1  2  3  4  5  6  0- 1  2  3  4  5  6  0  1- 2  3  4  5  6  0  1  2- 3  4  5  6  0  1  2  3- 4  5  6  0  1  2  3  4_ 5  6  0  1  2  3  4  5- 6  0  1  2  3  4  5  6        0  
 
 
-        static CopyBitsOrder ops[70] = {
+        CopyBitsOrder ops[70] = {
              {   //  Mode (100000)
                 CopyBitDestination::Mode,
                 0,
@@ -1930,7 +1930,7 @@ void GetBC_ModeSplit_CopyBitsOrderMode6(CopyBitsSequence& sequence, BC7ModeSplit
         // 8   0  1  2  3  4  5  6  0- 1  2  3  4  5  6  0  1- 2  3  4  5  6  0  1  2- 3  4  5  6  0  1  2  3- 4  5  6  0  1  2  3  4_ 5  6  0  1  2  3  4  5- 6  0  1  2  3  4  5  6        0  
 
 
-        static CopyBitsOrder ops[70] = {
+        CopyBitsOrder ops[70] = {
              {   //  Mode (1000000)
                 CopyBitDestination::Mode,
                 0,
@@ -4107,6 +4107,7 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
     uint8_t encodingBitsB = ModeTransformBCountToModeBits[modesUsed];
     uint8_t modeToEncoding[9] = {};
     uint8_t modesOrderedByCount[9] = {};
+    CopyBitsSequence bitSequences[9];
     {
         size_t modeCountCopy[9] = {};
         memcpy(modeCountCopy, modeCounts, sizeof(modeCounts));
@@ -4125,6 +4126,7 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
             modeToEncoding[mostFrequentMode] = lutEntry;
             modesOrderedByCount[lutEntry] = mostFrequentMode;
             modeCountCopy[mostFrequentMode] = 0;
+            BC7_ModeSplit_Shuffle_OpLists[mostFrequentMode](bitSequences[mostFrequentMode], opt, metrics);
         }
     }
 
@@ -4239,9 +4241,7 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
 
         if (mode < 8 || !mode8Clean)
         {
-            CopyBitsSequence sequence;
-            BC7_ModeSplit_Shuffle_OpLists[mode](sequence, opt, metrics);
-            BC7_ModeSplit_Shuffle_Slow((uint8_t)mode, nextStageSrc, b, sequence);
+            BC7_ModeSplit_Shuffle_Slow((uint8_t)mode, nextStageSrc, b, bitSequences[mode]);
 
             // add endpoint order bits to scraps (when we grow the buffers we always ensure there's at least 4 bits of extra space, no resize needed here)
             if ((endpointOrderModeMask & (1 << mode)) != 0 && opt.EndpointOrderStrategy)

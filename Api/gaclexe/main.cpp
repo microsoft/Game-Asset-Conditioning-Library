@@ -143,7 +143,7 @@ static void PrintHelp(void)
     printf("                            Not required if source file is a dds.\n");
     printf("\n");
     printf("  -o, --output [filename]   Output dds file name.\n");
-    printf("                            Should only be used in conjuction with Shuffle+Compress, so that acl\n");
+    printf("                            Should only be used in conjunction with Shuffle+Compress, so that gacl\n");
     printf("                            can correctly identify mips\\slices that do not benefit from shuffle,\n");
     printf("                            allowing for the correct (linear vs screen space) application of\n");
     printf("                            entropy reduction.\n");
@@ -162,10 +162,14 @@ static void PrintHelp(void)
     printf("\n");
     printf("  **  Space curves move screen-adjacent data to memory-adjacent.                              ** \n");
     printf("  **  Shuffle+compress includes a forward space curve to improve compression.                 ** \n");
+    printf("  **  Space curve transforms were made experimental in Preview #1 and so the below behavior   ** \n");
+    printf("  **  is off by default, only enabled when the -sce option is present.  It does represent     ** \n");
+    printf("  **  the final non-preview behaviors of RDO+shuffle+compress interaction though.             ** \n");
+    printf("  **                                                                                          ** \n");
     printf("  **  If a texture is having entropy reduction applied, the forward space curve is applied    ** \n");
     printf("  **  before bler\\cler, allowing those algorithms to work on screen-adjacent data.  If a     ** \n");
     printf("  **  texture is having Entrory Reduction applied, without Shuffle+Compress, entropy reduction** \n");
-    printf("  **  still occurs in the space curved context, as below:  ** \n");
+    printf("  **  still occurs in the space curved context, as below (with the exception of Preview):     ** \n");
     printf("  **     Input -> Forward Space Curve -> Entropy Reduction -> Reverse Space Curve -> Export   ** \n");
     printf("\n");
     printf("  -fsc, -forwardspacecurve  Forward space curve, no other transforms will be applied.\n");
@@ -177,6 +181,9 @@ static void PrintHelp(void)
     printf("                            Use this option when applying entropy reduction to a texture that\n");
     printf("                            will not use shuffle+compress. Textures that will not have a load-\n");
     printf("                            time unshuffle applied to them cannot have a space curve applied.\n");
+    printf("\n");
+    printf("                            Space curves are experimental in Preview 1, and this option only\n");
+    printf("                            has effect if experimental shuffle compress is enabled.\n");
     printf("\n");
     printf("\n");
     printf("Options, data shuffle related (supported for BC1\\3\\4\\5):\n");
