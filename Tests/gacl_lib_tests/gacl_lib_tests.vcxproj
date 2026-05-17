@@ -126,16 +126,10 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <None Include="packages.config" />
-  </ItemGroup>
-  <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="test_gacl.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\ThirdParty\zstd_p\build\VS2010\libzstd_p\libzstd_p.vcxproj">
-      <Project>{8bfd8150-94d5-4bf9-8a50-7bd9929a0850}</Project>
-    </ProjectReference>
     <ProjectReference Include="..\..\Api\gacllib\gacllib.vcxproj">
       <Project>{8a56e116-4e72-44e0-aa08-dd46ef9333bd}</Project>
     </ProjectReference>
@@ -155,16 +149,5 @@
     <Exec Command="xcopy /F /Y &quot;$(SolutionDir)Assets\TestImages\InsectsDemo\BC7mip0\GerberaLeafHigh_normal.DDS&quot;       &quot;$(TargetDir)TestImages\InsectsDemo\BC7mip0\&quot;" />
     <Exec Command="xcopy /F /Y &quot;$(SolutionDir)Assets\TestImages\InsectsDemo\BC7mip0\LetterBlock_LetterA_albedo.DDS&quot;   &quot;$(TargetDir)TestImages\InsectsDemo\BC7mip0\&quot;" />
     <Exec Command="xcopy /F /Y &quot;$(SolutionDir)Assets\TestImages\InsectsDemo\BC7mip0\Ladybug_Shell_Roughness_mask.DDS&quot; &quot;$(TargetDir)TestImages\InsectsDemo\BC7mip0\&quot;" />
-  </Target>
-  <ImportGroup Label="ExtensionTargets">
-    <Import Project="$(SolutionDir)packages\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.1.8.1.7\build\native\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.targets" Condition="Exists('$(SolutionDir)packages\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.1.8.1.7\build\native\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.targets')" />
-    <Import Project="$(SolutionDir)packages\directxtex_desktop_win10.2025.7.10.1\build\native\directxtex_desktop_win10.targets" Condition="Exists('$(SolutionDir)packages\directxtex_desktop_win10.2025.7.10.1\build\native\directxtex_desktop_win10.targets')" />
-  </ImportGroup>
-  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
-    <PropertyGroup>
-      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
-    </PropertyGroup>
-    <Error Condition="!Exists('$(SolutionDir)packages\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.1.8.1.7\build\native\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.targets')" Text="$([System.String]::Format('$(ErrorText)', '$(SolutionDir)packages\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.1.8.1.7\build\native\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.targets'))" />
-    <Error Condition="!Exists('$(SolutionDir)packages\directxtex_desktop_win10.2025.7.10.1\build\native\directxtex_desktop_win10.targets')" Text="$([System.String]::Format('$(ErrorText)', '$(SolutionDir)packages\directxtex_desktop_win10.2025.7.10.1\build\native\directxtex_desktop_win10.targets'))" />
   </Target>
 </Project>

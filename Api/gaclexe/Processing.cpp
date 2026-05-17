@@ -16,7 +16,8 @@
 #include "../helpers/Utility.h"
 #include "../helpers/FileUtility.h"
 #include "../helpers/FormatHelper.h"
-#include "../ThirdParty/zstd/lib/zstd.h"
+
+#include <zstd.h>
 
 #include <chrono>
 #include <thread>

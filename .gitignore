@@ -406,3 +406,6 @@ Tools/scripts/.setupCLER-venv/
 
 [Ii]nternal/
 [Ee]s-metadata.yml
+
+# vcpkg working directory
+vcpkg_installed/

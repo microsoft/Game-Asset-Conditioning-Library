@@ -67,14 +67,14 @@
 #include <DirectXColors.h>
 #include <DirectXTex.h>
 
-#include "GraphicsMemory.h"
-#include "DescriptorHeap.h"
-#include "BufferHelpers.h"
-#include "ResourceUploadBatch.h"
-#include "SimpleMath.h"
-#include "SpriteFont.h"
-#include "SpriteBatch.h"
-#include "DirectXHelpers.h"
+#include <directxtk12/GraphicsMemory.h>
+#include <directxtk12/DescriptorHeap.h>
+#include <directxtk12/BufferHelpers.h>
+#include <directxtk12/ResourceUploadBatch.h>
+#include <directxtk12/SimpleMath.h>
+#include <directxtk12/SpriteFont.h>
+#include <directxtk12/SpriteBatch.h>
+#include <directxtk12/DirectXHelpers.h>
 
 #include <algorithm>
 #include <cassert>

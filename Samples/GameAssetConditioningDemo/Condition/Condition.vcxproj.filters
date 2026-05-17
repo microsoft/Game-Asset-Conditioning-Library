@@ -18,9 +18,6 @@
     <Text Include="imagelist.txt" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="packages.config" />
-  </ItemGroup>
-  <ItemGroup>
     <Filter Include="Common">
       <UniqueIdentifier>{7d4f1f8b-d335-438e-bb0f-df0a12ae9d3f}</UniqueIdentifier>
     </Filter>

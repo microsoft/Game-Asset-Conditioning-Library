@@ -42,9 +42,6 @@
     </Manifest>
   </ItemGroup>
   <ItemGroup>
-    <None Include="packages.config" />
-  </ItemGroup>
-  <ItemGroup>
     <CopyFileToFolders Include="Assets\SegoeUI_24.spritefont">
       <Filter>Assets</Filter>
     </CopyFileToFolders>
