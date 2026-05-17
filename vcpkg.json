@@ -4,8 +4,14 @@
     "directx-headers",
     "directx12-agility",
     "directxmath",
-    "directxtex",
-    "directxtk12",
+    {
+      "name": "directxtex",
+      "default-features": false
+    },
+    {
+      "name": "directxtk12",
+      "default-features": false
+    },
     "dstorage",
     "gtest",
     "zstd"
