@@ -160,7 +160,7 @@ namespace gacl_exe_tests_with_real_images {
     }
 
     //run gacl exe on different image sizes
-    INSTANTIATE_TEST_CASE_P(
+    INSTANTIATE_TEST_SUITE_P(
         CLER,
         CLERTest,
         ::testing::Values(

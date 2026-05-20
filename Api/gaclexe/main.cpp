@@ -12,7 +12,7 @@
 #include "../helpers/Utility.h"
 #include "Processing.h"
 #define ZSTD_STATIC_LINKING_ONLY
-#include "../ThirdParty/zstd/lib/zstd.h"
+#include <zstd.h>
 
 #include <iostream>
 #include <algorithm>

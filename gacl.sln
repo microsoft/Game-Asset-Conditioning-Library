@@ -7,12 +7,6 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gacl_exe", "Api\gaclexe\gac
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gacl_lib", "Api\gacllib\gacllib.vcxproj", "{8A56E116-4E72-44E0-AA08-DD46EF9333BD}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libzstd_p", "ThirdParty\zstd_p\build\VS2010\libzstd_p\libzstd_p.vcxproj", "{8BFD8150-94D5-4BF9-8A50-7BD9929A0850}"
-EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libzstd_p-dll", "ThirdParty\zstd_p\build\VS2010\libzstd_p-dll\libzstd_p-dll.vcxproj", "{00000000-94D5-4BF9-8A50-7BD9929A0850}"
-EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zstd_p", "ThirdParty\zstd_p\build\VS2010\zstd_p\zstd_p.vcxproj", "{4E52A41A-F33B-4C7A-8C36-A1A6B4F4277C}"
-EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gacl_exe_tests", "Tests\gacl_exe_tests\gacl_exe_tests.vcxproj", "{0BA5815E-3517-4EEC-87B9-1C4EC414829D}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gacl_lib_tests", "Tests\gacl_lib_tests\gacl_lib_tests.vcxproj", "{3D493776-BCA1-4A84-9996-A339356DECE7}"
@@ -25,6 +19,12 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ml_rdo_tests", "Tests\ml_rd
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}"
+	ProjectSection(SolutionItems) = preProject
+		vcpkg-configuration.json = vcpkg-configuration.json
+		vcpkg.json = vcpkg.json
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -45,23 +45,6 @@ Global
 		{8A56E116-4E72-44E0-AA08-DD46EF9333BD}.Fuzzing|x64.Build.0 = Fuzzing|x64
 		{8A56E116-4E72-44E0-AA08-DD46EF9333BD}.Release|x64.ActiveCfg = Release|x64
 		{8A56E116-4E72-44E0-AA08-DD46EF9333BD}.Release|x64.Build.0 = Release|x64
-		{8BFD8150-94D5-4BF9-8A50-7BD9929A0850}.Debug|x64.ActiveCfg = Debug|x64
-		{8BFD8150-94D5-4BF9-8A50-7BD9929A0850}.Debug|x64.Build.0 = Debug|x64
-		{8BFD8150-94D5-4BF9-8A50-7BD9929A0850}.Fuzzing|x64.ActiveCfg = Fuzzing|x64
-		{8BFD8150-94D5-4BF9-8A50-7BD9929A0850}.Fuzzing|x64.Build.0 = Fuzzing|x64
-		{8BFD8150-94D5-4BF9-8A50-7BD9929A0850}.Release|x64.ActiveCfg = Release|x64
-		{8BFD8150-94D5-4BF9-8A50-7BD9929A0850}.Release|x64.Build.0 = Release|x64
-		{00000000-94D5-4BF9-8A50-7BD9929A0850}.Debug|x64.ActiveCfg = Debug|x64
-		{00000000-94D5-4BF9-8A50-7BD9929A0850}.Debug|x64.Build.0 = Debug|x64
-		{00000000-94D5-4BF9-8A50-7BD9929A0850}.Fuzzing|x64.ActiveCfg = Fuzzing|x64
-		{00000000-94D5-4BF9-8A50-7BD9929A0850}.Release|x64.ActiveCfg = Release|x64
-		{00000000-94D5-4BF9-8A50-7BD9929A0850}.Release|x64.Build.0 = Release|x64
-		{4E52A41A-F33B-4C7A-8C36-A1A6B4F4277C}.Debug|x64.ActiveCfg = Debug|x64
-		{4E52A41A-F33B-4C7A-8C36-A1A6B4F4277C}.Debug|x64.Build.0 = Debug|x64
-		{4E52A41A-F33B-4C7A-8C36-A1A6B4F4277C}.Fuzzing|x64.ActiveCfg = Fuzzing|x64
-		{4E52A41A-F33B-4C7A-8C36-A1A6B4F4277C}.Fuzzing|x64.Build.0 = Fuzzing|x64
-		{4E52A41A-F33B-4C7A-8C36-A1A6B4F4277C}.Release|x64.ActiveCfg = Release|x64
-		{4E52A41A-F33B-4C7A-8C36-A1A6B4F4277C}.Release|x64.Build.0 = Release|x64
 		{0BA5815E-3517-4EEC-87B9-1C4EC414829D}.Debug|x64.ActiveCfg = Debug|x64
 		{0BA5815E-3517-4EEC-87B9-1C4EC414829D}.Debug|x64.Build.0 = Debug|x64
 		{0BA5815E-3517-4EEC-87B9-1C4EC414829D}.Fuzzing|x64.ActiveCfg = Fuzzing|x64

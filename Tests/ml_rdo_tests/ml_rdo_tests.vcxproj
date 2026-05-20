@@ -151,16 +151,12 @@
     <Exec Command="xcopy /E /Y &quot;$(SolutionDir)tests\ml_rdo_tests\test_assets\*&quot; &quot;$(TargetDir)test_assets\&quot;" />
   </Target>
   <ImportGroup Label="ExtensionTargets">
-    <Import Project="$(SolutionDir)packages\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.1.8.1.7\build\native\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.targets" Condition="Exists('$(SolutionDir)packages\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.1.8.1.7\build\native\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.targets')" />
-    <Import Project="$(SolutionDir)packages\directxtex_desktop_win10.2025.7.10.1\build\native\directxtex_desktop_win10.targets" Condition="Exists('$(SolutionDir)packages\directxtex_desktop_win10.2025.7.10.1\build\native\directxtex_desktop_win10.targets')" />
     <Import Project="$(SolutionDir)packages\Microsoft.ML.OnnxRuntime.1.24.2\build\native\Microsoft.ML.OnnxRuntime.targets" Condition="Exists('..\..\packages\Microsoft.ML.OnnxRuntime.1.24.2\build\native\Microsoft.ML.OnnxRuntime.targets')" />
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them. The missing file is {0}.</ErrorText>
     </PropertyGroup>
-    <Error Condition="!Exists('$(SolutionDir)packages\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.1.8.1.7\build\native\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.targets')" Text="$([System.String]::Format('$(ErrorText)', '$(SolutionDir)packages\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.1.8.1.7\build\native\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.targets'))" />
-    <Error Condition="!Exists('$(SolutionDir)packages\directxtex_desktop_win10.2025.7.10.1\build\native\directxtex_desktop_win10.targets')" Text="$([System.String]::Format('$(ErrorText)', '$(SolutionDir)packages\directxtex_desktop_win10.2025.7.10.1\build\native\directxtex_desktop_win10.targets'))" />
     <Error Condition="!Exists('$(SolutionDir)packages\Microsoft.ML.OnnxRuntime.1.24.2\build\native\Microsoft.ML.OnnxRuntime.props')" Text="$([System.String]::Format('$(ErrorText)', '..\..\packages\Microsoft.ML.OnnxRuntime.1.24.2\build\native\Microsoft.ML.OnnxRuntime.props'))" />
     <Error Condition="!Exists('$(SolutionDir)packages\Microsoft.ML.OnnxRuntime.1.24.2\build\native\Microsoft.ML.OnnxRuntime.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\..\packages\Microsoft.ML.OnnxRuntime.1.24.2\build\native\Microsoft.ML.OnnxRuntime.targets'))" />
   </Target>

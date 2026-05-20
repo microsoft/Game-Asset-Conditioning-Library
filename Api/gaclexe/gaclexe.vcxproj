@@ -26,18 +26,12 @@
     <ClInclude Include="Processing.h" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\ThirdParty\zstd_p\build\VS2010\libzstd_p\libzstd_p.vcxproj">
-      <Project>{8bfd8150-94d5-4bf9-8a50-7bd9929a0850}</Project>
-    </ProjectReference>
     <ProjectReference Include="..\..\Api\gacllib\gacllib.vcxproj">
       <Project>{8a56e116-4e72-44e0-aa08-dd46ef9333bd}</Project>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="gaclexe.rc" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="packages.config" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
@@ -149,15 +143,7 @@
     </Link>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
-  <ImportGroup Label="ExtensionTargets">
-    <Import Project="$(SolutionDir)packages\directxtex_desktop_win10.2025.7.10.1\build\native\directxtex_desktop_win10.targets" Condition="Exists('$(SolutionDir)packages\directxtex_desktop_win10.2025.7.10.1\build\native\directxtex_desktop_win10.targets')" />
-  </ImportGroup>
-  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
-    <PropertyGroup>
-      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
-    </PropertyGroup>
-    <Error Condition="!Exists('$(SolutionDir)packages\directxtex_desktop_win10.2025.7.10.1\build\native\directxtex_desktop_win10.targets')" Text="$([System.String]::Format('$(ErrorText)', '$(SolutionDir)packages\directxtex_desktop_win10.2025.7.10.1\build\native\directxtex_desktop_win10.targets'))" />
-  </Target>
+  <ImportGroup Label="ExtensionTargets" />
   <Target Name="CopyDependencies" AfterTargets="Build">
     <Exec Command="xcopy /Y /D &quot;$(SolutionDir)packages\Microsoft.ML.OnnxRuntime.1.24.2\runtimes\win-x64\native\*.dll&quot; &quot;$(TargetDir)&quot;" />
   </Target>

@@ -5,14 +5,55 @@
     <OutDir>$(SolutionDir)bin\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)bin\obj\$(MSBuildProjectName)\$(Platform)\$(Configuration)\</IntDir>
   </PropertyGroup>
+
+  <PropertyGroup Label="Vcpkg">
+    <VcpkgRoot Condition="'$(VcpkgRoot)'==''">$(VsInstallRoot)\vc\vcpkg\</VcpkgRoot>
+    <VcpkgRoot Condition="!HasTrailingSlash('$(VcpkgRoot)')">$(VcpkgRoot)\</VcpkgRoot>
+    <VcpkgEnableManifest>true</VcpkgEnableManifest>
+    <VcpkgHostTriplet>x64-windows</VcpkgHostTriplet>
+    <VcpkgUseStatic>true</VcpkgUseStatic>
+    <VcpkgUseMD>true</VcpkgUseMD>
+  </PropertyGroup>
+
+  <Import Condition="Exists('$(VcpkgRoot)scripts\buildsystems\msbuild\vcpkg.props')"
+          Project="$(VcpkgRoot)scripts\buildsystems\msbuild\vcpkg.props" />
+
+  <PropertyGroup>
+    <VcpkgPageSchema>$(VcpkgRoot)scripts\buildsystems\msbuild\vcpkg-general.xml</VcpkgPageSchema>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Platform)'=='Win32'">
+    <VcpkgTriplet>x86-windows-static-md</VcpkgTriplet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Platform)'=='x64'">
+    <VcpkgTriplet>x64-windows-static-md</VcpkgTriplet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Platform)'=='ARM64'">
+    <VcpkgTriplet>arm64-windows-static-md</VcpkgTriplet>
+  </PropertyGroup>
+
   <PropertyGroup>
       <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
   </PropertyGroup>
+
   <ItemDefinitionGroup>
     <ClCompile>
       <TreatWarningAsError>true</TreatWarningAsError>
       <WarningLevel>Level4</WarningLevel>
       <Optimization Condition="'$(Configuration)' == 'Debug'">Disabled</Optimization>
+      <AdditionalOptions>/Zc:__cplusplus /ZH:SHA_256 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
+  </ItemDefinitionGroup>
+
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <ControlFlowGuard>Guard</ControlFlowGuard>
+    </ClCompile>
+  </ItemDefinitionGroup>
+
+  <ItemDefinitionGroup Condition="'$(Platform)'=='x64'">
+    <Link>
+      <CETCompat>true</CETCompat>
+    </Link>
   </ItemDefinitionGroup>
 </Project>

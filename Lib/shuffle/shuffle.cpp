@@ -13,7 +13,8 @@
 #include "../BCnBlockDefs.h"
 #include "../helpers/FormatHelper.h"
 #include "../helpers/Utility.h"
-#include "../ThirdParty/zstd/lib/zstd.h"
+
+#include <zstd.h>
 
 #include <thread>
 #include <vector>

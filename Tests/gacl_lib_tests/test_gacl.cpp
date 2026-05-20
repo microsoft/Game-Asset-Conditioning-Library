@@ -18,7 +18,7 @@
 #include <DirectXTex.h>
 
 #include <gacl.h>
-#include "../../ThirdParty/zstd/lib/zstd.h"
+#include <zstd.h>
 
 using namespace DirectX;
 using namespace std;
@@ -443,7 +443,7 @@ TEST_P(SC_BC7_Test, LargeBC7_ShuffleCompress) {
 
 // These files were selected in order to yield coverage of the general pattners and BC7 features
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     SC,
     SC_BC7_Test,
     ::testing::Values(
