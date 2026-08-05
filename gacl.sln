@@ -26,6 +26,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ml_rdo_tests", "Tests\ml_rd
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "shader_tests", "Tests\shader_tests\shader_tests.vcxproj", "{BE5C899D-B026-40B2-A076-5711B5DB4F2B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -86,6 +88,12 @@ Global
 		{54EDBE87-2E02-46E6-A174-E62BA36200FB}.Fuzzing|x64.Build.0 = Fuzzing|x64
 		{54EDBE87-2E02-46E6-A174-E62BA36200FB}.Release|x64.ActiveCfg = Release|x64
 		{54EDBE87-2E02-46E6-A174-E62BA36200FB}.Release|x64.Build.0 = Release|x64
+		{BE5C899D-B026-40B2-A076-5711B5DB4F2B}.Debug|x64.ActiveCfg = Debug|x64
+		{BE5C899D-B026-40B2-A076-5711B5DB4F2B}.Debug|x64.Build.0 = Debug|x64
+		{BE5C899D-B026-40B2-A076-5711B5DB4F2B}.Fuzzing|x64.ActiveCfg = Release|x64
+		{BE5C899D-B026-40B2-A076-5711B5DB4F2B}.Fuzzing|x64.Build.0 = Release|x64
+		{BE5C899D-B026-40B2-A076-5711B5DB4F2B}.Release|x64.ActiveCfg = Release|x64
+		{BE5C899D-B026-40B2-A076-5711B5DB4F2B}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -95,6 +103,7 @@ Global
 		{3D493776-BCA1-4A84-9996-A339356DECE7} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
 		{192D36AD-5573-4A18-BBCB-82E34DF729D2} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
 		{54EDBE87-2E02-46E6-A174-E62BA36200FB} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
+		{BE5C899D-B026-40B2-A076-5711B5DB4F2B} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {E67441CF-83CA-42FF-8E58-6493917B3B89}
