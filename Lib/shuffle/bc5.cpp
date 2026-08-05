@@ -26,6 +26,129 @@ static void WriteShuffledBC5Block(uint8_t*& d1, uint8_t*& d2, uint8_t*& d3,
     *d6++ = *src++; *d6++ = *src++; *d6++ = *src++;
 }
 
+/* Experimental shuffle pattern, may be removed in future releases */
+static void WriteShuffledBC5x4Blocks(uint8_t*& d1, uint8_t*& d2, uint8_t*& d3,
+    uint8_t*& d4, uint8_t*& d5, uint8_t*& d6, const uint8_t*& src)
+{
+    d2; d5;
+
+
+    struct BC5x4
+    {
+        union Red
+        {
+            uint64_t c;
+            uint8_t bytes[8];
+        } r;
+        uint8_t rIdx[24];
+        union Green
+        {
+            uint64_t c;
+            uint8_t bytes[8];
+        } g;
+        uint8_t gIdx[24];
+    } bc5x2 = {};
+
+
+    bc5x2.r.c =
+        (((src[0] >> 6ull) & 0x3ull) << 62ull) |
+        (((src[1] >> 6ull) & 0x3ull) << 60ull) |
+        (((src[16] >> 6ull) & 0x3ull) << 58ull) |
+        (((src[17] >> 6ull) & 0x3ull) << 56ull) |
+        (((src[32] >> 6ull) & 0x3ull) << 54ull) |
+        (((src[33] >> 6ull) & 0x3ull) << 52ull) |
+        (((src[48] >> 6ull) & 0x3ull) << 50ull) |
+        (((src[49] >> 6ull) & 0x3ull) << 48ull) |
+
+        (((src[0] >> 4ull) & 0x3ull) << 46ull) |
+        (((src[1] >> 4ull) & 0x3ull) << 44ull) |
+        (((src[16] >> 4ull) & 0x3ull) << 42ull) |
+        (((src[17] >> 4ull) & 0x3ull) << 40ull) |
+        (((src[32] >> 4ull) & 0x3ull) << 38ull) |
+        (((src[33] >> 4ull) & 0x3ull) << 36ull) |
+        (((src[48] >> 4ull) & 0x3ull) << 34ull) |
+        (((src[49] >> 4ull) & 0x3ull) << 32ull) |
+
+        (((src[0] >> 2ull) & 0x3ull) << 30ull) |
+        (((src[1] >> 2ull) & 0x3ull) << 28ull) |
+        (((src[16] >> 2ull) & 0x3ull) << 26ull) |
+        (((src[17] >> 2ull) & 0x3ull) << 24ull) |
+        (((src[32] >> 2ull) & 0x3ull) << 22ull) |
+        (((src[33] >> 2ull) & 0x3ull) << 20ull) |
+        (((src[48] >> 2ull) & 0x3ull) << 18ull) |
+        (((src[49] >> 2ull) & 0x3ull) << 16ull) |
+
+        (((src[0] >> 0ull) & 0x3ull) << 14ull) |
+        (((src[1] >> 0ull) & 0x3ull) << 12ull) |
+        (((src[16] >> 0ull) & 0x3ull) << 10ull) |
+        (((src[17] >> 0ull) & 0x3ull) << 8ull) |
+        (((src[32] >> 0ull) & 0x3ull) << 6ull) |
+        (((src[33] >> 0ull) & 0x3ull) << 4ull) |
+        (((src[48] >> 0ull) & 0x3ull) << 2ull) |
+        (((src[49] >> 0ull) & 0x3ull) << 0ull);
+
+    memcpy(bc5x2.rIdx, src + 2, 6);
+    memcpy(bc5x2.rIdx + 6, src + 18, 6);
+    memcpy(bc5x2.rIdx + 12, src + 34, 6);
+    memcpy(bc5x2.rIdx + 18, src + 50, 6);
+
+    bc5x2.g.c =
+        (((src[8] >> 6ull) & 0x3ull) << 62ull) |
+        (((src[9] >> 6ull) & 0x3ull) << 60ull) |
+        (((src[24] >> 6ull) & 0x3ull) << 58ull) |
+        (((src[25] >> 6ull) & 0x3ull) << 56ull) |
+        (((src[40] >> 6ull) & 0x3ull) << 54ull) |
+        (((src[41] >> 6ull) & 0x3ull) << 52ull) |
+        (((src[56] >> 6ull) & 0x3ull) << 50ull) |
+        (((src[57] >> 6ull) & 0x3ull) << 48ull) |
+
+        (((src[8] >> 4ull) & 0x3ull) << 46ull) |
+        (((src[9] >> 4ull) & 0x3ull) << 44ull) |
+        (((src[24] >> 4ull) & 0x3ull) << 42ull) |
+        (((src[25] >> 4ull) & 0x3ull) << 40ull) |
+        (((src[40] >> 4ull) & 0x3ull) << 38ull) |
+        (((src[41] >> 4ull) & 0x3ull) << 36ull) |
+        (((src[56] >> 4ull) & 0x3ull) << 34ull) |
+        (((src[57] >> 4ull) & 0x3ull) << 32ull) |
+
+        (((src[8] >> 2ull) & 0x3ull) << 30ull) |
+        (((src[9] >> 2ull) & 0x3ull) << 28ull) |
+        (((src[24] >> 2ull) & 0x3ull) << 26ull) |
+        (((src[25] >> 2ull) & 0x3ull) << 24ull) |
+        (((src[40] >> 2ull) & 0x3ull) << 22ull) |
+        (((src[41] >> 2ull) & 0x3ull) << 20ull) |
+        (((src[56] >> 2ull) & 0x3ull) << 18ull) |
+        (((src[57] >> 2ull) & 0x3ull) << 16ull) |
+
+        (((src[8] >> 0ull) & 0x3ull) << 14ull) |
+        (((src[9] >> 0ull) & 0x3ull) << 12ull) |
+        (((src[24] >> 0ull) & 0x3ull) << 10ull) |
+        (((src[25] >> 0ull) & 0x3ull) << 8ull) |
+        (((src[40] >> 0ull) & 0x3ull) << 6ull) |
+        (((src[41] >> 0ull) & 0x3ull) << 4ull) |
+        (((src[56] >> 0ull) & 0x3ull) << 2ull) |
+        (((src[57] >> 0ull) & 0x3ull) << 0ull);
+
+    memcpy(bc5x2.gIdx, src + 10, 6);
+    memcpy(bc5x2.gIdx + 6, src + 26, 6);
+    memcpy(bc5x2.gIdx + 12, src + 42, 6);
+    memcpy(bc5x2.gIdx + 18, src + 58, 6);
+
+
+    for (size_t i = 0; i < _countof(bc5x2.r.bytes); i++)
+        *d1++ = bc5x2.r.bytes[i];
+
+    for (size_t i = 0; i < _countof(bc5x2.rIdx); i++)
+        *d3++ = bc5x2.rIdx[i];
+
+    for (size_t i = 0; i < _countof(bc5x2.g.bytes); i++)
+        *d4++ = bc5x2.g.bytes[i];
+
+    for (size_t i = 0; i < _countof(bc5x2.gIdx); i++)
+        *d6++ = bc5x2.gIdx[i];
+
+    src += 64;
+}
 
 HRESULT Shuffle_BC5(
     _Out_writes_all_(size) uint8_t* dest,
@@ -34,7 +157,7 @@ HRESULT Shuffle_BC5(
     size_t version
 )
 {
-    if (nullptr == src || nullptr == dest || (size % 8) != 0 || version != 1)
+    if (nullptr == src || nullptr == dest || (size % 16) != 0 || version != 1 /*|| version > 2*/)
     {
         return E_INVALIDARG;
     }
@@ -56,6 +179,11 @@ HRESULT Shuffle_BC5(
 
     for (size_t i = 0; i < numQuads; i++)
     {
+        if (version == 2)
+        {
+            WriteShuffledBC5x4Blocks(d1, d2, d3, d4, d5, d6, src);
+            continue;
+        }
         for (size_t x = 0; x < BLOCKS_PER_QUAD; x++)
         {
             WriteShuffledBC5Block(d1, d2, d3, d4, d5, d6, src);

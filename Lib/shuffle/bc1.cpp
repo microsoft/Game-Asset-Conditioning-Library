@@ -21,6 +21,8 @@ static void WriteShuffledBC1Blockv1(uint8_t*& d1, uint8_t*& d2, uint8_t*& d3, co
 }
 
 
+// Some textures compress better if the least significant bits of each endpoint are carved off
+
 static void WriteShuffledBC1Blockv2(uint8_t*& d1, uint8_t*& d2, const uint8_t*& src)
 {
     // R[15:11] G[10:5] B[4:0]    - 5:6:5
@@ -28,36 +30,24 @@ static void WriteShuffledBC1Blockv2(uint8_t*& d1, uint8_t*& d2, const uint8_t*& 
     // 15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
     //  M  M  M  M  L  M  M  M  M  L  L  M  M  M  M  L
 
-    const uint16_t* e0 = reinterpret_cast<const uint16_t*>(src); src += 2;
-    const uint16_t* e1 = reinterpret_cast<const uint16_t*>(src); src += 2;
+    const uint16_t e0 = *reinterpret_cast<const uint16_t*>(src); src += 2;
+    const uint16_t e1 = *reinterpret_cast<const uint16_t*>(src); src += 2;
 
-    // most significant 4 bits from first two endpoint color fields
-    *d1++ =
-        (((*e0 >> 12u) & 0xfu) << 4u) +
-        (((*e0 >> 7u) & 0xfu) << 0u);
+    static constexpr uint16_t eMajor = 0b1111011110011110ul;
+    static constexpr uint16_t eMinor = uint16_t(~eMajor);
 
-    // most significant 4 bits from next two endpoint color fields
-    *d1++ =
-        (((*e0 >> 1u) & 0xfu) << 4u) +
-        (((*e1 >> 12u) & 0xfu) << 0u);
+    uint32_t eo =
+        (_pext_u32(e0, eMajor) << 20) |
+        (_pext_u32(e1, eMajor) << 8) |
+        (_pext_u32(e0, eMinor) << 4) |
+        (_pext_u32(e1, eMinor) << 0);
 
-    // ...repeat
-    *d1++ =
-        (((*e1 >> 7u) & 0xfu) << 4u) +
-        (((*e1 >> 1u) & 0xfu) << 0u);
-
-    // least significant 1-2 bits from all color fields
-    *d1++ =
-        (((*e0 >> 11u) & 0x1u) << 7u) +
-        (((*e0 >> 5u) & 0x3u) << 5u) +
-        (((*e0 >> 0u) & 0x1u) << 4u) +
-        (((*e1 >> 11u) & 0x1u) << 3u) +
-        (((*e1 >> 5u) & 0x3u) << 1u) +
-        (((*e1 >> 0u) & 0x1u) << 0u);
+    *reinterpret_cast<uint32_t*>(d1) = eo;  d1 += 4;
 
     *d2++ = *src++; *d2++ = *src++; // index (4B)
     *d2++ = *src++; *d2++ = *src++;
 }
+
 
 
 HRESULT Shuffle_BC1(
