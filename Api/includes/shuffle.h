@@ -118,14 +118,27 @@ enum GACL_SHUFFLE_TRANSFORM
 
 _Success_(dest!=nullptr && src != nullptr)
 GACL_API bool GACL_Shuffle_ApplySpaceCurve(
-    _Out_writes_bytes_opt_(size) uint8_t* dest,
-    _In_reads_opt_(size) const uint8_t* src,
-    size_t size, 
+    _Out_writes_bytes_opt_(sizeBytes) uint8_t* dest,
+    _In_reads_opt_(sizeBytes) const uint8_t* src,
+    size_t sizeBytes,
     size_t elementSizeBytes, 
     size_t widthInPixels, 
     bool forward
 );
 
+/// <summary>
+/// As above, but applies the same curved transform to decoded linear pixel data.
+/// </summary>
+_Success_(dest != nullptr && src != nullptr)
+GACL_API bool GACL_Shuffle_ApplySpaceCurveDecoded(
+    _Out_writes_bytes_opt_(sizeBytes) uint8_t* dest,
+    _In_reads_opt_(sizeBytes) const uint8_t* src,
+    size_t sizeBytes,
+    size_t encodedElementSizeBytes,
+    size_t decodedPixelSizeBytes,
+    size_t widthInPixels,
+    bool forward
+);
 
 GACL_API const wchar_t* GACL_ShuffleCompress_GetFileExtensionForTransform(GACL_SHUFFLE_TRANSFORM transformId);
 

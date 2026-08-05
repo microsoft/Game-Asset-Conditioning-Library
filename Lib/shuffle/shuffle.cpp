@@ -24,9 +24,9 @@
 
 _Success_(dest != nullptr && src != nullptr)
 bool GACL_Shuffle_ApplySpaceCurve(
-    _Out_writes_bytes_opt_(size) uint8_t* dest,
-    _In_reads_opt_(size) const uint8_t* src,
-    size_t size,
+    _Out_writes_bytes_opt_(sizeBytes) uint8_t* dest,
+    _In_reads_opt_(sizeBytes) const uint8_t* src,
+    size_t sizeBytes,
     size_t elementSizeBytes,
     size_t widthInPixels,
     bool forward
@@ -35,11 +35,11 @@ bool GACL_Shuffle_ApplySpaceCurve(
     const size_t widthInElements = (widthInPixels + 3) / 4;
     const size_t pitchBytes = elementSizeBytes * widthInElements;
     
-    const size_t heightInElements = (size + pitchBytes - 1) / pitchBytes;
+    const size_t heightInElements = (sizeBytes + pitchBytes - 1) / pitchBytes;
     
     // 16KB micro tiles in z-order, applicable when height\width in tiles is power of 2
     if ((elementSizeBytes == 8 || elementSizeBytes == 16) &&
-        size > 16ull * 1024 &&
+        sizeBytes > 16ull * 1024 &&
         _mm_popcnt_u64(widthInElements) == 1 && widthInElements >= (elementSizeBytes == 8 ? 64u: 32u) &&
         _mm_popcnt_u64(heightInElements) == 1 && heightInElements >= 32u)
     {
@@ -47,7 +47,7 @@ bool GACL_Shuffle_ApplySpaceCurve(
         {
             // 32 element * 32\64 element micro tile  
             const size_t tileSizeBytes = 16ull * 1024;
-            const size_t tiles = size / tileSizeBytes;
+            const size_t tiles = sizeBytes / tileSizeBytes;
 
             const size_t tileWidthElements = elementSizeBytes == 16 ? 32 : 64;
             const size_t widthInTiles = widthInElements / tileWidthElements;
@@ -99,7 +99,101 @@ bool GACL_Shuffle_ApplySpaceCurve(
     {
         if (dest != nullptr && src != nullptr)
         {
-            memcpy(dest, src, size);
+            memcpy(dest, src, sizeBytes);
+        }
+        return false;
+    }
+}
+
+
+/*  As above, but this function will apply the same 16KB encoded data space curve to decoded pixel data, or original art data loaded from another source */
+bool GACL_Shuffle_ApplySpaceCurveDecoded(
+    _Out_writes_bytes_opt_(sizeBytes) uint8_t* dest,
+    _In_reads_opt_(sizeBytes) const uint8_t* src,
+    size_t sizeBytes,
+    size_t encodedElementSizeBytes,
+    size_t decodedPixelSizeBytes,
+    size_t widthInPixels,
+    bool forward
+)
+{
+    const size_t sizeInPixels = sizeBytes / decodedPixelSizeBytes;
+    const size_t heightInPixels = sizeInPixels / widthInPixels;
+
+    const size_t rowPitchBytes = widthInPixels * decodedPixelSizeBytes;
+    const size_t tileRowPitchBytes = rowPitchBytes * 128;
+
+    const size_t widthInElements = (widthInPixels + 3) / 4;
+    const size_t heightInElements = (heightInPixels + 3) / 4;
+
+    // 16KB micro tiles in z-order, applicable when height\width in tiles is power of 2
+    if ((encodedElementSizeBytes == 8 || encodedElementSizeBytes == 16 ) &&
+        widthInElements * heightInElements * 16 * decodedPixelSizeBytes == sizeBytes &&
+        _mm_popcnt_u64(widthInElements) == 1 && widthInElements >= (encodedElementSizeBytes == 8 ? 64u : 32u) &&
+        _mm_popcnt_u64(heightInElements) == 1 && heightInElements >= 32u)
+    {
+        if (dest != nullptr && src != nullptr)
+        {
+            // 32 element * 32\64 element micro tile  
+            const size_t encodedTileSizeBytes = 16ull * 1024;
+            const size_t tileSizeInElements = encodedTileSizeBytes / encodedElementSizeBytes;
+            const size_t tiles = (widthInElements * heightInElements) / tileSizeInElements;
+
+            const size_t tileWidthElements = encodedElementSizeBytes == 16 ? 32 : 64;
+            const size_t widthInTiles = widthInElements / tileWidthElements;
+            const size_t heightInTiles = tiles / widthInTiles;
+
+            const size_t tilePitchBytes = tileWidthElements * 4 * decodedPixelSizeBytes;
+
+            // default mask 
+            size_t maskX = 0xAAAAAAAA;
+            size_t maskY = 0x55555555;
+            if (widthInTiles > heightInTiles)
+            {
+                size_t smallDimMask = (heightInTiles * heightInTiles) - 1;
+                maskY &= smallDimMask;
+                maskX |= ~smallDimMask;
+            }
+            else if (widthInTiles < heightInTiles)
+            {
+                size_t smallDimMask = (widthInTiles * widthInTiles) - 1;
+                maskY |= ~smallDimMask;
+                maskX &= smallDimMask;
+            }
+
+            for (size_t t = 0; t < tiles; t++)
+            {
+                size_t tx = _pext_u64(t, maskX);
+                size_t ty = _pext_u64(t, maskY);
+
+                const size_t decodedTileSizeBytes = tileSizeInElements * 16 * decodedPixelSizeBytes;
+
+                const size_t firstTileByte =
+                    ty * (tileRowPitchBytes) +
+                    tx * (tilePitchBytes);
+
+                for (size_t r = 0; r < 128; r++)
+                {
+                    const size_t firstRowByte = firstTileByte + r * rowPitchBytes;
+
+                    if (forward)
+                    {
+                        memcpy(dest + decodedTileSizeBytes * t + tilePitchBytes * r, src + firstRowByte, tilePitchBytes);
+                    }
+                    else
+                    {
+                        memcpy(dest + firstRowByte, src + decodedTileSizeBytes * t + tilePitchBytes * r, tilePitchBytes);
+                    }
+                }
+            }
+        }
+        return true;
+    }
+    else
+    {
+        if (dest != nullptr && src != nullptr)
+        {
+            memcpy(dest, src, sizeBytes);
         }
         return false;
     }

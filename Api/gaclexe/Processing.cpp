@@ -161,7 +161,7 @@ bool gacl::ProcessTexture(
 
     const DXGI_FORMAT baseFormat = GetBaseFormat(siMeta.format);
     const uint32_t elementSize = uint32_t(GetElementSize(siMeta.format));
-    const bool isSpaceCurveEligible = GACL_Shuffle_ApplySpaceCurve(nullptr, nullptr, 
+    const bool isSpaceCurveEligible = GACL_Shuffle_ApplySpaceCurve(nullptr, nullptr,
         ((siMeta.width + 3) / 4) * ((siMeta.height + 3) / 4) * elementSize, elementSize, (siMeta.width + 3) & ~3ull, true);
 
     if (verbosity >= Verbosity::eVerbose)
@@ -243,8 +243,208 @@ bool gacl::ProcessTexture(
     const bool isGammaFormat = IsGammaFormat(siMeta.format);
 #endif
 
+    DirectX::ScratchImage blerLinearSpace;
+    DirectX::ScratchImage blerScreenSpace;
+    DirectX::ScratchImage clerLinearSpace;
+    DirectX::ScratchImage clerScreenSpace;
+    bool containsCurvedRdoMips = false;
+    size_t lastCurvedRdoMip = 0;
+    bool curvedMipLevelReported = false;
+
+#if GACL_INCLUDE_BLER
+
+    // Determine when\how BLER should be applied
+    // If applying shuffle+compress, we need a full set of curved\linear RDO streams, if curved transforms are in the mix.  
+    //
+    // If we are simply exporting back to DDS, enable based on the curved rdo option (though this will become the default in GA)
+    // Linear is almost always needed, unles we're only applying RDO and exporting with curved RDO and all mips being eligable.
+
+    bool genBlerScreenSpace = 
+        options.BlerOptions.Enabled &&
+        isSpaceCurveEligible &&
+        !options.CurveOptions.DisableSpaceCurve &&
+        ((options.ShuffleOptions.Enabled && options.ShuffleOptions.Transform == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL) || options.CurveOptions.CurvedRDO) &&
+        (baseFormat == DXGI_FORMAT_BC1_TYPELESS || baseFormat == DXGI_FORMAT_BC2_TYPELESS || baseFormat == DXGI_FORMAT_BC3_TYPELESS || baseFormat == DXGI_FORMAT_BC4_TYPELESS || baseFormat == DXGI_FORMAT_BC5_TYPELESS || baseFormat == DXGI_FORMAT_BC7_TYPELESS);
+
+    bool genBlerLinearSpace =
+        options.BlerOptions.Enabled &&
+        (baseFormat == DXGI_FORMAT_BC1_TYPELESS || baseFormat == DXGI_FORMAT_BC2_TYPELESS || baseFormat == DXGI_FORMAT_BC3_TYPELESS || baseFormat == DXGI_FORMAT_BC4_TYPELESS || baseFormat == DXGI_FORMAT_BC5_TYPELESS || baseFormat == DXGI_FORMAT_BC7_TYPELESS);
+
+    if (siMeta.mipLevels == 1 && isSpaceCurveEligible && !options.ShuffleOptions.Enabled && options.CurveOptions.CurvedRDO)
+    {
+        genBlerLinearSpace = false;
+    }
+
+    if (options.BlerOptions.Enabled)
+    {
+        Utility::Printf(GACL_Logging_Priority_Low, L"\n=== Block-Level Entropy Reduction ===\n");
+
+        if (baseFormat == DXGI_FORMAT_BC1_TYPELESS ||
+            baseFormat == DXGI_FORMAT_BC2_TYPELESS ||
+            baseFormat == DXGI_FORMAT_BC3_TYPELESS ||
+            baseFormat == DXGI_FORMAT_BC4_TYPELESS ||
+            baseFormat == DXGI_FORMAT_BC5_TYPELESS ||
+            baseFormat == DXGI_FORMAT_BC7_TYPELESS)
+        {
+            
+            // perform Block-Level Entropy reduction in both screen-space and linear space as needed by options...
+            DirectX::ScratchImage* blerImages[] = 
+            {
+                genBlerScreenSpace ? &blerScreenSpace : nullptr,
+                genBlerLinearSpace ? &blerLinearSpace : nullptr,
+            };
+            
+            for (DirectX::ScratchImage* blerImage : blerImages)
+            {
+                if (!blerImage) continue;
+
+                hr = blerImage->Initialize2D(siMeta.format, siMeta.width, siMeta.height, siMeta.arraySize, siMeta.mipLevels);
+                if (FAILED(hr)) {
+                    Utility::Printf(GACL_Logging_Priority_High, L"ERROR: Failed to initialize output image.\n");
+                    return false;
+                }
+
+                for (size_t item = 0; item < siMeta.arraySize; ++item)
+                {
+                    for (size_t mip = 0; mip < siMeta.mipLevels; ++mip)
+                    {
+                        const DirectX::Image* dstConst = blerImage->GetImage(mip, item, 0);
+                        DirectX::Image* dst = const_cast<DirectX::Image*>(dstConst);
+
+                        // Copy source BC data
+                        const DirectX::Image* src = si.GetImage(mip, item, 0);
+
+                        size_t mipWidth = std::max<size_t>(1, siMeta.width >> mip);
+                        size_t mipHeight = std::max<size_t>(1, siMeta.height >> mip);
+                        size_t blocksX = (mipWidth + 3) / 4;
+                        size_t blocksY = (mipHeight + 3) / 4;
+                        size_t numBlocks = blocksX * blocksY;
+
+                        uint8_t* encodedBlocks = reinterpret_cast<uint8_t*>(_aligned_malloc(numBlocks * elementSize, 32));
+
+                        if (blerImage == &blerScreenSpace)
+                        {
+                            std::vector<uint8_t> curvedData(numBlocks* elementSize);
+                            if (!GACL_Shuffle_ApplySpaceCurve(curvedData.data(), src->pixels, numBlocks * elementSize, elementSize, blocksX * 4, true))
+                            {
+                                if (containsCurvedRdoMips) 
+                                    lastCurvedRdoMip = mip - 1;
+
+                                // If a given mip isn't eligible for curved transforms, smaller mips won't be either
+                                // Short circuit here, and skip all further mips.  But, later we need to copy across the data from the texture that had linear RDO.
+                                if (!curvedMipLevelReported && siMeta.mipLevels > 1)
+                                {
+                                    Utility::Printf(GACL_Logging_Priority_Medium, L"Space curve (16KB Z-order micro-tile) applied to largest %zu mips.\n", mip);
+                                    curvedMipLevelReported = true;
+                                }
+                                _aligned_free(encodedBlocks);
+                                break;  
+                            }
+                            containsCurvedRdoMips = true;
+
+                            memcpy(encodedBlocks, curvedData.data(), numBlocks * elementSize);
+
+#if _DEBUG
+                            std::vector<uint8_t> uncurvedData(numBlocks* elementSize);
+                            GACL_Shuffle_ApplySpaceCurve(uncurvedData.data(), curvedData.data(), numBlocks * elementSize, elementSize, blocksX*4, false);
+                            if (memcmp(uncurvedData.data(), src->pixels, numBlocks * elementSize)) __debugbreak();
+#endif
+                        }
+                        else
+                        {
+                            memcpy(encodedBlocks, src->pixels, numBlocks * elementSize);
+                        }
+                        DirectX::Image localSrc = *src;     // copy original metadata
+                        localSrc.pixels = encodedBlocks;    // but with local (possibly curved) data we can read\write for BLER
+
+                        // Decode raw RGBA, though a developer might instead pull this in from elsewhere if they have original art
+                        DirectX::TexMetadata mipMetadata = siMeta;
+                        mipMetadata.width = mipWidth;
+                        mipMetadata.height = mipHeight;
+                        mipMetadata.mipLevels = 1;
+                        mipMetadata.arraySize = 1;
+                        mipMetadata.dimension = DirectX::TEX_DIMENSION_TEXTURE2D;
+                        DirectX::ScratchImage decoded;
+                        hr = DirectX::Decompress(&localSrc, 1, mipMetadata, isGammaFormat ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM, decoded);
+                        if (FAILED(hr)) {
+                            Utility::Printf(GACL_Logging_Priority_High, L"Failed to decode mip %ull array item %ull\n", mip, item);
+                            _aligned_free(encodedBlocks);
+                            return false;
+                        }
+
+                        const DirectX::Image* rgbaImg = decoded.GetImage(0, 0, 0);
+                        uint8_t* decodedBlocks = reinterpret_cast<uint8_t*>(_aligned_malloc(numBlocks * 16 * 4, 32));
+                        GACL_RDO_R8G8B8A8LinearToBlockGrouped(decodedBlocks, rgbaImg->pixels, rgbaImg->rowPitch, mipWidth, mipHeight);
+
+
+
+                        assert(numBlocks >> 32 == 0);
+                        GACL_RDO_BlockLevelEntropyReduce(uint32_t(numBlocks), encodedBlocks, (uint32_t)elementSize, decodedBlocks, options.BlerOptions.TargetUniqueBlockReduction);
+
+                        if (blerImage == &blerScreenSpace)
+                        {
+                            // if we applied a space curve, uncurve the data
+                            std::vector<uint8_t> decurvedData(numBlocks* elementSize);
+                            GACL_Shuffle_ApplySpaceCurve(decurvedData.data(), encodedBlocks, numBlocks * elementSize, elementSize, blocksX * 4, false);
+                            memcpy(dst->pixels, decurvedData.data(), numBlocks * elementSize);
+                        }
+                        else
+                        {
+                            // Replace original image with clustered image
+                            memcpy(dst->pixels, encodedBlocks, numBlocks * elementSize);
+                        }
+
+                        _aligned_free(encodedBlocks);
+                        _aligned_free(decodedBlocks);
+                    }
+                }
+            }   // for (DirectX::ScratchImage* blerImage : blerImages)
+
+            if (genBlerScreenSpace && containsCurvedRdoMips && (lastCurvedRdoMip+1) < siMeta.mipLevels)
+            {
+                // If we're applying RDO to a whole mip chain, with curved transforms enabled, smaller mips won't be eligible, just copy over the linear RDO data
+                for (size_t item = 0; item < siMeta.arraySize; ++item)
+                {
+                    for (size_t mip = lastCurvedRdoMip + 1; mip < siMeta.mipLevels; ++mip)
+                    {
+                        DirectX::Image* dstCurved = const_cast<DirectX::Image*>(blerScreenSpace.GetImage(mip, item, 0));
+                        const DirectX::Image* srcLinear = blerLinearSpace.GetImage(mip, item, 0);
+                        memcpy(dstCurved->pixels, srcLinear->pixels, dstCurved->slicePitch);
+                    }
+                }
+            }
+        }
+        else
+        {
+            Utility::Printf(GACL_Logging_Priority_High, L"ERROR: Block-Level Entropy Reduction not implemented for texture format.\n");
+            return false;
+        }
+    }
+#else
+    bool genBlerScreenSpace = false;
+    bool genBlerLinearSpace = false;
+#endif  // GACL_INCLUDE_BLER
 
 #if GACL_INCLUDE_CLER
+
+    bool isRefSpaceCurveEligible = false;
+
+    bool genClerScreenSpace =
+        options.ClerOptions.Enabled &&
+        isSpaceCurveEligible &&
+        !options.CurveOptions.DisableSpaceCurve &&
+        ((options.ShuffleOptions.Enabled && options.ShuffleOptions.Transform == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL) || options.CurveOptions.CurvedRDO) &&
+        (baseFormat == DXGI_FORMAT_BC1_TYPELESS);
+
+    bool genClerLinearSpace =
+        options.ClerOptions.Enabled &&
+        (baseFormat == DXGI_FORMAT_BC1_TYPELESS);
+
+    if (siMeta.mipLevels == 1 && isSpaceCurveEligible && !options.ShuffleOptions.Enabled && options.CurveOptions.CurvedRDO)
+    {
+        genClerLinearSpace = false;
+    }
+
     if (options.ClerOptions.Enabled)
     {
         Utility::Printf(GACL_Logging_Priority_Medium, L"\n=== Component-Level Entropy Reduction (ML RDO) ===\n");
@@ -310,44 +510,52 @@ bool gacl::ProcessTexture(
                         referenceImage.reset();
                         refInfo = TexMetadata{};
                     }
-                    else if (bitsPerColor > 8)
+                    else if ((isGammaFormat && originalRefFormat != DXGI_FORMAT_R8G8B8A8_UNORM_SRGB) ||
+                        (!isGammaFormat && GetBaseFormat(originalRefFormat) != DXGI_FORMAT_R8G8B8A8_TYPELESS))
                     {
                         Utility::Printf(GACL_Logging_Priority_Medium,
                             L"Warning: Reference image precision reduced from %zu-bit to 8-bit per channel.\n",
                             bitsPerColor);
-                    }
-                    else 
-                    {
+
                         // Convert reference image to R8G8B8A8_UNORM to match the expected format
                         // WIC can load images in various formats (BGRA, RGB24, etc.) depending on source
-                        DXGI_FORMAT targetRefFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-                        if (refInfo.format != targetRefFormat)
-                        {
-                            DirectX::ScratchImage converted;
-                            HRESULT convertHr = DirectX::Convert(
-                                referenceImage->GetImages(),
-                                referenceImage->GetImageCount(),
-                                referenceImage->GetMetadata(),
-                                targetRefFormat,
-                                DirectX::TEX_FILTER_DEFAULT,
-                                DirectX::TEX_THRESHOLD_DEFAULT,
-                                converted);
+                        DXGI_FORMAT targetRefFormat = isGammaFormat ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM;
+                        TEX_FILTER_FLAGS flags = isGammaFormat ? TEX_FILTER_SRGB_IN : DirectX::TEX_FILTER_DEFAULT;
 
-                            if (SUCCEEDED(convertHr))
-                            {
-                                *referenceImage = std::move(converted);
-                                refInfo = referenceImage->GetMetadata();
-                                Utility::Printf(GACL_Logging_Priority_Medium, L"Converted reference image to R8G8B8A8_UNORM\n");
-                            }
-                            else
-                            {
-                                Utility::Printf(GACL_Logging_Priority_High, L"Warning: Failed to convert reference image format (HRESULT=0x%08X), using decoded BC as reference instead.\n", convertHr);
-                                referenceImage.reset();
-                                refInfo = TexMetadata{};
-                            }
+                        DirectX::ScratchImage converted;
+                        HRESULT convertHr = DirectX::Convert(
+                            referenceImage->GetImages(),
+                            referenceImage->GetImageCount(),
+                            referenceImage->GetMetadata(),
+                            targetRefFormat,
+                            flags,
+                            DirectX::TEX_THRESHOLD_DEFAULT,
+                            converted);
+
+                        if (SUCCEEDED(convertHr))
+                        {
+                            *referenceImage = std::move(converted);
+                            refInfo = referenceImage->GetMetadata();
+                            Utility::Printf(GACL_Logging_Priority_Medium, L"Converted reference image to R8G8B8A8_UNORM\n");
+                        }
+                        else
+                        {
+                            Utility::Printf(GACL_Logging_Priority_High, L"Warning: Failed to convert reference image format (HRESULT=0x%08X), using decoded BC as reference instead.\n", convertHr);
+                            referenceImage.reset();
+                            refInfo = TexMetadata{};
                         }
                     }
                 }
+            }
+        }
+
+        if (referenceImage != nullptr && genClerScreenSpace)
+        {
+            isRefSpaceCurveEligible = GACL_Shuffle_ApplySpaceCurveDecoded(nullptr, nullptr, referenceImage->GetPixelsSize(), elementSize, 4, refInfo.width, true);
+            if (!isRefSpaceCurveEligible)
+            {
+                Utility::Printf(GACL_Logging_Priority_Medium, L"Warning: Reference image is not eligible for space curve. Disabling screen-space CLER.\n");
+                genClerScreenSpace = false;
             }
         }
 
@@ -391,146 +599,254 @@ bool gacl::ProcessTexture(
         using namespace std::chrono;
         auto start_time = high_resolution_clock::now();
 
-        for (size_t item = 0; item < siMeta.arraySize; ++item)
+        // perform component-Level entropy reduction in both screen-space and linear space as needed by options...
+
+        DirectX::ScratchImage* clerImages[] =
         {
-            if (siMeta.arraySize > 1)
-            {
-                Utility::Printf(GACL_Logging_Priority_Medium, L"=== Processing array item %zu/%zu ===\n", item + 1, siMeta.arraySize);
+            genClerLinearSpace ? &clerLinearSpace : nullptr,
+            genClerScreenSpace ? &clerScreenSpace : nullptr
+        };
+
+        DirectX::ScratchImage* clerSrcImages[] =
+        {
+            genBlerLinearSpace ? &blerLinearSpace : &si,
+            genBlerScreenSpace ? &blerScreenSpace : &si
+        };
+
+        for (int img : {0, 1})
+        {
+            DirectX::ScratchImage* clerImage = clerImages[img];
+            DirectX::ScratchImage* clerSrcImage = clerSrcImages[img];
+
+            if (!clerImage) continue;
+            
+            hr = clerImage->Initialize2D(siMeta.format, siMeta.width, siMeta.height, siMeta.arraySize, siMeta.mipLevels);
+            if (FAILED(hr)) {
+                Utility::Printf(GACL_Logging_Priority_High, L"Failed to initialize output image.\n");
+                return false;
             }
 
-            for (size_t mip = 0; mip < siMeta.mipLevels; ++mip)
+
+            bool notifyMipSkipped = false;
+
+            for (size_t item = 0; item < siMeta.arraySize; ++item)
             {
-                const DirectX::Image* src = si.GetImage(mip, item, 0);
-
-                size_t c_width = std::max<size_t>(1, siMeta.width >> mip);
-                size_t c_height = std::max<size_t>(1, siMeta.height >> mip);
-
-                if (siMeta.mipLevels > 1)
+                if (siMeta.arraySize > 1)
                 {
-                    Utility::Printf(GACL_Logging_Priority_Medium, L"\nMip level %zu/%zu (%zux%zu)\n", mip, siMeta.mipLevels - 1, c_width, c_height);
+                    Utility::Printf(GACL_Logging_Priority_Medium, L"=== Processing array item %zu/%zu ===\n", item + 1, siMeta.arraySize);
                 }
 
-                if (mip >= options.ClerOptions.Mips) {
-                    Utility::Printf(GACL_Logging_Priority_Medium, L"Skipping - mip level %zu is beyond the last mip level to process %zu. To change this, use '-cmips' argument.\n", mip, options.ClerOptions.Mips - 1);
-					continue;
-                }
-
-                if (c_width < 24 || c_height < 24)
+                for (size_t mip = 0; mip < siMeta.mipLevels; ++mip)
                 {
-                    Utility::Printf(GACL_Logging_Priority_Medium, L"Skipping - too small for RDO (< 24x24)\n");
-                    continue;
-                }
+                    const DirectX::Image* dstConst = clerImage->GetImage(mip, item, 0);
+                    DirectX::Image* dst = const_cast<DirectX::Image*>(dstConst);
 
-                // Decode BC data to RGBA for reference
-                DirectX::TexMetadata mipMetadata = siMeta;
-                mipMetadata.width = c_width;
-                mipMetadata.height = c_height;
-                mipMetadata.mipLevels = 1;
-                mipMetadata.arraySize = 1;
-                mipMetadata.dimension = DirectX::TEX_DIMENSION_TEXTURE2D;
+                    const DirectX::Image* src = clerSrcImage->GetImage(mip, item, 0);
 
-                DirectX::ScratchImage decoded;
-                hr = DirectX::Decompress(src, 1, mipMetadata, isGammaFormat ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM, decoded);
-                if (FAILED(hr)) 
-                {
-                    Utility::Printf(GACL_Logging_Priority_High, L"ERROR: Failed to decode mip %zu array item %zu\n", mip, item);
-                    return false;
-                }
+                    size_t c_width = std::max<size_t>(1, siMeta.width >> mip);
+                    size_t c_height = std::max<size_t>(1, siMeta.height >> mip);
+                    size_t c_blocksX = (c_width + 3) / 4;
+                    size_t c_blocksY = (c_height + 3) / 4;
+                    size_t c_numBlocks = c_blocksX * c_blocksY;
 
-                const DirectX::Image* rgbaImg = decoded.GetImage(0, 0, 0);
-
-                if (options.ClerOptions.MaxK <= 0)
-                {
-                    rdoOptions.maxClusters = static_cast<int>(((c_width > c_height) ? 0.125 * c_width : 0.125 * c_height));
-                    if (rdoOptions.maxClusters < rdoOptions.minClusters) 
+                    if (mip >= options.ClerOptions.Mips) 
                     {
-                        rdoOptions.maxClusters = rdoOptions.minClusters;
+                        if (!notifyMipSkipped)
+                        {
+                            Utility::Printf(GACL_Logging_Priority_Medium, L"Skipping - mip level %zu is beyond the last mip level to process %zu. To change this, use '-cmips' argument.\n", mip, options.ClerOptions.Mips - 1);
+                            notifyMipSkipped = true;
+                        }
+                        memcpy(dst->pixels, src->pixels, c_numBlocks * elementSize);
+                        continue;
                     }
-                }
 
-                const void* referenceRGBA = nullptr;
-                DirectX::ScratchImage resizedRef;
-
-                if (referenceImage && refInfo.width > 0 && refInfo.height > 0)
-                {
-                    const DirectX::Image* refMip = nullptr;
-                    if (mip < refInfo.mipLevels)
+                    if (siMeta.mipLevels > 1)
                     {
-                        refMip = referenceImage->GetImage(mip, 0, 0);
+                        Utility::Printf(GACL_Logging_Priority_Medium, L"\nMip level %zu/%zu (%zux%zu)\n", mip, siMeta.mipLevels - 1, c_width, c_height);
+                    }
+
+                    if (c_width < 24 || c_height < 24)
+                    {
+                        Utility::Printf(GACL_Logging_Priority_Medium, L"Skipping - too small for RDO (< 24x24)\n");
+                        memcpy(dst->pixels, src->pixels, c_numBlocks * elementSize);
+                        continue;
+                    }
+
+                    // local (possibly curved) copy of the image data
+                    uint8_t* encodedBlocks = reinterpret_cast<uint8_t*>(_aligned_malloc(c_numBlocks * elementSize, 32));
+
+                    if (clerImage == &clerScreenSpace)
+                    {
+                        std::vector<uint8_t> curvedData(c_numBlocks * elementSize);
+                        if (!GACL_Shuffle_ApplySpaceCurve(curvedData.data(), src->pixels, c_numBlocks * elementSize, elementSize, c_blocksX * 4, true))
+                        {
+                            if (containsCurvedRdoMips)
+                                lastCurvedRdoMip = mip - 1;
+
+                            // If a given mip isn't eligible for curved transforms, smaller mips won't be either
+                            // Short circuit here, and skip all further mips.  But, later we need to copy across the data from the texture that had linear RDO.
+                            if (!curvedMipLevelReported && siMeta.mipLevels > 1)
+                            {
+                                Utility::Printf(GACL_Logging_Priority_Medium, L"Space curve (16KB Z-order micro-tile) applied to largest %zu mips.\n", mip);
+                                curvedMipLevelReported = true;
+                            }
+                            _aligned_free(encodedBlocks);
+                            break;
+                        }
+                        containsCurvedRdoMips = true;
+
+                        memcpy(encodedBlocks, curvedData.data(), c_numBlocks* elementSize);
                     }
                     else
                     {
-                        refMip = referenceImage->GetImage(0, 0, 0);
+                        memcpy(encodedBlocks, src->pixels, c_numBlocks * elementSize);
+                    }
+                    DirectX::Image localSrc = *src;     // copy original metadata
+                    localSrc.pixels = encodedBlocks;    // but with local (possibly curved) data we can read\write for CLER
+
+
+                    // Decode BC data to RGBA for reference
+                    DirectX::TexMetadata mipMetadata = siMeta;
+                    mipMetadata.width = c_width;
+                    mipMetadata.height = c_height;
+                    mipMetadata.mipLevels = 1;
+                    mipMetadata.arraySize = 1;
+                    mipMetadata.dimension = DirectX::TEX_DIMENSION_TEXTURE2D;
+
+                    DirectX::ScratchImage decoded;
+                    hr = DirectX::Decompress(&localSrc, 1, mipMetadata, isGammaFormat ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM, decoded);
+                    if (FAILED(hr))
+                    {
+                        Utility::Printf(GACL_Logging_Priority_High, L"ERROR: Failed to decode mip %zu array item %zu\n", mip, item);
+                        _aligned_free(encodedBlocks);
+                        return false;
                     }
 
-                    const DirectX::Image* refToUse = refMip;
+                    const DirectX::Image* rgbaImg = decoded.GetImage(0, 0, 0);
 
-                    bool refMatchesMipDims = refToUse && refToUse->width == c_width && refToUse->height == c_height;
-
-                    if (!refMatchesMipDims)
+                    if (options.ClerOptions.MaxK <= 0)
                     {
-                        if (comInitialized && refToUse)
+                        rdoOptions.maxClusters = static_cast<int>(((c_width > c_height) ? 0.125 * c_width : 0.125 * c_height));
+                        if (rdoOptions.maxClusters < rdoOptions.minClusters)
                         {
-                            HRESULT rhr = DirectX::Resize(
-                                referenceImage->GetImages(),
-                                referenceImage->GetImageCount(),
-                                referenceImage->GetMetadata(),
-                                (size_t)c_width,
-                                (size_t)c_height,
-                                DirectX::TEX_FILTER_FANT,
-                                resizedRef);
+                            rdoOptions.maxClusters = rdoOptions.minClusters;
+                        }
+                    }
 
-                            if (SUCCEEDED(rhr))
-                            {
-                                refToUse = resizedRef.GetImage(0, 0, 0);
-                                refMatchesMipDims = refToUse && refToUse->width == c_width && refToUse->height == c_height;
-                                Utility::Printf(GACL_Logging_Priority_Medium, L"Downscaled reference to %zux%zu for mip %zu\n", c_width, c_height, mip);
-                            }
-                            else
-                            {
-                                Utility::Printf(GACL_Logging_Priority_Medium, L"WARNING: Failed to downscale reference, using decoded image as fallback\n");
-                                refToUse = nullptr;
-                            }
+                    const void* referenceRGBA = nullptr;
+                    DirectX::ScratchImage resizedRef;
+                    DirectX::ScratchImage curvedRef;
+
+                    if (referenceImage && refInfo.width > 0 && refInfo.height > 0)
+                    {
+                        const DirectX::Image* refMip = nullptr;
+                        if (mip < refInfo.mipLevels)
+                        {
+                            refMip = referenceImage->GetImage(mip, 0, 0);
                         }
                         else
                         {
-                            refToUse = nullptr;
+                            refMip = referenceImage->GetImage(0, 0, 0);
+                        }
+
+                        const DirectX::Image* refToUse = refMip;
+
+                        bool refMatchesMipDims = refToUse && refToUse->width == c_width && refToUse->height == c_height;
+
+                        if (!refMatchesMipDims)
+                        {
+                            if (comInitialized && refToUse)
+                            {
+                                HRESULT rhr = DirectX::Resize(
+                                    referenceImage->GetImages(),
+                                    referenceImage->GetImageCount(),
+                                    referenceImage->GetMetadata(),
+                                    (size_t)c_width,
+                                    (size_t)c_height,
+                                    DirectX::TEX_FILTER_FANT,
+                                    resizedRef);
+
+                                if (SUCCEEDED(rhr))
+                                {
+                                    refToUse = resizedRef.GetImage(0, 0, 0);
+                                    refMatchesMipDims = refToUse && refToUse->width == c_width && refToUse->height == c_height;
+                                    Utility::Printf(GACL_Logging_Priority_Medium, L"Downscaled reference to %zux%zu for mip %zu\n", c_width, c_height, mip);
+                                }
+                                else
+                                {
+                                    Utility::Printf(GACL_Logging_Priority_Medium, L"WARNING: Failed to downscale reference, using decoded image as fallback\n");
+                                    refToUse = nullptr;
+                                }
+                            }
+                            else
+                            {
+                                refToUse = nullptr;
+                            }
+                        }
+
+                        if (refToUse && refMatchesMipDims) {
+                            if (clerImage == &clerScreenSpace)
+                            {
+                                curvedRef.Initialize2D(refToUse->format, refToUse->width, refToUse->height, 1, 1);
+                                if (GACL_Shuffle_ApplySpaceCurveDecoded(curvedRef.GetPixels(), refToUse->pixels, c_numBlocks * 64, elementSize, 4, c_blocksX * 4, true))
+                                {
+                                    referenceRGBA = curvedRef.GetPixels();
+                                }
+                                else
+                                {
+                                    Utility::Printf(GACL_Logging_Priority_Medium, L"Failed to apply space curve to reference data\n");
+                                }
+                            }
+                            else
+                            {
+                                referenceRGBA = refToUse->pixels;
+                            }
+                            Utility::Printf(GACL_Logging_Priority_Medium, L"Using provided reference image\n");
                         }
                     }
 
-                    if (refToUse && refMatchesMipDims) {
-                        referenceRGBA = refToUse->pixels;
-                        Utility::Printf(GACL_Logging_Priority_Medium, L"Using provided reference image\n");
+                    if (!referenceRGBA)
+                    {
+                        referenceRGBA = rgbaImg->pixels;
+                        Utility::Printf(GACL_Logging_Priority_Medium, L"No external reference; using decoded image as reference\n");
+                    }
+
+                    RDO_ErrorCode rdoResult = GACL_RDO_ComponentLevelEntropyReduce(
+                        (uint32_t)GetElementSize(siMeta.format),
+                        const_cast<uint8_t*>(localSrc.pixels),
+                        const_cast<void*>(referenceRGBA),
+                        (uint32_t)c_width,
+                        (uint32_t)c_height,
+                        siMeta.format,
+                        rdoOptions
+                    );
+
+                    if (clerImage == &clerScreenSpace)
+                    {
+                        // if we applied a space curve, uncurve the data
+                        std::vector<uint8_t> decurvedData(c_numBlocks * elementSize);
+                        GACL_Shuffle_ApplySpaceCurve(decurvedData.data(), encodedBlocks, c_numBlocks * elementSize, elementSize, c_blocksX * 4, false);
+                        memcpy(dst->pixels, decurvedData.data(), c_numBlocks * elementSize);
+                    }
+                    else
+                    {
+                        // Replace original image with clustered image
+                        memcpy(dst->pixels, encodedBlocks, c_numBlocks * elementSize);
+                    }
+                    _aligned_free(encodedBlocks);
+
+                    if (rdoResult != RDO_ErrorCode::OK &&
+                        rdoResult != RDO_ErrorCode::OK_NoAdvancedRDO)
+                    {
+                        Utility::Printf(GACL_Logging_Priority_High, L"ERROR: RDO failed on mip %zu array item %zu (error=%d)\n", mip, item, (int)rdoResult);
+                        return false;
                     }
                 }
 
-                if (!referenceRGBA)
+                if (siMeta.arraySize > 1)
                 {
-                    referenceRGBA = rgbaImg->pixels;
-                    Utility::Printf(GACL_Logging_Priority_Medium, L"No external reference; using decoded image as reference\n");
-                }              
-
-                RDO_ErrorCode rdoResult = GACL_RDO_ComponentLevelEntropyReduce(
-                    (uint32_t)GetElementSize(siMeta.format),
-                    const_cast<uint8_t*>(src->pixels),
-                    const_cast<void*>(referenceRGBA),
-                    (uint32_t)c_width,
-                    (uint32_t)c_height,
-                    siMeta.format,
-                    rdoOptions
-                );
-
-                if (rdoResult != RDO_ErrorCode::OK &&
-                    rdoResult != RDO_ErrorCode::OK_NoAdvancedRDO)
-                {
-                    Utility::Printf(GACL_Logging_Priority_High, L"ERROR: RDO failed on mip %zu array item %zu (error=%d)\n", mip, item, (int)rdoResult);
-                    return false;
+                    Utility::Printf(GACL_Logging_Priority_Medium, L"\nArray item %zu complete\n", item + 1);
                 }
-            }
-
-            if (siMeta.arraySize > 1)
-            {
-                Utility::Printf(GACL_Logging_Priority_Medium, L"\nArray item %zu complete\n", item + 1);
             }
         }
 
@@ -548,188 +864,22 @@ bool gacl::ProcessTexture(
     }
 #endif
 
-    DirectX::ScratchImage blerLinearSpace;
-    DirectX::ScratchImage blerScreenSpace;
-
-#if GACL_INCLUDE_BLER
-
-    // Determine when\how BLER should be applied
-    // If applying shuffle+compress, we need a full set of curved\linear BLER streams, if curved transforms are in the mix.  
-    //      Right now, that's easy, since they are all moved to experimental in current preview
-    //
-    // If we are simply exporting back to DDS, disable screen space for now, but when curved becomes the norm, we'll need just one version (curved or linear) per mip
-
-    bool genBlerScreenSpace = 
-        options.BlerOptions.Enabled && 
-        isSpaceCurveEligible && 
-        !options.CurveOptions.DisableSpaceCurve && 
-        options.ShuffleOptions.Enabled &&
-        options.ShuffleOptions.Transform == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL &&
-        (baseFormat == DXGI_FORMAT_BC1_TYPELESS || baseFormat == DXGI_FORMAT_BC3_TYPELESS || baseFormat == DXGI_FORMAT_BC4_TYPELESS || baseFormat == DXGI_FORMAT_BC5_TYPELESS || baseFormat == DXGI_FORMAT_BC7_TYPELESS);
-
-    size_t lastCurvedRdoMip = genBlerScreenSpace ? siMeta.mipLevels - 1 : 0;
-
-    if (options.BlerOptions.Enabled)
-    {
-        if (baseFormat == DXGI_FORMAT_BC1_TYPELESS ||
-            baseFormat == DXGI_FORMAT_BC2_TYPELESS ||
-            baseFormat == DXGI_FORMAT_BC3_TYPELESS ||
-            baseFormat == DXGI_FORMAT_BC4_TYPELESS ||
-            baseFormat == DXGI_FORMAT_BC5_TYPELESS ||
-            baseFormat == DXGI_FORMAT_BC7_TYPELESS)
-        {
-            
-            // perform Block-Level Entropy reduction in both screen-sapce and linear space by default...
-            DirectX::ScratchImage* blerImages[] = 
-            {
-                genBlerScreenSpace ? &blerScreenSpace : nullptr,
-                &blerLinearSpace
-            };
-            
-            for (DirectX::ScratchImage* blerImage : blerImages)
-            {
-                if (!blerImage) continue;
-
-                hr = blerImage->Initialize2D(siMeta.format, siMeta.width, siMeta.height, siMeta.arraySize, siMeta.mipLevels);
-                if (FAILED(hr)) {
-                    Utility::Printf(GACL_Logging_Priority_High, L"Failed to initialize output image.\n");
-                    return false;
-                }
-
-                bool curvedMipLevelReported = false;
-                for (size_t item = 0; item < siMeta.arraySize; ++item)
-                {
-                    for (size_t mip = 0; mip < siMeta.mipLevels; ++mip)
-                    {
-                        const DirectX::Image* dstConst = blerImage->GetImage(mip, item, 0);
-                        DirectX::Image* dst = const_cast<DirectX::Image*>(dstConst);
-
-                        // Copy source BC data
-                        const DirectX::Image* src = si.GetImage(mip, item, 0);
-
-                        size_t mipWidth = std::max<size_t>(1, siMeta.width >> mip);
-                        size_t mipHeight = std::max<size_t>(1, siMeta.height >> mip);
-                        size_t blocksX = (mipWidth + 3) / 4;
-                        size_t blocksY = (mipHeight + 3) / 4;
-                        size_t numBlocks = blocksX * blocksY;
-
-                        uint8_t* encodedBlocks = reinterpret_cast<uint8_t*>(_aligned_malloc(numBlocks * elementSize, 32));
-
-                        if (blerImage == &blerScreenSpace)
-                        {
-                            std::vector<uint8_t> curvedData(numBlocks* elementSize);
-                            if (!GACL_Shuffle_ApplySpaceCurve(curvedData.data(), src->pixels, numBlocks * elementSize, elementSize, blocksX * 4, true))
-                            {
-                                // If a given mip isn't eligible for curved transforms, smaller mips won't be either
-                                // Short circuit here, and skip all further mips.  But, later we need to copy across the data from the texture that had linear RDO.
-                                if (!curvedMipLevelReported)
-                                {
-                                    Utility::Printf(GACL_Logging_Priority_Medium, L"Space curve (16KB Z-order micro-tile) applied to largest %zu mips.\n", mip);
-                                    lastCurvedRdoMip = mip - 1;
-                                    curvedMipLevelReported = true;
-                                }
-                                _aligned_free(encodedBlocks);
-                                break;  
-                            }
-                            memcpy(encodedBlocks, curvedData.data(), numBlocks * elementSize);
-
-#if _DEBUG
-                            std::vector<uint8_t> uncurvedData(numBlocks* elementSize);
-                            GACL_Shuffle_ApplySpaceCurve(uncurvedData.data(), curvedData.data(), numBlocks * elementSize, elementSize, blocksX*4, false);
-                            if (memcmp(uncurvedData.data(), src->pixels, numBlocks * elementSize)) __debugbreak();
-#endif
-                        }
-                        else
-                        {
-                            memcpy(encodedBlocks, src->pixels, numBlocks * elementSize);
-                        }
-                        DirectX::Image localSrc = *src;     // copy original metadata
-                        localSrc.pixels = encodedBlocks;    // but with local (possibly curved) data we can read\write for BLER
-
-                        // Decode raw RGBA, though a developer might instead pull this in from elsewhere if they have original art
-                        DirectX::TexMetadata mipMetadata = siMeta;
-                        mipMetadata.width = mipWidth;
-                        mipMetadata.height = mipHeight;
-                        mipMetadata.mipLevels = 1;
-                        mipMetadata.arraySize = 1;
-                        mipMetadata.dimension = DirectX::TEX_DIMENSION_TEXTURE2D;
-                        DirectX::ScratchImage decoded;
-                        hr = DirectX::Decompress(&localSrc, 1, mipMetadata, isGammaFormat ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM, decoded);
-                        if (FAILED(hr)) {
-                            Utility::Printf(GACL_Logging_Priority_High, L"Failed to decode mip %ull array item %ull\n", mip, item);
-                            _aligned_free(encodedBlocks);
-                            return false;
-                        }
-
-                        const DirectX::Image* rgbaImg = decoded.GetImage(0, 0, 0);
-                        uint8_t* decodedBlocks = reinterpret_cast<uint8_t*>(_aligned_malloc(numBlocks * 16 * 4, 32));
-                        GACL_RDO_R8G8B8A8LinearToBlockGrouped(decodedBlocks, rgbaImg->pixels, rgbaImg->rowPitch, mipWidth, mipHeight);
-
-
-
-                        assert(numBlocks >> 32 == 0);
-                        GACL_RDO_BlockLevelEntropyReduce(uint32_t(numBlocks), encodedBlocks, (uint32_t)elementSize, decodedBlocks, options.BlerOptions.TargetUniqueBlockReduction);
-
-                        if (blerImage == &blerScreenSpace)
-                        {
-                            // if we applied a space curve, uncurve the data
-                            std::vector<uint8_t> decurvedData(numBlocks* elementSize);
-                            GACL_Shuffle_ApplySpaceCurve(decurvedData.data(), encodedBlocks, numBlocks * elementSize, elementSize, blocksX * 4, false);
-                            memcpy(dst->pixels, decurvedData.data(), numBlocks * elementSize);
-                        }
-                        else
-                        {
-                            // Replace original image with clustered image
-                            memcpy(dst->pixels, encodedBlocks, numBlocks * elementSize);
-                        }
-
-                        _aligned_free(encodedBlocks);
-                        _aligned_free(decodedBlocks);
-                    }
-                }
-            }
-            if (genBlerScreenSpace && lastCurvedRdoMip < siMeta.mipLevels)
-            {
-                // If we're applying RDO to a whole mip chain, with curved transforms enabled, smaller mips won't be eligable, just copy over the linear RDO data
-                for (size_t item = 0; item < siMeta.arraySize; ++item)
-                {
-                    for (size_t mip = lastCurvedRdoMip + 1; mip < siMeta.mipLevels; ++mip)
-                    {
-                        DirectX::Image* dstCurved = const_cast<DirectX::Image*>(blerScreenSpace.GetImage(mip, item, 0));
-                        const DirectX::Image* srcLinear = blerLinearSpace.GetImage(mip, item, 0);
-                        memcpy(dstCurved->pixels, srcLinear->pixels, dstCurved->slicePitch);
-                    }
-                }
-            }
-        }
-        else
-        {
-            Utility::Printf(GACL_Logging_Priority_High, L"ERROR: Block-Level Entropy Reduction not implemented for texture format.\n");
-            return false;
-        }
-    }
-#else
-    bool genBlerScreenSpace = false;
-#endif  // GACL_INCLUDE_BLER
-
-    DirectX::ScratchImage* outImage = nullptr;
-    if (options.BlerOptions.Enabled)
-    {
-        outImage = genBlerScreenSpace ? &blerScreenSpace : &blerLinearSpace;
-    }
-#if GACL_INCLUDE_CLER
-    else if (options.ClerOptions.Enabled)
-    {
-        outImage = &si;
-    }
-#endif
+    DirectX::ScratchImage* outImage =
+        genClerScreenSpace ? &clerScreenSpace :
+        genClerLinearSpace ? &clerLinearSpace :
+        genBlerScreenSpace ? &blerScreenSpace :
+        genBlerLinearSpace ? &blerLinearSpace : nullptr;
 
 
     if (options.ShuffleOptions.Enabled == true)
     {
-        DirectX::ScratchImage& srcForCurvedTransforms = blerScreenSpace;
-        DirectX::ScratchImage& srcForUncurvedTransforms = options.BlerOptions.Enabled ? blerLinearSpace : si;
-        outImage = (genBlerScreenSpace ? &srcForCurvedTransforms : &srcForUncurvedTransforms);
+        DirectX::ScratchImage& srcForCurvedTransforms = genClerScreenSpace ? clerScreenSpace : blerScreenSpace;
+#if GACL_INCLUDE_CLER
+        DirectX::ScratchImage& srcForUncurvedTransforms = genClerLinearSpace ? clerLinearSpace : genBlerLinearSpace ? blerLinearSpace : si;
+#else
+        DirectX::ScratchImage& srcForUncurvedTransforms = options.BlerOptions.Enabled ? rdoLinearSpace : si;
+#endif
+        outImage = (genClerScreenSpace || genBlerScreenSpace) ? &srcForCurvedTransforms : &srcForUncurvedTransforms;
 
         // Experimental transforms include curved (16KB micro-tile) patterns.
         // Those transforms allow for the application of RDO in curved space, which can yield 10-20% additional compressed size savings
@@ -742,7 +892,7 @@ bool gacl::ProcessTexture(
             Utility::Printf(GACL_Logging_Priority_Medium, L"         data.  This yields improved quality and compression ratio for the non-shuffled fallback.\n");
             Utility::Printf(GACL_Logging_Priority_Medium, L"\n");
             Utility::Printf(GACL_Logging_Priority_Medium, L"         When Shuffle+Compress is applied independently of entropy reduction, ensure the texture was previously\n");
-            Utility::Printf(GACL_Logging_Priority_Medium, L"         exported from gacl.exe with Entropy Reduction and Shuffle+Compress enabled, if entropy reduction is desired.\n");
+            Utility::Printf(GACL_Logging_Priority_Medium, L"         exported from gacl.exe with entropy Reduction and Shuffle+Compress enabled, if entropy reduction is desired.\n");
             Utility::Printf(GACL_Logging_Priority_Medium, L"\n");
         }
 
@@ -767,8 +917,8 @@ bool gacl::ProcessTexture(
                     const size_t mipSize = elementSize * blocksX * blocksY;
 
                     const bool mipIsCurvedTransformEligible = GACL_Shuffle_ApplySpaceCurve(nullptr, nullptr, mipSize, elementSize, blocksX * 4, true);
-                    const bool mipHasCurvedRdoData = genBlerScreenSpace && mipIsCurvedTransformEligible;
-                    const DirectX::Image* imgForCurve = genBlerScreenSpace ? srcForCurvedTransforms.GetImage(mip, item, 0) : nullptr;
+                    const bool mipHasCurvedRdoData = (genBlerScreenSpace || genClerScreenSpace) && mipIsCurvedTransformEligible;
+                    const DirectX::Image* imgForCurve = (genBlerScreenSpace || genClerScreenSpace) ? srcForCurvedTransforms.GetImage(mip, item, 0) : nullptr;
 
                     uint8_t zstdCompressionLevel = options.CompressOptions.Level;
                     int tbs = options.CompressOptions.TargetBlockSize;
@@ -803,7 +953,7 @@ bool gacl::ProcessTexture(
 
                         // if we have mip data that's had RDO applied in screen space, use that.
                         // else let the API make a curved copy of the data that would be used for non-curve transforms, so long as the mip is eligible
-                        const uint8_t* curvedRdoTextureData = mipHasCurvedRdoData ? imgForCurve->pixels : (mipIsCurvedTransformEligible ? imgNoCurve->pixels : nullptr);
+                        const uint8_t* curvedRdoTextureData = mipHasCurvedRdoData ? imgForCurve->pixels : ((mipIsCurvedTransformEligible && !options.CurveOptions.DisableSpaceCurve) ? imgNoCurve->pixels : nullptr);
                         SHUFFLE_COMPRESS_PARAMETERS params = { mipSize, siMeta.format, imgNoCurve->pixels, {zstdCompressionLevel, tbs}, {4 * blocksX, curvedRdoTextureData} };
 
 
