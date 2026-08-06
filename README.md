@@ -37,7 +37,7 @@ Shader sources have been included for visibility and public feedback.  This incl
 Location: `\\Shaders\\Shuffle`
 
 **Shuffle shader validation suite**
-Gtest based set of tests for validating any changes to shaders or patterns.  This new test project is included in the root solution file or can be found at \\Tests\\shader\_tests.
+Gtest based set of tests for validating any changes to shaders or patterns.  This new test project is included in the root solution file or can be found at `\\Tests\\shader\_tests`.
 
 **Shuffle shader sample**
 D3D UI sample that demonstrates the raw usage of all shaders, implementing the reversal of most GACL transforms in GPU compute.  Given a launch parameter “-path <path\_to\_dds>”, the texture will be loaded, shuffled though the GACL, and then unshuffled on GPU using the appropriate shader for the transformID.
