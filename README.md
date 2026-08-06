@@ -34,15 +34,15 @@ The front-end sample integration has been extended to allow for BLER+CLER stacki
 
 **Unshuffle shader sources (including BC7)**
 Shader sources have been included for visibility and public feedback.  This includes the BC1\\3\\4\\5 unshuffle shaders integrated into the DirectStorage 1.4 preview #1, as well as the BC1\\3\\4\\5\\7 shaders planned for pickup in future DirectStorage releases.
-Location: `\Shaders\Shuffle`
+Location: `\\Shaders\\Shuffle`
 
 **Shuffle shader validation suite**
-Gtest based set of tests for validating any changes to shaders or patterns.  This new test project is included in the root solution file or can be found at `\Tests\shader_tests`.
+Gtest based set of tests for validating any changes to shaders or patterns.  This new test project is included in the root solution file or can be found at `\\Tests\\shader_tests`.
 
 **Shuffle shader sample**
 D3D UI sample that demonstrates the raw usage of all shaders, implementing the reversal of most GACL transforms in GPU compute.  Given a launch parameter “-path <path\_to\_dds>”, the texture will be loaded, shuffled though the GACL, and then unshuffled on GPU using the appropriate shader for the transformID.
 
-The project is standalone and can be found at `\Samples\RawShaderUnshuffleDemo`.
+The project is standalone and can be found at `\\Samples\\RawShaderUnshuffleDemo`.
 
 
 
@@ -54,8 +54,8 @@ GACL is currently **in preview**. We are actively seeking feedback from the comm
 
 As a preview:
 
-* **APIs are subject to change.** Interfaces documented in this release, including those in `gacl.h`, `shuffle.h`, `blockentropy.h`, and `ml_RDO.h`, may be revised based on feedback from the community.
-* **Experimental features** (enabled via `GACL_EXPERIMENTAL`) are particularly likely to evolve or be replaced.
+* **APIs are subject to change.** Interfaces documented in this release, including those in `gacl.h`, `shuffle.h`, `blockentropy.h`, and `ml\_RDO.h`, may be revised based on feedback from the community.
+* **Experimental features** (enabled via `GACL\_EXPERIMENTAL`) are particularly likely to evolve or be replaced.
 
 We would love to hear from you - please use [GitHub Issues](https://github.com/microsoft/Game-Asset-Conditioning-Library/issues) to report bugs, share results, or suggest improvements. Pull requests are also welcome; see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
