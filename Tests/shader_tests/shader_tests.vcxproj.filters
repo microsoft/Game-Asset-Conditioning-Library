@@ -50,128 +50,48 @@
     <ClCompile Include="Processing.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="..\Shaders\UnshuffleCSMode0.hlsl">
-      <Filter>Shaders\UnshufflePerMode</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\UnshuffleCSMode1.hlsl">
-      <Filter>Shaders\UnshufflePerMode</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\UnshuffleCSMode2.hlsl">
-      <Filter>Shaders\UnshufflePerMode</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\UnshuffleCSMode3.hlsl">
-      <Filter>Shaders\UnshufflePerMode</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\UnshuffleCSMode4.hlsl">
-      <Filter>Shaders\UnshufflePerMode</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\UnshuffleCSMode5.hlsl">
-      <Filter>Shaders\UnshufflePerMode</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\UnshuffleCSMode6.hlsl">
-      <Filter>Shaders\UnshufflePerMode</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\UnshuffleCSMode7.hlsl">
-      <Filter>Shaders\UnshufflePerMode</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\UnshuffleCSMode8.hlsl">
-      <Filter>Shaders\UnshufflePerMode</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\PrepassB.hlsl">
-      <Filter>Shaders\PrepassShaders</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\PrefixSumPassCS_MinWave4.hlsl">
-      <Filter>Shaders\PrefixSumShaders</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\PrefixSumPassCS_MinWave8.hlsl">
-      <Filter>Shaders\PrefixSumShaders</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\PrefixSumPassCS_MinWave16.hlsl">
-      <Filter>Shaders\PrefixSumShaders</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\PrefixSumPassCS_MinWave32.hlsl">
-      <Filter>Shaders\PrefixSumShaders</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\PrefixSumPassCS_MinWave64.hlsl">
-      <Filter>Shaders\PrefixSumShaders</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\PrefixSumPassCS_MinWave128.hlsl">
-      <Filter>Shaders\PrefixSumShaders</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\BinningPassCS_MinWave4.hlsl">
-      <Filter>Shaders\BinningPassShaders</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\BinningPassCS_MinWave8.hlsl">
-      <Filter>Shaders\BinningPassShaders</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\BinningPassCS_MinWave16.hlsl">
-      <Filter>Shaders\BinningPassShaders</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\BinningPassCS_MinWave32.hlsl">
-      <Filter>Shaders\BinningPassShaders</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\BinningPassCS_MinWave64.hlsl">
-      <Filter>Shaders\BinningPassShaders</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\BinningPassCS_MinWave128.hlsl">
-      <Filter>Shaders\BinningPassShaders</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\UnshuffleBC1.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\UnshuffleBC3.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\UnshuffleBC4.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\UnshuffleBC5.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\UnshuffleBC1x.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\UnshuffleBC3x.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\UnshuffleBC4x.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\UnshuffleBC5x.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
-    <FxCompile Include="..\Shaders\UnshuffleCurveOnly.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\BinningPassCS_MinWave128.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\BinningPassCS_MinWave16.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\BinningPassCS_MinWave32.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\BinningPassCS_MinWave4.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\BinningPassCS_MinWave64.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\BinningPassCS_MinWave8.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\PrefixSumPassCS_MinWave128.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\PrefixSumPassCS_MinWave16.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\PrefixSumPassCS_MinWave32.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\PrefixSumPassCS_MinWave4.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\PrefixSumPassCS_MinWave64.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\PrefixSumPassCS_MinWave8.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\PrepassB.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC1.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC1x.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC3.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC3x.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC4.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC4x.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC5.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC5x.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCurveOnly.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCSMode0.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCSMode1.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCSMode2.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCSMode3.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCSMode4.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCSMode5.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCSMode6.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCSMode7.hlsl" />
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCSMode8.hlsl" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
-    <None Include="..\Shaders\BinningPassCommonCS.hlsli">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="..\Shaders\DerotationHelpers.hlsli">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="..\Shaders\EndpointOrderingHelpers.hlsli">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="..\Shaders\PrefixSumCommonCS.hlsli">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="..\Shaders\PrepassCS.hlsli">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="..\Shaders\SharedDefinitions.hlsli">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="..\Shaders\UnshuffleCommonCS.hlsli">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="..\Shaders\UnshuffleHelpers.hlsli">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="..\Shaders\Shared.hlsli">
-      <Filter>Shaders</Filter>
-    </None>
+    <None Include="..\..\Shaders\Shuffle\BinningPassCommonCS.hlsli" />
+    <None Include="..\..\Shaders\Shuffle\DerotationHelpers.hlsli" />
+    <None Include="..\..\Shaders\Shuffle\EndpointOrderingHelpers.hlsli" />
+    <None Include="..\..\Shaders\Shuffle\PrefixSumCommonCS.hlsli" />
+    <None Include="..\..\Shaders\Shuffle\PrepassCS.hlsli" />
+    <None Include="..\..\Shaders\Shuffle\Shared.hlsli" />
+    <None Include="..\..\Shaders\Shuffle\SharedDefinitions.hlsli" />
+    <None Include="..\..\Shaders\Shuffle\UnshuffleCommonCS.hlsli" />
+    <None Include="..\..\Shaders\Shuffle\UnshuffleHelpers.hlsli" />
   </ItemGroup>
 </Project>

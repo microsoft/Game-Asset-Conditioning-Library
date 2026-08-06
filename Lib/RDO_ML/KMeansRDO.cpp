@@ -69,11 +69,14 @@ std::vector<std::vector<uint8_t>> KMeansRDO::ClusterRDOWithLoss(
     float lowerLossBound,
     int numThreads,
     bool plusplus,
-    Ort::Session* onnxModelPtr)
+    Ort::Session* onnxModelPtr,
+    uint32_t chunkId)
 {
-    Utility::Printf(GACL_Logging_Priority_Medium, L"\nEndpoints: %zu, k range: [%d, %d]\n", endpoints.size(), minK, maxK);
-    Utility::Printf(GACL_Logging_Priority_Medium, L"Loss metric: %s, bounds: [%.4f, %.4f]\n", LossMetrics::ToString(lossMetric).c_str(), lowerLossBound, upperLossBound);
-
+    if (chunkId == 0)   // settings will be uniform across the texture, just log once
+    {
+        Utility::Printf(GACL_Logging_Priority_Low, L"Endpoints: %zu, k range: [%d, %d]\n", chunkId, endpoints.size(), minK, maxK);
+        Utility::Printf(GACL_Logging_Priority_Low, L"Loss metric: %s, bounds: [%.4f, %.4f]\n", chunkId, LossMetrics::ToString(lossMetric).c_str(), lowerLossBound, upperLossBound);
+    }
     if (endpoints.empty() || modes.size() != numBlocks)
     {
         Utility::Printf(GACL_Logging_Priority_High, L"ERROR: invalid inputs (endpoints=%zu, modes=%zu, blocks=%u).\n", endpoints.size(), modes.size(), numBlocks);
@@ -96,15 +99,18 @@ std::vector<std::vector<uint8_t>> KMeansRDO::ClusterRDOWithLoss(
             Utility::Printf(GACL_Logging_Priority_Medium, L"Small mip level detected (%ux%u) — using basic k-means (k=%d).\n", imageWidth, imageHeight, maxK);
         }
 
-        auto centroids = InitializeCentroids(endpoints, maxK, plusplus, lowerLossBound, upperLossBound);
-        auto clustered = ClusterEventing(endpoints, maxK, iterations, numThreads, centroids);
+        auto centroids = InitializeCentroids(endpoints, maxK, plusplus, lowerLossBound, upperLossBound, chunkId);
+        auto clustered = ClusterEventing(endpoints, maxK, iterations, numThreads, centroids, chunkId);
         Utility::Printf(GACL_Logging_Priority_Medium, L"Basic k-means fallback completed.\n\n");
         return clustered;
     }
 
     if (needsModels && !hasModels)
     {
-        Utility::Printf(GACL_Logging_Priority_Medium, L"Warning: loss metric %s requires models, but no models provided; using MSE loss instead.\n", LossMetrics::ToString(lossMetric).c_str());
+        if (chunkId == 0)   // only warn once per higher level call, not once per chunk\region
+        {
+            Utility::Printf(GACL_Logging_Priority_Medium, L"Warning: loss metric %s requires models, but no models provided; using MSE loss instead.\n", LossMetrics::ToString(lossMetric).c_str());
+        }
         lossMetric = LossMetrics::Metric::MSE;
     }
 
@@ -240,12 +246,12 @@ std::vector<std::vector<uint8_t>> KMeansRDO::ClusterRDOWithLoss(
     bool foundAcceptable = false;
     float bestLoss = std::numeric_limits<float>::infinity();
     std::vector<std::vector<uint8_t>> bestClustered;
-    auto cents = InitializeCentroids(endpoints, maxK, plusplus, lowerLossBound, upperLossBound);
+    auto cents = InitializeCentroids(endpoints, maxK, plusplus, lowerLossBound, upperLossBound, chunkId);
 
     while (kLow <= kHigh && k > 0)
     {
         std::vector<std::vector<uint8_t>> curr_cents(cents.begin(), cents.begin() + k);
-        auto clustered = ClusterEventing(endpoints, k, iterations, numThreads, curr_cents);
+        auto clustered = ClusterEventing(endpoints, k, iterations, numThreads, curr_cents, chunkId);
 
         if (clustered.size() != size_t(numBlocks) * 2 || (!clustered.empty() && clustered[0].size() < 3))
         {
@@ -304,7 +310,7 @@ std::vector<std::vector<uint8_t>> KMeansRDO::ClusterRDOWithLoss(
                 lossMetric);
         }
 
-        Utility::Printf(GACL_Logging_Priority_Medium, L"Loss: %.6f\n", loss);
+        Utility::Printf(GACL_Logging_Priority_Low, L"C:%d  Loss: %.6f\n", chunkId, loss);
 
         const float targetMid = 0.5f * (lowerLossBound + upperLossBound);
         const float curDist = std::abs(loss - targetMid);
@@ -318,7 +324,7 @@ std::vector<std::vector<uint8_t>> KMeansRDO::ClusterRDOWithLoss(
 
         if (loss <= upperLossBound && loss >= lowerLossBound)
         {
-            Utility::Printf(GACL_Logging_Priority_Medium, L"Acceptable loss found at k=%d (%.6f)\n", k, loss);
+            Utility::Printf(GACL_Logging_Priority_Low, L"C:%d  Acceptable loss found at k=%d (%.6f)\n", chunkId, k, loss);
             foundAcceptable = true;
             if (bestClustered.empty())
             {
@@ -345,16 +351,16 @@ std::vector<std::vector<uint8_t>> KMeansRDO::ClusterRDOWithLoss(
 
     if (!foundAcceptable)
     {
-        Utility::Printf(GACL_Logging_Priority_Medium, L"No exact solution; using best loss: %.6f\n\n", bestLoss);
+        Utility::Printf(GACL_Logging_Priority_Low, L"C:%d  No exact solution; using best loss: %.6f\n\n", chunkId, bestLoss);
     }
     else
     {
-        Utility::Printf(GACL_Logging_Priority_Medium, L"Success: best loss=%.6f\n", bestLoss);
+        Utility::Printf(GACL_Logging_Priority_Low, L"C:%d  Success: best loss=%.6f\n", chunkId, bestLoss);
     }
 
     if (bestClustered.empty())
     {
-        return ClusterEventing(endpoints, maxK, iterations, numThreads, cents);
+        return ClusterEventing(endpoints, maxK, iterations, numThreads, cents, chunkId);
     }
     return bestClustered;
 }
@@ -444,9 +450,10 @@ std::vector<std::vector<uint8_t>> KMeansRDO::ClusterEventing(
     int k,
     int iterations,
     int numThreads,
-    std::vector<std::vector<uint8_t>> centroids)
+    std::vector<std::vector<uint8_t>> centroids,
+    uint32_t chunkId)
 {
-    Utility::Printf(GACL_Logging_Priority_Medium, L"Running k-means with input: %zu endpoints, k=%d, iterations=%d, numThreads=%d\n", endpoints.size(), k, iterations, numThreads);
+    Utility::Printf(GACL_Logging_Priority_Low, L"C:%d  Running k-means with input: %zu endpoints, k=%d, iterations=%d, numThreads=%d\n", chunkId, endpoints.size(), k, iterations, numThreads);
 
     std::vector<std::vector<uint8_t>> result = endpoints;
 
@@ -710,10 +717,13 @@ std::vector<std::vector<uint8_t>> KMeansRDO::InitializeCentroids(
     int k,
     bool plusplus,
     float lowerLossBound,
-    float upperLossBound)
+    float upperLossBound,
+    uint32_t chunkId)
 {
-    Utility::Printf(GACL_Logging_Priority_Medium, L"\nInitializing centroids (k=%d, plusplus=%d).\n", k, plusplus);
-
+    if (chunkId == 0) // only log once, since settings will be identical (or nearly so) between chunks
+    {
+        Utility::Printf(GACL_Logging_Priority_Low, L"Initializing centroids (k=%d, plusplus=%d).\n", k, plusplus);
+    }
     std::vector<std::vector<uint8_t>> centroids;
 
     if (data.empty() || k <= 0)
@@ -755,10 +765,16 @@ std::vector<std::vector<uint8_t>> KMeansRDO::InitializeCentroids(
             }
 
             samplePtr = &sample;
-            Utility::Printf(GACL_Logging_Priority_Medium, L"Sampled %zu points (%.0f%%) from %zu for k-means++ centroid initialization.\n", sample.size(), samplePercent * 100.0f, data.size());
+            if (chunkId == 0) // only log once, since settings will be identical (or nearly so) between chunks
+            {
+                Utility::Printf(GACL_Logging_Priority_Low, L"Sampling %zu points (%.0f%%) from %zu for k-means++ centroid initialization.\n", sample.size(), samplePercent * 100.0f, data.size());
+            }
         } else {
             samplePtr = &data;
-            Utility::Printf(GACL_Logging_Priority_Medium, L"Using all %zu points for k-means++ centroid initialization.\n", data.size());
+            if (chunkId == 0) // only log once, since settings will be identical (or nearly so) between chunks
+            {
+                Utility::Printf(GACL_Logging_Priority_Low, L"Using all %zu points for k-means++ centroid initialization.\n", data.size());
+            }
         }
 
         const auto& sampleData = *samplePtr;
@@ -813,7 +829,10 @@ std::vector<std::vector<uint8_t>> KMeansRDO::InitializeCentroids(
         }
     }
 
-    Utility::Printf(GACL_Logging_Priority_Medium, L"%zu centroids initialized.\n\n", centroids.size());
+    if (chunkId == 0) // only log once, since settings will be identical (or nearly so) between chunks
+    {
+        Utility::Printf(GACL_Logging_Priority_Low, L"%zu centroids initialized.\n\n", centroids.size());
+    }
     return centroids;
 }
 

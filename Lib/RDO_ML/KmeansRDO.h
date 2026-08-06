@@ -25,14 +25,16 @@ namespace KMeansRDO
         int k,
         bool plusplus,
         float lowerLossBound,
-        float upperLossBound);
+        float upperLossBound,
+        uint32_t chunkId);
 
     std::vector<std::vector<uint8_t>> ClusterEventing(
         const std::vector<std::vector<uint8_t>>& endpoints,
         int k,
         int iterations,
         int numThreads,
-        std::vector<std::vector<uint8_t>> centroids);
+        std::vector<std::vector<uint8_t>> centroids,
+        uint32_t chunkId);
 
     std::vector<int> AssignClustersParallelized(
         const std::vector<std::vector<uint8_t>>& data,
@@ -57,7 +59,8 @@ namespace KMeansRDO
         float lowerLossBound,
         int numThreads,
         bool plusplus,
-        Ort::Session* onnxModelPtr);
+        Ort::Session* onnxModelPtr,
+        uint32_t chunkId);
 
     void ApplyBC1Endpoints(
         uint8_t* encodedData,

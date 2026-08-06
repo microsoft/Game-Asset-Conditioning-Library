@@ -415,7 +415,8 @@ RDO_ErrorCode GACL_RDO_ComponentLevelEntropyReduce(
                             options.lossMin,
                             threadsPerChunk,
                             options.usePlusPlus,
-                            onnxModel
+                            onnxModel,
+                            chunk
                         );
                     }
                     catch (...)
@@ -431,7 +432,8 @@ RDO_ErrorCode GACL_RDO_ComponentLevelEntropyReduce(
                         maxK,
                         options.usePlusPlus,
                         options.lossMin,
-                        options.lossMax
+                        options.lossMax,
+                        chunk
                     );
 
                     clustered = KMeansRDO::ClusterEventing(
@@ -439,7 +441,8 @@ RDO_ErrorCode GACL_RDO_ComponentLevelEntropyReduce(
                         maxK,
                         iterations,
                         threadsPerChunk,
-                        centroids
+                        centroids,
+                        chunk
                     );
                 }
 
