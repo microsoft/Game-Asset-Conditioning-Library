@@ -18,29 +18,32 @@ implementing the reverse transform at data retrieval time.
 
 # Preview Release #2 (What's New)
 
-As a step in working towards a general release, this preview #2 primarily gives visibility into forward looking features, **including BC7**.  The core functionality of the Game Asset Conditioning Library remains largely unchanged.  Texture shuffle transforms that are not yet supported within the DirectStorage runtime are still marked experimental.  
+As a step in working towards a general release, this preview #2 primarily gives visibility into forward looking features, **including BC7**.  The core functionality of the Game Asset Conditioning Library remains largely unchanged.  Texture shuffle transforms that are not yet supported within the DirectStorage runtime are still marked experimental. 
+ 
 However, as transforms near completion for inclusion into the supported list, there is a desire to increase visibility into future plans and invite feedback on the transforms and shader implementations.  Additionally, experimental work on CLER continues, as avenues of stacking technologies are investigated.
 
 **Included in preview #2:**
 
 **CLER functional updates**
-Component Level Entropy Reduction RDO has been extended with the ability to operate on smaller regions within a texture, both within linear memory layout and the 16KB space curve layout.  For BC1 textures, this means that Block-Level Entropy Reduction and Component-Level Entropy Reduction can be applied in series when experimental features are enabled.  
+Component Level Entropy Reduction RDO has been extended with the ability to operate on smaller regions within a texture, both within linear memory layout and the 16KB space curve layout.  For BC1 textures, this means that Block-Level Entropy Reduction and Component-Level Entropy Reduction can be applied in series when experimental features are enabled.
+
 
 
 **Gacl.exe updates**
-The front-end sample integration has been extended to allow for BLER+CLER stacking for BC1, allowing for experiments that combine the two techniques.
+The front-end sample integration has been extended to allow for BLER+CLER stacking for BC1, allowing for experiments that combine the two techniques.  Whole block merging is performed first, through the BLER algorithm, and then partial-block merging through CLER optionally second.
 
 **Unshuffle shader sources (including BC7)**
-Shader sources have been included for visibility and public feedback.  This includes the BC1\3\4\5 unshuffle shaders integrated into the DirectStorage 1.4 preview #1, as well as the BC1\3\4\5\7 shaders planned for pickup in future DirectStorage releases.
-Location: \Shaders\Shuffle
+Shader sources have been included for visibility and public feedback.  This includes the BC1\\3\\4\\5 unshuffle shaders integrated into the DirectStorage 1.4 preview #1, as well as the BC1\\3\\4\\5\\7 shaders planned for pickup in future DirectStorage releases.
+Location: `\\Shaders\\Shuffle`
 
-**Shuffle shader validation suite** 
-Gtest based set of tests for validating any changes to shaders or patterns.  This new test project is included in the root solution file or can be found at \Tests\shader_tests.
+**Shuffle shader validation suite**
+Gtest based set of tests for validating any changes to shaders or patterns.  This new test project is included in the root solution file or can be found at \\Tests\\shader\_tests.
 
 **Shuffle shader sample**
-D3D UI sample that demonstrates the raw usage of all shaders, implementing the reversal of most GACL transforms in GPU compute.  Given a launch parameter “-path <path_to_dds>”, the texture will be loaded, shuffled though the GACL, and then unshuffled on GPU using the appropriate shader for the transformID:
-   
-The project is standalone and can be found at \Samples\RawShaderUnshuffleDemo.
+D3D UI sample that demonstrates the raw usage of all shaders, implementing the reversal of most GACL transforms in GPU compute.  Given a launch parameter “-path <path\_to\_dds>”, the texture will be loaded, shuffled though the GACL, and then unshuffled on GPU using the appropriate shader for the transformID.
+
+The project is standalone and can be found at `\\Samples\\RawShaderUnshuffleDemo`.
+
 
 
 
@@ -51,8 +54,8 @@ GACL is currently **in preview**. We are actively seeking feedback from the comm
 
 As a preview:
 
-* **APIs are subject to change.** Interfaces documented in this release, including those in `gacl.h`, `shuffle.h`, `blockentropy.h`, and `ml\_RDO.h`, may be revised based on feedback from the community.
-* **Experimental features** (enabled via `GACL\_EXPERIMENTAL`) are particularly likely to evolve or be replaced.
+* **APIs are subject to change.** Interfaces documented in this release, including those in `gacl.h`, `shuffle.h`, `blockentropy.h`, and `ml\\\_RDO.h`, may be revised based on feedback from the community.
+* **Experimental features** (enabled via `GACL\\\_EXPERIMENTAL`) are particularly likely to evolve or be replaced.
 
 We would love to hear from you - please use [GitHub Issues](https://github.com/microsoft/Game-Asset-Conditioning-Library/issues) to report bugs, share results, or suggest improvements. Pull requests are also welcome; see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
@@ -111,7 +114,7 @@ git submodule update
 
 Primary build solution can be found at:
 
-`<root>\\gacl.sln`
+`<root>\\\\gacl.sln`
 
 Gtest-based validation projects can be found in the "tests" folder or solution area, and can be directly launched with F5 within Visual Studio.
 
@@ -126,7 +129,7 @@ These correspond to three general functional areas:
 * Block-Level Entropy Reduction (BLER)
 * Component-Level Entropy Reduction (CLER)
 
-> Note on experimental\\\\future features: These are turned off by default using the `GACL\_EXPERIMENTAL` C++ define.  See `gacl.h` for further information on experimental features.
+> Note on experimental\\\\\\\\future features: These are turned off by default using the `GACL\\\_EXPERIMENTAL` C++ define.  See `gacl.h` for further information on experimental features.
 
 ## Block-level Entropy Reduction, aka BLER (blockentropy.h):
 
@@ -137,26 +140,26 @@ each 4x4 block of pixels.  A second API is included to quickly convert linear da
 BLER is generally able to reduce the compressed stream size by up to 50% while maintaining PSNR values of 40dB+.
 
 ```
-void GACL\_RDO\_BlockLevelEntropyReduce(  
-    uint32\_t numBlocks,
-    void\* encodedData,  
-    uint32\_t bcElementSizeBytes,  
-    void\* decodedR8G8B8A8,  
+void GACL\\\_RDO\\\_BlockLevelEntropyReduce(  
+    uint32\\\_t numBlocks,
+    void\\\* encodedData,  
+    uint32\\\_t bcElementSizeBytes,  
+    void\\\* decodedR8G8B8A8,  
     float uniqueBlockReduce,
-    float maxDistSq = 64.0f \* 4.0f,  
-    float avgDistSq = 64.0f \* 0.5f
+    float maxDistSq = 64.0f \\\* 4.0f,  
+    float avgDistSq = 64.0f \\\* 0.5f
 );
 ```
 
 
 
 ```
-void GACL\_RDO\_R8G8B8A8LinearToBlockGrouped(
-    uint8\_t\* blockGroupedData,  
-    const uint8\_t\* linearR8G8B8A8Data,  
-    size\_t rowPitch,
-    size\_t width,  
-    size\_t height  
+void GACL\\\_RDO\\\_R8G8B8A8LinearToBlockGrouped(
+    uint8\\\_t\\\* blockGroupedData,  
+    const uint8\\\_t\\\* linearR8G8B8A8Data,  
+    size\\\_t rowPitch,
+    size\\\_t width,  
+    size\\\_t height  
 );
 ```
 
@@ -184,30 +187,30 @@ Shuffle+Compress will generally yield up to a relative 10% reduction in compress
 shuffling.  Savings can vary widely by texture.
 
 ```
-HRESULT GACL\_ShuffleCompress\_BCn(
-    uint8\_t\* dest,
-    GACL\_SHUFFLE\_TRANSFORM\& destTransformId,  
-    size\_t\& destBytesWritten,  
-    SHUFFLE\_COMPRESS\_PARAMETERS\& params   
+HRESULT GACL\\\_ShuffleCompress\\\_BCn(
+    uint8\\\_t\\\* dest,
+    GACL\\\_SHUFFLE\\\_TRANSFORM\\\& destTransformId,  
+    size\\\_t\\\& destBytesWritten,  
+    SHUFFLE\\\_COMPRESS\\\_PARAMETERS\\\& params   
 );
 ```
 
-Returns `S\_OK` if shuffle+compress reduced the size of the data, in which case the compressed stream is written to `dest`. The transform ID
+Returns `S\\\_OK` if shuffle+compress reduced the size of the data, in which case the compressed stream is written to `dest`. The transform ID
 in `destTransformID` will be used in Direct Storage read requests for queueing the matching unshuffle transform at runtime.
 
-Returns `S\_FALSE` if shuffle+compress did not produce any reduction in size.  In this case a title should package the asset in uncompressed form.
+Returns `S\\\_FALSE` if shuffle+compress did not produce any reduction in size.  In this case a title should package the asset in uncompressed form.
 
 Shuffle+Compress requests use zstd compression by default, but can be customized by replacing the three global compression function pointers below:
 
 ```
-typedef HRESULT(\*PGACL\_COMPRESSION\_INITROUTINE)
-(void\*\* ccContext, size\_t\* destBytesRequired, const SHUFFLE\_COMPRESS\_PARAMETERS\* params);
-typedef HRESULT(\*PGACL\_COMPRESSION\_COMPRESSROUTINE) ( void\* context, void\* dest, size\_t\* destBytes, const void\* src, size\_t srcBytes);
-typedef HRESULT(\*PGACL\_COMPRESSION\_CLEANUPROUTINE) ( void\* pContext);
+typedef HRESULT(\\\*PGACL\\\_COMPRESSION\\\_INITROUTINE)
+(void\\\*\\\* ccContext, size\\\_t\\\* destBytesRequired, const SHUFFLE\\\_COMPRESS\\\_PARAMETERS\\\* params);
+typedef HRESULT(\\\*PGACL\\\_COMPRESSION\\\_COMPRESSROUTINE) ( void\\\* context, void\\\* dest, size\\\_t\\\* destBytes, const void\\\* src, size\\\_t srcBytes);
+typedef HRESULT(\\\*PGACL\\\_COMPRESSION\\\_CLEANUPROUTINE) ( void\\\* pContext);
 
-extern PGACL\_COMPRESSION\_INITROUTINE GACL\_Compression\_InitRoutine;
-extern PGACL\_COMPRESSION\_COMPRESSROUTINE GACL\_Compression\_CompressRoutine;
-extern PGACL\_COMPRESSION\_CLEANUPROUTINE GACL\_Compression\_CleanupRoutine;
+extern PGACL\\\_COMPRESSION\\\_INITROUTINE GACL\\\_Compression\\\_InitRoutine;
+extern PGACL\\\_COMPRESSION\\\_COMPRESSROUTINE GACL\\\_Compression\\\_CompressRoutine;
+extern PGACL\\\_COMPRESSION\\\_CLEANUPROUTINE GACL\\\_Compression\\\_CleanupRoutine;
 ```
 
 ## Space Curves and transforms
@@ -243,12 +246,12 @@ compression-improvement operations can be completed in curved space.  Future rel
 support for reversing curved data.
 
 ```
-bool GACL\_Shuffle\_ApplySpaceCurve(
-    uint8\_t\* dest,
-    const uint8\_t\* src,
-    size\_t size,
-    size\_t elementSizeBytes,
-    size\_t widthInPixels,
+bool GACL\\\_Shuffle\\\_ApplySpaceCurve(
+    uint8\\\_t\\\* dest,
+    const uint8\\\_t\\\* src,
+    size\\\_t size,
+    size\\\_t elementSizeBytes,
+    size\\\_t widthInPixels,
     bool forward
 );
 ```
@@ -261,16 +264,16 @@ the block compressed (BCn) data, while using perceptual quality measurement mode
 This feature is experimental and under active development to improve performance.
 Execution of this function on a single 4k texture may take many seconds depending on hardware.
 
-Requires `GACL\_EXPERIMENTAL` or `GACL\_INCLUDE\_CLER` to be defined. See `gacl.h`.
+Requires `GACL\\\_EXPERIMENTAL` or `GACL\\\_INCLUDE\\\_CLER` to be defined. See `gacl.h`.
 
 ```
-void GACL\_RDO\_ComponentLevelEntropyReduce(
-    void\* encodedData,
-    uint32\_t imageWidth,  
-    uint32\_t imageHeight, 
-    void\* referenceR8G8B8A8,  
-    DXGI\_FORMAT format
-    RDOOptions\& options
+void GACL\\\_RDO\\\_ComponentLevelEntropyReduce(
+    void\\\* encodedData,
+    uint32\\\_t imageWidth,  
+    uint32\\\_t imageHeight, 
+    void\\\* referenceR8G8B8A8,  
+    DXGI\\\_FORMAT format
+    RDOOptions\\\& options
 );
 ```
 
@@ -288,7 +291,7 @@ struct RDOOptions {
     bool usePlusPlus = true;                     - Use k-means++ initialization
     bool useClusterRDO = true;                   - Enable advanced RDO and use of loss metric
     bool isGammaFormat = false;                  - Indicates sRGB/gamma format
-    void\* onnxModelPtr = nullptr;                - Internal pointer for ONNX model (managed by library)
+    void\\\* onnxModelPtr = nullptr;                - Internal pointer for ONNX model (managed by library)
 );
 
 enum class RDOLossMetric{
@@ -298,7 +301,7 @@ enum class RDOLossMetric{
     LPIPS,    - LPIPS ml-based perceptual loss
 );
 
-enum class RDO\_ErrorCode : int
+enum class RDO\\\_ErrorCode : int
 ```
 
 |Error code|Value|Meaning|
