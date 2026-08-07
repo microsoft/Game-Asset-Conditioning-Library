@@ -107,6 +107,7 @@ bool GACL_Shuffle_ApplySpaceCurve(
 
 
 /*  As above, but this function will apply the same 16KB encoded data space curve to decoded pixel data, or original art data loaded from another source */
+_Success_(dest != nullptr && src != nullptr)
 bool GACL_Shuffle_ApplySpaceCurveDecoded(
     _Out_writes_bytes_opt_(sizeBytes) uint8_t* dest,
     _In_reads_opt_(sizeBytes) const uint8_t* src,
