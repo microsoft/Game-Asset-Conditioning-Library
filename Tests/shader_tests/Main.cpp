@@ -39,9 +39,9 @@ std::string PrintToStringParamName(testing::TestParamInfo<GTestParameters> param
     return params.param.testName;
 }
 
-class BC7UnshuffleTest : public ::testing::TestWithParam<GTestParameters> {};
+class BCnUnshuffleTest : public ::testing::TestWithParam<GTestParameters> {};
 
-TEST_P(BC7UnshuffleTest, UnshuffleAndVerify)
+TEST_P(BCnUnshuffleTest, UnshuffleAndVerify)
 {
     const GTestParameters params = GetParam();
 
@@ -170,7 +170,7 @@ std::vector<GTestParameters> GetUnshufflingTestParameters()
 }
 
 INSTANTIATE_TEST_CASE_P(
-    GT, BC7UnshuffleTest,
+    GT, BCnUnshuffleTest,
     ::testing::ValuesIn(GetUnshufflingTestParameters()), 
     PrintToStringParamName);
 

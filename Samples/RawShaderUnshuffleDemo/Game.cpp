@@ -984,7 +984,7 @@ void Game::CreateBC7UnshufflePassD3D12Resources(std::vector<uint8_t>& shuffledBu
             &uploadHeapProps,
             D3D12_HEAP_FLAG_NONE,
             &shuffledBufferDesc,
-            D3D12_RESOURCE_STATE_COMMON,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
             nullptr,
             IID_PPV_ARGS(m_shuffledBufferUpload.ReleaseAndGetAddressOf())));
         m_shuffledBufferUpload->SetName(L"ShuffledBufferUpload");
@@ -1060,10 +1060,9 @@ void Game::CreateBC7UnshufflePassD3D12Resources(std::vector<uint8_t>& shuffledBu
 
         // Once uploaded, transition resources to correct states and perform the copy
         {
-            D3D12_RESOURCE_BARRIER barriers[2] = {};
+            D3D12_RESOURCE_BARRIER barriers[1] = {};
             barriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(m_shuffledBuffer.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
-            barriers[1] = CD3DX12_RESOURCE_BARRIER::Transition(m_shuffledBufferUpload.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE);
-            commandList->ResourceBarrier(2, barriers);
+            commandList->ResourceBarrier(1, barriers);
             
             commandList->CopyResource(m_shuffledBuffer.Get(), m_shuffledBufferUpload.Get());
 
@@ -1148,7 +1147,7 @@ void Game::CreateBC1345UnshufflePassD3D12Resources(std::vector<uint8_t>& shuffle
             &uploadHeapProps,
             D3D12_HEAP_FLAG_NONE,
             &shuffledBufferDesc,
-            D3D12_RESOURCE_STATE_COMMON,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
             nullptr,
             IID_PPV_ARGS(m_shuffledBufferUpload.ReleaseAndGetAddressOf())));
         m_shuffledBufferUpload->SetName(L"ShuffledBufferUpload");
@@ -1205,10 +1204,9 @@ void Game::CreateBC1345UnshufflePassD3D12Resources(std::vector<uint8_t>& shuffle
         m_shuffledBufferUpload->Unmap(0, nullptr);
 
         {
-            D3D12_RESOURCE_BARRIER barriers[2] = {};
+            D3D12_RESOURCE_BARRIER barriers[1] = {};
             barriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(m_shuffledBuffer.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
-            barriers[1] = CD3DX12_RESOURCE_BARRIER::Transition(m_shuffledBufferUpload.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE);
-            commandList->ResourceBarrier(2, barriers);
+            commandList->ResourceBarrier(1, barriers);
 
             commandList->CopyResource(m_shuffledBuffer.Get(), m_shuffledBufferUpload.Get());
 
