@@ -3,7 +3,7 @@
 
 # Introduction
 
-\---
+---
 
 The Game Asset Conditioning Library (GACL) contains several components that help improve compression of game assets.
 Texture assets are the primary focus, since those make up the largest portion of most games package size.
@@ -15,6 +15,8 @@ high throughput from the anticipated decompression implementations.  Two approac
 distortion optimization (RDO) are included, block-level and component-level entropy reduction.  Shuffle transforms can be applied prior
 to compression to losslessly further improve compression ratios of [block compressed BCn](https://learn.microsoft.com/en-us/windows/win32/direct3d11/texture-block-compression-in-direct3d-11) data streams, with DirectStorage supporting and
 implementing the reverse transform at data retrieval time.
+
+---
 
 # Preview Release #2 (What's New)
 
@@ -34,34 +36,31 @@ The front-end sample integration has been extended to allow for BLER+CLER stacki
 
 **Unshuffle shader sources (including BC7)**
 Shader sources have been included for visibility and public feedback.  This includes the BC1\\3\\4\\5 unshuffle shaders integrated into the DirectStorage 1.4 preview #1, as well as the BC1\\3\\4\\5\\7 shaders planned for pickup in future DirectStorage releases.
-Location: `\\Shaders\\Shuffle`
+Location: `\Shaders\Shuffle`
 
 **Shuffle shader validation suite**
-Gtest based set of tests for validating any changes to shaders or patterns.  This new test project is included in the root solution file or can be found at `\\Tests\\shader_tests`.
+Gtest based set of tests for validating any changes to shaders or patterns.  This new test project is included in the root solution file or can be found at `\Tests\shader_tests`.
 
 **Shuffle shader sample**
 D3D UI sample that demonstrates the raw usage of all shaders, implementing the reversal of most GACL transforms in GPU compute.  Given a launch parameter “-path <path\_to\_dds>”, the texture will be loaded, shuffled though the GACL, and then unshuffled on GPU using the appropriate shader for the transformID.
 
-The project is standalone and can be found at `\\Samples\\RawShaderUnshuffleDemo`.
+The project is standalone and can be found at `\Samples\RawShaderUnshuffleDemo`.
 
 
-
-
-
-\---
+---
 
 GACL is currently **in preview**. We are actively seeking feedback from the community and welcome contributions to help guide the future development of this library.
 
 As a preview:
 
-* **APIs are subject to change.** Interfaces documented in this release, including those in `gacl.h`, `shuffle.h`, `blockentropy.h`, and `ml\_RDO.h`, may be revised based on feedback from the community.
-* **Experimental features** (enabled via `GACL\_EXPERIMENTAL`) are particularly likely to evolve or be replaced.
+* **APIs are subject to change.** Interfaces documented in this release, including those in `gacl.h`, `shuffle.h`, `blockentropy.h`, and `ml_RDO.h`, may be revised based on feedback from the community.
+* **Experimental features** (enabled via `GACL_EXPERIMENTAL`) are particularly likely to evolve or be replaced.
 
 We would love to hear from you - please use [GitHub Issues](https://github.com/microsoft/Game-Asset-Conditioning-Library/issues) to report bugs, share results, or suggest improvements. Pull requests are also welcome; see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 # Getting Started
 
-\---
+---
 
 The GACL preview is buildable via Visual Studio, version 2022 or newer.
 
@@ -84,7 +83,7 @@ Enable "Desktop Development with C++" in Workloads
 
 # Description of Components
 
-\---
+---
 
 Apart from external dependencies, the Game Asset Conditiontioning Library is split into a core functional library designed for
 integration into content pipelines which import textures, and a front end tool intended for simplified scenarios.
@@ -100,12 +99,12 @@ line.  Note that for optimized performance with CPU offload decompression implem
 * gacl\_lib - Core library that contains APIs for RDO and Shuffle transforms, builds into static lib.
 * gacl\_exe - Builds the gacl.exe front end tool that loads textures and applies selected transforms.
 * Tests/... - gtest based projects used for validation.
-* Shaders/... - Shaders implementing unshuffle and other runtime functionality.
+* Shaders/... - Shaders implementing unshuffle runtime functionality.
 * Samples/... - Standalone samples showing DirectStorage or raw compute shader usage at runtime.
 
 # Build and Test
 
-\---
+---
 
 Before building, or viewing sources in Visual Studio, the zstd submodule must be initialized by the following git commands:
 
@@ -122,7 +121,7 @@ Gtest-based validation projects can be found in the "tests" folder or solution a
 
 # Primary API
 
-\---
+---
 
 Top level include (**gacl.h**) will pull in additional headers for the primary functional areas (**shuffle.h**, **blockentropy.h**, **ml\_RDO.h**).
 These correspond to three general functional areas:
@@ -131,7 +130,7 @@ These correspond to three general functional areas:
 * Block-Level Entropy Reduction (BLER)
 * Component-Level Entropy Reduction (CLER)
 
-> Note on experimental\\\\\\\\future features: These are turned off by default using the `GACL\\\_EXPERIMENTAL` C++ define.  See `gacl.h` for further information on experimental features.
+> Note on experimental\\future features: These are turned off by default using the `GACL_EXPERIMENTAL` C++ define.  See `gacl.h` for further information on experimental features.
 
 ## Block-level Entropy Reduction, aka BLER (blockentropy.h):
 
@@ -142,26 +141,26 @@ each 4x4 block of pixels.  A second API is included to quickly convert linear da
 BLER is generally able to reduce the compressed stream size by up to 50% while maintaining PSNR values of 40dB+.
 
 ```
-void GACL\\\_RDO\\\_BlockLevelEntropyReduce(  
-    uint32\\\_t numBlocks,
-    void\\\* encodedData,  
-    uint32\\\_t bcElementSizeBytes,  
-    void\\\* decodedR8G8B8A8,  
+void GACL_RDO_BlockLevelEntropyReduce(  
+    uint32_t numBlocks,
+    void* encodedData,  
+    uint32_t bcElementSizeBytes,  
+    void* decodedR8G8B8A8,  
     float uniqueBlockReduce,
-    float maxDistSq = 64.0f \\\* 4.0f,  
-    float avgDistSq = 64.0f \\\* 0.5f
+    float maxDistSq = 64.0f * 4.0f,  
+    float avgDistSq = 64.0f * 0.5f
 );
 ```
 
 
 
 ```
-void GACL\\\_RDO\\\_R8G8B8A8LinearToBlockGrouped(
-    uint8\\\_t\\\* blockGroupedData,  
-    const uint8\\\_t\\\* linearR8G8B8A8Data,  
-    size\\\_t rowPitch,
-    size\\\_t width,  
-    size\\\_t height  
+void GACL_RDO_R8G8B8A8LinearToBlockGrouped(
+    uint8_t* blockGroupedData,  
+    const uint8_t* linearR8G8B8A8Data,  
+    size_t rowPitch,
+    size_t width,  
+    size_t height  
 );
 ```
 
@@ -189,30 +188,30 @@ Shuffle+Compress will generally yield up to a relative 10% reduction in compress
 shuffling.  Savings can vary widely by texture.
 
 ```
-HRESULT GACL\\\_ShuffleCompress\\\_BCn(
-    uint8\\\_t\\\* dest,
-    GACL\\\_SHUFFLE\\\_TRANSFORM\\\& destTransformId,  
-    size\\\_t\\\& destBytesWritten,  
-    SHUFFLE\\\_COMPRESS\\\_PARAMETERS\\\& params   
+HRESULT GACL_ShuffleCompress_BCn(
+    uint8_t* dest,
+    GACL_SHUFFLE_TRANSFORM& destTransformId,  
+    size_t& destBytesWritten,  
+    SHUFFLE_COMPRESS_PARAMETERS& params   
 );
 ```
 
-Returns `S\\\_OK` if shuffle+compress reduced the size of the data, in which case the compressed stream is written to `dest`. The transform ID
+Returns `S_OK` if shuffle+compress reduced the size of the data, in which case the compressed stream is written to `dest`. The transform ID
 in `destTransformID` will be used in Direct Storage read requests for queueing the matching unshuffle transform at runtime.
 
-Returns `S\\\_FALSE` if shuffle+compress did not produce any reduction in size.  In this case a title should package the asset in uncompressed form.
+Returns `S_FALSE` if shuffle+compress did not produce any reduction in size.  In this case a title should package the asset in uncompressed form.
 
 Shuffle+Compress requests use zstd compression by default, but can be customized by replacing the three global compression function pointers below:
 
 ```
-typedef HRESULT(\\\*PGACL\\\_COMPRESSION\\\_INITROUTINE)
-(void\\\*\\\* ccContext, size\\\_t\\\* destBytesRequired, const SHUFFLE\\\_COMPRESS\\\_PARAMETERS\\\* params);
-typedef HRESULT(\\\*PGACL\\\_COMPRESSION\\\_COMPRESSROUTINE) ( void\\\* context, void\\\* dest, size\\\_t\\\* destBytes, const void\\\* src, size\\\_t srcBytes);
-typedef HRESULT(\\\*PGACL\\\_COMPRESSION\\\_CLEANUPROUTINE) ( void\\\* pContext);
+typedef HRESULT(*PGACL_COMPRESSION_INITROUTINE)
+(void** ccContext, size_t* destBytesRequired, const SHUFFLE_COMPRESS_PARAMETERS* params);
+typedef HRESULT(*PGACL_COMPRESSION_COMPRESSROUTINE) ( void* context, void* dest, size_t* destBytes, const void* src, size_t srcBytes);
+typedef HRESULT(*PGACL_COMPRESSION_CLEANUPROUTINE) ( void* pContext);
 
-extern PGACL\\\_COMPRESSION\\\_INITROUTINE GACL\\\_Compression\\\_InitRoutine;
-extern PGACL\\\_COMPRESSION\\\_COMPRESSROUTINE GACL\\\_Compression\\\_CompressRoutine;
-extern PGACL\\\_COMPRESSION\\\_CLEANUPROUTINE GACL\\\_Compression\\\_CleanupRoutine;
+extern PGACL_COMPRESSION_INITROUTINE GACL_Compression_InitRoutine;
+extern PGACL_COMPRESSION_COMPRESSROUTINE GACL_Compression_CompressRoutine;
+extern PGACL_COMPRESSION_CLEANUPROUTINE GACL_Compression_CleanupRoutine;
 ```
 
 ## Space Curves and transforms
@@ -248,12 +247,12 @@ compression-improvement operations can be completed in curved space.  Future rel
 support for reversing curved data.
 
 ```
-bool GACL\\\_Shuffle\\\_ApplySpaceCurve(
-    uint8\\\_t\\\* dest,
-    const uint8\\\_t\\\* src,
-    size\\\_t size,
-    size\\\_t elementSizeBytes,
-    size\\\_t widthInPixels,
+bool GACL_Shuffle_ApplySpaceCurve(
+    uint8_t* dest,
+    const uint8_t* src,
+    size_t size,
+    size_t elementSizeBytes,
+    size_t widthInPixels,
     bool forward
 );
 ```
@@ -266,16 +265,16 @@ the block compressed (BCn) data, while using perceptual quality measurement mode
 This feature is experimental and under active development to improve performance.
 Execution of this function on a single 4k texture may take many seconds depending on hardware.
 
-Requires `GACL\\\_EXPERIMENTAL` or `GACL\\\_INCLUDE\\\_CLER` to be defined. See `gacl.h`.
+Requires `GACL_EXPERIMENTAL` or `GACL_INCLUDE_CLER` to be defined. See `gacl.h`.
 
 ```
-void GACL\\\_RDO\\\_ComponentLevelEntropyReduce(
-    void\\\* encodedData,
-    uint32\\\_t imageWidth,  
-    uint32\\\_t imageHeight, 
-    void\\\* referenceR8G8B8A8,  
-    DXGI\\\_FORMAT format
-    RDOOptions\\\& options
+void GACL_RDO_ComponentLevelEntropyReduce(
+    void* encodedData,
+    uint32_t imageWidth,  
+    uint32_t imageHeight, 
+    void* referenceR8G8B8A8,  
+    DXGI_FORMAT format
+    RDOOptions& options
 );
 ```
 
@@ -293,7 +292,7 @@ struct RDOOptions {
     bool usePlusPlus = true;                     - Use k-means++ initialization
     bool useClusterRDO = true;                   - Enable advanced RDO and use of loss metric
     bool isGammaFormat = false;                  - Indicates sRGB/gamma format
-    void\\\* onnxModelPtr = nullptr;                - Internal pointer for ONNX model (managed by library)
+    void* onnxModelPtr = nullptr;                - Internal pointer for ONNX model (managed by library)
 );
 
 enum class RDOLossMetric{
@@ -303,7 +302,7 @@ enum class RDOLossMetric{
     LPIPS,    - LPIPS ml-based perceptual loss
 );
 
-enum class RDO\\\_ErrorCode : int
+enum class RDO_ErrorCode : int
 ```
 
 |Error code|Value|Meaning|
@@ -325,7 +324,7 @@ enum class RDO\\\_ErrorCode : int
 
 # Credits
 
-\---
+---
 
 The GACL library is the work of Richard Meyer, Meredith Green, Paul Edelstein and Zuoming Shi, with further contributions from Di Tang, Simon Craddick, Danny Chen, and Adeline Braun.
 
