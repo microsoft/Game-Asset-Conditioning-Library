@@ -1,6 +1,8 @@
 # Raw Shader Unshuffle Demo
 
-This demo shows how to use the Game Asset Conditioning Library (GACL) using the underlying shaders to unshuffle textures at runtime.
+This demo shows how to use the Game Asset Conditioning Library (GACL) along with the raw shaders that implement reverse shuffle transforms on GPU.
+The sample can load a BC1\3\4\5\7 texture, which will be shuffle+compressed through GACL.  The shuffle transform will be reversed on GPU by loading
+and running the appropriate shaders for the content, based on the transform ID returned from the GACL library.
 
 # Build
 

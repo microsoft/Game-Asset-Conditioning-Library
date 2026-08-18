@@ -69,12 +69,12 @@ Install latest Visual Studio 2022 from here:  https://aka.ms/vs/17/release/vs\_e
 Enable "Desktop Development with C++" in Workloads
 2. Software dependencies
    - For lossy ML based implementation:
-     - For model download (highly suggested), run the CLER set up script Tools\\scripts\\setupCLER.ps1
-     - We currently support CPU-based model inference. Check out other ORT nuget packages and execution providers for GPU support: https://onnxruntime.ai/docs/install/
+      - For model download (highly suggested), run the CLER set up script Tools\\scripts\\setupCLER.ps1
+      - We currently support CPU-based model inference. Check out other ORT nuget packages and execution providers for GPU support: https://onnxruntime.ai/docs/install/
    - Submodules
-     - zstd is included as a submodule within this repository.  From within your cloned GACL repo, zstd can be pulled down via the folowwing commands:
-       - `git submodule init`
-       - `git submodule update`
+      - zstd is included as a submodule within this repository.  From within your cloned GACL repo, zstd can be pulled down via the folowwing commands:
+         - `git submodule init`
+         - `git submodule update`
 3. The solution file "gacl.sln" can be found in the root folder
 
 # Description of Components
@@ -229,12 +229,12 @@ Any texture with a height and width that are both a power of 2 BCn elements in e
 eligible for curved space transforms.  Curved textures are arranged as a z-order series of 16KB micro tiles.  For example, a BC7 mip 1024 pixels
 (256 elements) wide, and 512 pixels (128 elements) high would be broken into 32 micro tiles as below:
 
-|||||||||
-|-|-|-|-|-|-|-|-|
-|0|1|4|5|16|17|20|21|
-|2|3|6|7|18|19|22|23|
-|8|9|12|13|24|25|28|29|
-|10|11|14|15|26|27|30|31|
+|    |    |    |    |    |    |    |    |
+|----|----|----|----|----|----|----|----|
+|  0 |  1 |  4 |  5 | 16 | 17 | 20 | 21 |
+|  2 |  3 |  6 |  7 | 18 | 19 | 22 | 23 |
+|  8 |  9 | 12 | 13 | 24 | 25 | 28 | 29 |
+| 10 | 11 | 14 | 15 | 26 | 27 | 30 | 31 |
 
 Each screen-adjacent set of 4 (2x2) micro tiles represent a screen-adjacent 64KB block.  Likewise sets of 16 (4x4) micro tiles represent screen
 adjacent 256KB blocks.  One API allows for converting textures to (forward) or from (reverse) curved space, so that RDO or other
@@ -300,22 +300,22 @@ enum class RDOLossMetric{
 enum class RDO_ErrorCode : int
 ```
 
-|Error code|Value|Meaning|
-|-|-|-|
-|0|OK|Success|
-|1|OK\_NoAdvancedRDO|Success, but advanced RDO not used|
-|10|NullEncodedData|Input data pointer is null|
-|11|UnsupportedEncodedFormat|Encoded format not supported|
-|12|InvalidImageDimensions|Image width or height is zero or invalid|
-|13|InvalidBCElementSize|Block-compressed element size is invalid|
-|14|UnsupportedBaseFormat|Base format not supported|
-|20|InvalidClusterRange|Cluster count parameters are out of range|
-|21|InvalidLossRange|Loss bounds are invalid (min > max, or out of \[0,1])|
-|30|ClusteredSizeMismatch|Internal error: clustered data size mismatch|
-|31|ModesSizeMismatch|Internal error: modes data size mismatch|
-|32|UnsupportedFormatNotImplemented|Format is not implemented yet|
-|40|InternalException|Internal exception occurred during processing|
-|50|UnknownError|Unknown error|
+| Error code | Value | Meaning |
+|-----------------|-----------------|-----------------|
+| 0     | OK     | Success     |
+| 1     | OK_NoAdvancedRDO     | Success, but advanced RDO not used     |
+| 10     | NullEncodedData     | Input data pointer is null     |
+| 11     | UnsupportedEncodedFormat     | Encoded format not supported    |
+| 12     | InvalidImageDimensions     | Image width or height is zero or invalid     |
+| 13     | InvalidBCElementSize     | Block-compressed element size is invalid     |
+| 14     | UnsupportedBaseFormat     | Base format not supported      |
+| 20     | InvalidClusterRange     | Cluster count parameters are out of range     |
+| 21     | InvalidLossRange     |Loss bounds are invalid (min > max, or out of [0,1])    |
+| 30     | ClusteredSizeMismatch     | Internal error: clustered data size mismatch     |
+| 31     | ModesSizeMismatch     | Internal error: modes data size mismatch     |
+| 32     | UnsupportedFormatNotImplemented     |Format is not implemented yet      |
+| 40     | InternalException     | Internal exception occurred during processing     |
+| 50     | UnknownError     | Unknown error    |
 
 # Credits
 
