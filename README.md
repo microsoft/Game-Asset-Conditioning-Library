@@ -1,5 +1,5 @@
-[!\[Build](https://github.com/microsoft/Game-Asset-Conditioning-Library/actions/workflows/build.yml/badge.svg)](https://github.com/microsoft/Game-Asset-Conditioning-Library/actions/workflows/build.yml)
-[!\[Test](https://github.com/microsoft/Game-Asset-Conditioning-Library/actions/workflows/test.yml/badge.svg)](https://github.com/microsoft/Game-Asset-Conditioning-Library/actions/workflows/test.yml)
+[![Build](https://github.com/microsoft/Game-Asset-Conditioning-Library/actions/workflows/build.yml/badge.svg)](https://github.com/microsoft/Game-Asset-Conditioning-Library/actions/workflows/build.yml)
+[![Test](https://github.com/microsoft/Game-Asset-Conditioning-Library/actions/workflows/test.yml/badge.svg)](https://github.com/microsoft/Game-Asset-Conditioning-Library/actions/workflows/test.yml)
 
 # Introduction
 
@@ -53,8 +53,8 @@ GACL is currently **in preview**. We are actively seeking feedback from the comm
 
 As a preview:
 
-* **APIs are subject to change.** Interfaces documented in this release, including those in `gacl.h`, `shuffle.h`, `blockentropy.h`, and `ml_RDO.h`, may be revised based on feedback from the community.
-* **Experimental features** (enabled via `GACL_EXPERIMENTAL`) are particularly likely to evolve or be replaced.
+- **APIs are subject to change.** Interfaces documented in this release, including those in `gacl.h`, `shuffle.h`, `blockentropy.h`, and `ml_RDO.h`, may be revised based on feedback from the community.
+- **Experimental features** (enabled via `GACL_EXPERIMENTAL`) are particularly likely to evolve or be replaced.
 
 We would love to hear from you - please use [GitHub Issues](https://github.com/microsoft/Game-Asset-Conditioning-Library/issues) to report bugs, share results, or suggest improvements. Pull requests are also welcome; see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
@@ -68,17 +68,13 @@ The GACL preview is buildable via Visual Studio, version 2022 or newer.
 Install latest Visual Studio 2022 from here:  https://aka.ms/vs/17/release/vs\_enterprise.exe
 Enable "Desktop Development with C++" in Workloads
 2. Software dependencies
-
-   * For lossy ML based implementation:
-
-     * For model download (highly suggested), run the CLER set up script Tools\\scripts\\setupCLER.ps1
-     * We currently support CPU-based model inference. Check out other ORT nuget packages and execution providers for GPU support: https://onnxruntime.ai/docs/install/
-   * Submodules
-
-     * zstd is included as a submodule within this repository.  From within your cloned GACL repo, zstd can be pulled down via the folowwing commands:
-
-       * `git submodule init`
-       * `git submodule update`
+   - For lossy ML based implementation:
+     - For model download (highly suggested), run the CLER set up script Tools\\scripts\\setupCLER.ps1
+     - We currently support CPU-based model inference. Check out other ORT nuget packages and execution providers for GPU support: https://onnxruntime.ai/docs/install/
+   - Submodules
+     - zstd is included as a submodule within this repository.  From within your cloned GACL repo, zstd can be pulled down via the folowwing commands:
+       - `git submodule init`
+       - `git submodule update`
 3. The solution file "gacl.sln" can be found in the root folder
 
 # Description of Components
@@ -94,7 +90,6 @@ integration into content pipelines which import textures, and a front end tool i
 * libzstd\_p-dll - As above, but builds to dll form.
 * zstd\_p - As above, builds a modified version of the zstd.exe command line tool that limits the window size, which cannot be specified at command
 line.  Note that for optimized performance with CPU offload decompression implementations, it is also advised that developers include the following setting when compressing content:
-
   * \--target-compressed-block-size=8192
 * gacl\_lib - Core library that contains APIs for RDO and Shuffle transforms, builds into static lib.
 * gacl\_exe - Builds the gacl.exe front end tool that loads textures and applies selected transforms.
