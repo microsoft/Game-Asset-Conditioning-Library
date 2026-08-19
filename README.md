@@ -18,34 +18,7 @@ implementing the reverse transform at data retrieval time.
 
 ---
 
-# Preview Release #2 (What's New)
-
-As a step in working towards a general release, this preview #2 primarily gives visibility into forward looking features, **including BC7**.  The core functionality of the Game Asset Conditioning Library remains largely unchanged.  Texture shuffle transforms that are not yet supported within the DirectStorage runtime are still marked experimental. 
- 
-However, as transforms near completion for inclusion into the supported list, there is a desire to increase visibility into future plans and invite feedback on the transforms and shader implementations.  Additionally, experimental work on CLER continues, as avenues of stacking technologies are investigated.
-
-**Included in preview #2:**
-
-**CLER functional updates**
-Component Level Entropy Reduction RDO has been extended with the ability to operate on smaller regions within a texture, both within linear memory layout and the 16KB space curve layout.  For BC1 textures, this means that Block-Level Entropy Reduction and Component-Level Entropy Reduction can be applied in series when experimental features are enabled.
-
-
-
-**Gacl.exe updates**
-The front-end sample integration has been extended to allow for BLER+CLER stacking for BC1, allowing for experiments that combine the two techniques.  Whole block merging is performed first, through the BLER algorithm, and then partial-block merging through CLER optionally second.
-
-**Unshuffle shader sources (including BC7)**
-Shader sources have been included for visibility and public feedback.  This includes the BC1\\3\\4\\5 unshuffle shaders integrated into the DirectStorage 1.4 preview #1, as well as the BC1\\3\\4\\5\\7 shaders planned for pickup in future DirectStorage releases.
-Location: `\Shaders\Shuffle`
-
-**Shuffle shader validation suite**
-Gtest based set of tests for validating any changes to shaders or patterns.  This new test project is included in the root solution file or can be found at `\Tests\shader_tests`.
-
-**Shuffle shader sample**
-D3D UI sample that demonstrates the raw usage of all shaders, implementing the reversal of most GACL transforms in GPU compute.  Given a launch parameter “-path <path\_to\_dds>”, the texture will be loaded, shuffled though the GACL, and then unshuffled on GPU using the appropriate shader for the transformID.
-
-The project is standalone and can be found at `\Samples\RawShaderUnshuffleDemo`.
-
+# Preview Release 
 
 ---
 
