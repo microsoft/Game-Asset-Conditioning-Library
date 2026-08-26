@@ -1,6 +1,4 @@
-This folder contains the shaders used by DirectStorage to provide unshuffling support.  They are included here for
-
-transparency and to allow public feedback.  
+This folder contains HLSL implementations of the texture unshuffle transforms used with block-compressed texture formats. DirectStorage uses these shaders to provide runtime support for decoding shuffle transforms. The shaders are provided for transparency, reference, and community feedback. 
 
 
 
