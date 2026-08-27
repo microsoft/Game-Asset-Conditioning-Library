@@ -155,7 +155,7 @@ static void PrintHelp(void)
     printf("                                > 256KB : level 18\n");
     printf("\n");
     printf("  -ztbs, --zstdtargetblocksize <size>   \n");
-    printf("                            Target compressed block size for zstd compression. DefaultL 8192:\n");
+    printf("                            Target compressed block size for zstd compression. Default: 8192\n");
     printf("\n");
     printf("  -v, --verbose             Display more information and statistics.\n");
     printf("  -q, --quiet               Suppress unnecessary messages.\n");
@@ -163,7 +163,7 @@ static void PrintHelp(void)
     printf("  **  Space curves move screen-adjacent data to memory-adjacent.                              ** \n");
     printf("  **  Shuffle+compress includes a forward space curve to improve compression.                 ** \n");
     printf("  **  Space curve transforms were made experimental in Preview #1 and so the below behavior   ** \n");
-    printf("  **  is off by default, only enabled when the -sce option is present.  It does represent     ** \n");
+    printf("  **  is off by default, only enabled when the -sce or -rdosc are specified. It does represent** \n");
     printf("  **  the final non-preview behaviors of RDO+shuffle+compress interaction though.             ** \n");
     printf("  **                                                                                          ** \n");
     printf("  **  If a texture is having entropy reduction applied, the forward space curve is applied    ** \n");
@@ -182,8 +182,10 @@ static void PrintHelp(void)
     printf("                            will not use shuffle+compress. Textures that will not have a load-\n");
     printf("                            time unshuffle applied to them cannot have a space curve applied.\n");
     printf("\n");
-    printf("                            Space curves are experimental in Preview 1, and this option only\n");
+    printf("                            Space curves are experimental in Preview 1, and -dsc only\n");
     printf("                            has effect if experimental shuffle compress is enabled.\n");
+    printf("\n");
+    printf("  -rdosc                    [preview #2] Enables curved RDO as it will work in later releases.\n");
     printf("\n");
     printf("\n");
     printf("Options, data shuffle related (supported for BC1\\3\\4\\5):\n");
@@ -242,6 +244,14 @@ static void PrintHelp(void)
     printf("                            (optional, default = 25)\n");
     printf("                            i.e.  \"-breduce 40\" implies 40%% reduction in unique blocks.\n");
     printf("                            example: 10000 unique blocks, reduced 40%% down to 6000 unique blocks. \n");
+#endif
+#if GACL_INCLUDE_CLER && GACL_INCLUDE_BLER
+    printf("\n");
+    printf("Options, Combined BLER + CLER (series pipeline):\n");
+    printf("\n");
+    printf("  -bler -cler               When both are specified, BLER runs first to reduce unique block\n");
+    printf("                            counts, then CLER applies k-means endpoint clustering on the\n");
+    printf("                            BLER output, improving overall compression. \n");
 #endif
 }
 
@@ -316,7 +326,7 @@ int wmain(size_t argc, const wchar_t* argv[])
 
     BlockLevelEntopyReductionOptions blerOptions = { false, 0.25f };
     ShuffleTransformOptions shuffleOptions = { false, GACL_SHUFFLE_TRANSFORM::GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED };
-    SpaceCurveOptions curveOptions = { false, false, false };
+    SpaceCurveOptions curveOptions = { false, false, false, false };
     ZstdCompressOptions compressOptions = { 0xff, GACL_ZSTD_TARGET_COMPRESSED_BLOCK_SIZE };
     bool blockBC7Join = false;
     bool blockBC7Split = false;
@@ -482,6 +492,10 @@ int wmain(size_t argc, const wchar_t* argv[])
         {
             curveOptions.DisableSpaceCurve = true;
         }
+        else if (option == L"-rdosc")
+        {
+            curveOptions.CurvedRDO = true;
+        }
     }
 
     if (verbosity >= Verbosity::eVerbose)
@@ -508,6 +522,13 @@ int wmain(size_t argc, const wchar_t* argv[])
         return -1;
     }
 #endif
+
+    if (curveOptions.DisableSpaceCurve && curveOptions.CurvedRDO)
+    {
+        printf("Error: disabling space curve is not compatible with the curved RDO option.\n");
+        return -1;
+    }
+
 
     if (blockBC7Join && blockBC7Split)
     {

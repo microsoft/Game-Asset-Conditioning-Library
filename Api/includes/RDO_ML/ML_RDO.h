@@ -50,7 +50,8 @@ struct RDOOptions
     bool usePlusPlus = true;
     bool useClusterRDO = true;
     bool isGammaFormat = false;
-
+    bool isDataCurved = false;
+    uint32_t idealChunkSize = 256 * 1024;
     void* onnxModelPtr = nullptr;
 };
 

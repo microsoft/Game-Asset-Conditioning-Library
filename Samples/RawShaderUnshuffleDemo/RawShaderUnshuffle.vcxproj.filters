@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Common">
+      <UniqueIdentifier>c463b700-fecd-4d86-8582-b160dd13c3d7</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shaders">
+      <UniqueIdentifier>{91a67c26-914f-4568-9c71-fb2620abbfde}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ATGTK">
+      <UniqueIdentifier>{47330a28-fc46-4fa6-ad16-aefdd71f683d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shaders\UnshufflePerMode">
+      <UniqueIdentifier>{6de8efe6-f6b3-485c-9ff3-e2550d1d7af9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shaders\BinningPassShaders">
+      <UniqueIdentifier>{f475d17c-f4ea-438b-bcaf-b23483b6a614}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shaders\PrefixSumShaders">
+      <UniqueIdentifier>{9cecd547-05c1-4c31-865f-3d9cfe6ebfc1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shaders\PrepassShaders">
+      <UniqueIdentifier>{8b12947c-804e-4799-b7c9-a7db901c3c09}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Media">
+      <UniqueIdentifier>{6fcbcfbd-75a4-4204-8004-ded8eeb6fbf1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shaders\BC1345">
+      <UniqueIdentifier>{c93fb716-0a05-4f25-8747-361f211a0e63}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="pch.h" />
+    <ClInclude Include="StepTimer.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Game.h" />
+    <ClInclude Include="DeviceResources.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="ReadData.h">
+      <Filter>ATGTK</Filter>
+    </ClInclude>
+    <ClInclude Include="SharedDefinitions.h" />
+    <ClInclude Include="d3dx12.h" />
+    <ClInclude Include="Processing.h" />
+    <ClInclude Include="FindMedia.h">
+      <Filter>ATGTK</Filter>
+    </ClInclude>
+    <ClInclude Include="PerformanceTimers.h">
+      <Filter>ATGTK</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="pch.cpp" />
+    <ClCompile Include="Main.cpp" />
+    <ClCompile Include="Game.cpp" />
+    <ClCompile Include="DeviceResources.cpp">
+      <Filter>Common</Filter>
+    </ClCompile>
+    <ClCompile Include="Processing.cpp" />
+    <ClCompile Include="PerformanceTimers.cpp">
+      <Filter>ATGTK</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="FullScreenQuadPS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="FullScreenQuadVS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\BinningPassCS_MinWave4.hlsl">
+      <Filter>Shaders\BinningPassShaders</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\BinningPassCS_MinWave8.hlsl">
+      <Filter>Shaders\BinningPassShaders</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\BinningPassCS_MinWave16.hlsl">
+      <Filter>Shaders\BinningPassShaders</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\BinningPassCS_MinWave32.hlsl">
+      <Filter>Shaders\BinningPassShaders</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\BinningPassCS_MinWave64.hlsl">
+      <Filter>Shaders\BinningPassShaders</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\BinningPassCS_MinWave128.hlsl">
+      <Filter>Shaders\BinningPassShaders</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\PrefixSumPassCS_MinWave4.hlsl">
+      <Filter>Shaders\PrefixSumShaders</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\PrefixSumPassCS_MinWave8.hlsl">
+      <Filter>Shaders\PrefixSumShaders</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\PrefixSumPassCS_MinWave16.hlsl">
+      <Filter>Shaders\PrefixSumShaders</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\PrefixSumPassCS_MinWave32.hlsl">
+      <Filter>Shaders\PrefixSumShaders</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\PrefixSumPassCS_MinWave64.hlsl">
+      <Filter>Shaders\PrefixSumShaders</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\PrefixSumPassCS_MinWave128.hlsl">
+      <Filter>Shaders\PrefixSumShaders</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\PrepassB.hlsl">
+      <Filter>Shaders\PrepassShaders</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC1.hlsl">
+      <Filter>Shaders\BC1345</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC1x.hlsl">
+      <Filter>Shaders\BC1345</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC3.hlsl">
+      <Filter>Shaders\BC1345</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC3x.hlsl">
+      <Filter>Shaders\BC1345</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC4.hlsl">
+      <Filter>Shaders\BC1345</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC4x.hlsl">
+      <Filter>Shaders\BC1345</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC5.hlsl">
+      <Filter>Shaders\BC1345</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC5x.hlsl">
+      <Filter>Shaders\BC1345</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCSMode0.hlsl">
+      <Filter>Shaders\UnshufflePerMode</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCSMode1.hlsl">
+      <Filter>Shaders\UnshufflePerMode</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCSMode2.hlsl">
+      <Filter>Shaders\UnshufflePerMode</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCSMode3.hlsl">
+      <Filter>Shaders\UnshufflePerMode</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCSMode4.hlsl">
+      <Filter>Shaders\UnshufflePerMode</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCSMode5.hlsl">
+      <Filter>Shaders\UnshufflePerMode</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCSMode6.hlsl">
+      <Filter>Shaders\UnshufflePerMode</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCSMode7.hlsl">
+      <Filter>Shaders\UnshufflePerMode</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCSMode8.hlsl">
+      <Filter>Shaders\UnshufflePerMode</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCurveOnly.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+    <None Include="FullScreenQuad.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\..\Shaders\Shuffle\BinningPassCommonCS.hlsli">
+      <Filter>Shaders\BinningPassShaders</Filter>
+    </None>
+    <None Include="..\..\Shaders\Shuffle\PrefixSumCommonCS.hlsli">
+      <Filter>Shaders\PrefixSumShaders</Filter>
+    </None>
+    <None Include="..\..\Shaders\Shuffle\DerotationHelpers.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\..\Shaders\Shuffle\EndpointOrderingHelpers.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\..\Shaders\Shuffle\PrepassCS.hlsli">
+      <Filter>Shaders\PrepassShaders</Filter>
+    </None>
+    <None Include="..\..\Shaders\Shuffle\UnshuffleCommonCS.hlsli">
+      <Filter>Shaders\UnshufflePerMode</Filter>
+    </None>
+    <None Include="..\..\Shaders\Shuffle\SharedDefinitions.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\..\Shaders\Shuffle\UnshuffleHelpers.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <CopyFileToFolders Include="Media\Fonts\SegoeUI_24.spritefont">
+      <Filter>Media</Filter>
+    </CopyFileToFolders>
+  </ItemGroup>
+</Project>
