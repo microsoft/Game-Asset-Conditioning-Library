@@ -286,7 +286,7 @@
       <EnablePREfast>false</EnablePREfast>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <WholeProgramOptimization>true</WholeProgramOptimization>
+      <WholeProgramOptimization>false</WholeProgramOptimization>
       <OmitFramePointers>true</OmitFramePointers>
     </ClCompile>
     <Link>
@@ -377,7 +377,6 @@
 
       -->
       <AdditionalOptions>%(AdditionalOptions) /wd26115 /wd6001 /wd6011 /wd6262 /wd6293 /wd6297 /wd6385 /wd6386</AdditionalOptions>
-      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(AdditionalOptions) /guard:cast /d2CastGuardFailureMode:fastfail</AdditionalOptions>
       <PreprocessorDefinitions>ZSTD_MULTITHREAD=1;ZSTD_LEGACY_SUPPORT=5;WIN32;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <CallingConvention>Cdecl</CallingConvention>
       <ControlFlowGuard Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Guard</ControlFlowGuard>

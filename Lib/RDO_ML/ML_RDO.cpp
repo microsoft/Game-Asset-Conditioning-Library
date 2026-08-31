@@ -207,6 +207,8 @@ RDO_ErrorCode GACL_RDO_ComponentLevelEntropyReduce(
         uint32_t widthInBlocks = (imageWidth + 3) / 4;
         uint32_t heightInBlocks = (imageHeight + 3) / 4;
         uint32_t numBlocks = widthInBlocks * heightInBlocks;
+        uint32_t rowPitchBytes = widthInBlocks * bcElementSizeBytes;
+        uint32_t imageSizeBytes = numBlocks * bcElementSizeBytes;
 
         if (!encodedData)
         {
@@ -229,6 +231,7 @@ RDO_ErrorCode GACL_RDO_ComponentLevelEntropyReduce(
 
         DXGI_FORMAT baseFormat = GetBaseFormat(format);
         size_t bcElementSize = GetElementSize(format);
+
 
         if (bcElementSize == 0)
         {
@@ -301,16 +304,12 @@ RDO_ErrorCode GACL_RDO_ComponentLevelEntropyReduce(
         if (baseFormat == DXGI_FORMAT_BC1_TYPELESS)
         {
             uint8_t* bcData = static_cast<uint8_t*>(encodedData);
-
-            std::vector<int> modes;
-            std::vector<std::vector<uint8_t>> endpoints = KMeansRDO::ExtractBC1Endpoints(bcData, numBlocks, modes);
+            const uint8_t* refData = static_cast<const uint8_t*>(referenceR8G8B8A8);
 
             bool hasReference = (referenceR8G8B8A8 != nullptr);
-
             bool useAdvancedRDO = options.useClusterRDO && hasReference;
 
-            std::vector<std::vector<uint8_t>> clustered;
-
+            // Initialize perceptual model once before chunk processing
             if (useAdvancedRDO)
             {
                 if (lossMetric == LossMetrics::Metric::LPIPS || lossMetric == LossMetrics::Metric::VGG) {
@@ -325,79 +324,177 @@ RDO_ErrorCode GACL_RDO_ComponentLevelEntropyReduce(
                 if (lossMetric == LossMetrics::Metric::LPIPS || lossMetric == LossMetrics::Metric::VGG) {
                     LoadPerceptualModel(options, lossMetric);
                 }
+            }
 
-                Ort::Session* onnxModel = nullptr;
+            Ort::Session* onnxModel = nullptr;
+            if (options.onnxModelPtr)
+            {
+                onnxModel = static_cast<Ort::Session*>(options.onnxModelPtr);
+            }
 
-                if(options.onnxModelPtr)
+            // Process in 256KB chunks aligned to complete block-rows
+            const uint32_t linearChunkBlockRows = imageSizeBytes <= options.idealChunkSize ? heightInBlocks : (options.idealChunkSize + rowPitchBytes - 1) / rowPitchBytes;
+            
+            const uint32_t chunkNormalSize = !options.isDataCurved ? linearChunkBlockRows * rowPitchBytes : options.idealChunkSize;
+			const uint32_t remainderBytes = imageSizeBytes % chunkNormalSize;
+			const bool remainderRequiresChunk = imageSizeBytes < chunkNormalSize || remainderBytes >= (chunkNormalSize/2);
+			
+            // Compute how many chunks (at least 1), last chunk will include any remainder less than half a chunk in size
+            const uint32_t numChunks = ((numBlocks * uint32_t(bcElementSize)) / chunkNormalSize) + (remainderRequiresChunk ? 1 : 0);
+            
+            uint32_t curvedChunkWidth = imageSizeBytes <= options.idealChunkSize ? imageWidth : (bcElementSize == 8 ? 1024 : 512);
+            uint32_t curvedChunkHeight = imageSizeBytes <= options.idealChunkSize ? imageHeight : 512;
+
+            // account for images that are narrower in one dimension than the square 256KB macro tile size
+            while (imageSizeBytes > options.idealChunkSize && (imageWidth < curvedChunkWidth || imageHeight < curvedChunkHeight))
+            {
+                if (imageWidth < curvedChunkWidth)
                 {
-                    onnxModel = static_cast<Ort::Session*>(options.onnxModelPtr);
+                    curvedChunkWidth >>= 1;
+                    curvedChunkHeight <<= 1;
                 }
-                try
+                else
                 {
-                    clustered = KMeansRDO::ClusterRDOWithLoss(
+                    curvedChunkWidth <<= 1;
+                    curvedChunkHeight >>= 1;
+                }
+            }
+
+            const uint32_t threadsPerChunk = std::max(1u, numThreads / numChunks);
+
+
+            // Per-chunk result tracking for parallel execution
+            struct ChunkResult
+            {
+                RDO_ErrorCode errorCode = RDO_ErrorCode::OK;
+                bool usedAdvancedRDO = false;
+            };
+            std::vector<ChunkResult> chunkResults(numChunks);
+
+            // Lambda to process a single chunk
+            auto processChunk = [&](uint32_t chunk)
+            {
+                const uint32_t chunkPixelHeight = options.isDataCurved ? curvedChunkHeight : (chunk == numChunks - 1) ? (imageHeight - linearChunkBlockRows * 4 * (numChunks - 1)) : linearChunkBlockRows * 4;
+                const uint32_t chunkPixelWidth = options.isDataCurved ? curvedChunkWidth : imageWidth ;
+
+				const uint32_t chunkBcDataSize = (chunk == numChunks-1) ? imageSizeBytes - chunk * chunkNormalSize : chunkNormalSize;
+				const uint32_t chunkNumBlocks = chunkBcDataSize / uint32_t(bcElementSize);
+                uint8_t* chunkBcData = bcData + chunkNormalSize * chunk;
+
+                const void* chunkRefData = nullptr;
+                if (refData)
+                {
+                    chunkRefData = refData + chunk * (chunkPixelHeight * chunkPixelWidth * 4);		// 4 bytes each
+                }
+
+                std::vector<int> chunkModes;
+                std::vector<std::vector<uint8_t>> endpoints = KMeansRDO::ExtractBC1Endpoints(chunkBcData, chunkNumBlocks, chunkModes);
+
+                std::vector<std::vector<uint8_t>> clustered;
+                bool chunkUsedAdvancedRDO = useAdvancedRDO;
+
+                if (chunkUsedAdvancedRDO)
+                {
+                    try
+                    {
+                        clustered = KMeansRDO::ClusterRDOWithLoss(
+                            endpoints,
+                            chunkModes,
+                            chunkBcData,
+                            chunkNumBlocks,
+                            chunkPixelWidth,
+                            chunkPixelHeight,
+                            chunkRefData,
+                            format,
+                            options.isGammaFormat,
+                            maxK,
+                            minK,
+                            iterations,
+                            lossMetric,
+                            options.lossMax,
+                            options.lossMin,
+                            threadsPerChunk,
+                            options.usePlusPlus,
+                            onnxModel,
+                            chunk
+                        );
+                    }
+                    catch (...)
+                    {
+                        chunkUsedAdvancedRDO = false;
+                    }
+                }
+
+                if (!chunkUsedAdvancedRDO)
+                {
+                    std::vector<std::vector<uint8_t>> centroids = KMeansRDO::InitializeCentroids(
                         endpoints,
-                        modes,
-                        bcData,
-                        numBlocks,
-                        imageWidth,
-                        imageHeight,
-                        referenceR8G8B8A8,
-                        format,
-                        options.isGammaFormat,
                         maxK,
-                        minK,
-                        iterations,
-                        lossMetric,
-                        options.lossMax,
-                        options.lossMin,
-                        numThreads,
                         options.usePlusPlus,
-                        onnxModel
+                        options.lossMin,
+                        options.lossMax,
+                        chunk
+                    );
+
+                    clustered = KMeansRDO::ClusterEventing(
+                        endpoints,
+                        maxK,
+                        iterations,
+                        threadsPerChunk,
+                        centroids,
+                        chunk
                     );
                 }
-                catch (...)
+
+                if (clustered.size() < uint64_t(chunkNumBlocks * 2))
                 {
-                    Utility::Printf(GACL_Logging_Priority_Medium, L"[INFO] Falling back to basic RDO.\n");
-                    useAdvancedRDO = false;
+                    chunkResults[chunk].errorCode = RDO_ErrorCode::ClusteredSizeMismatch;
+                    return;
                 }
-            }
-            else if(!useAdvancedRDO)
+                if (chunkModes.size() != chunkNumBlocks)
+                {
+                    chunkResults[chunk].errorCode = RDO_ErrorCode::ModesSizeMismatch;
+                    return;
+                }
+
+                KMeansRDO::ApplyBC1Endpoints(chunkBcData, chunkNumBlocks, clustered, chunkModes);
+                chunkResults[chunk].usedAdvancedRDO = chunkUsedAdvancedRDO;
+                chunkResults[chunk].errorCode = RDO_ErrorCode::OK;
+            };
+
+
+            uint32_t chunksProcessed = 0;
+            std::vector<std::thread> threads;
+            threads.reserve(numChunks);
+            while (chunksProcessed < numChunks - 1)
             {
-                Utility::Printf(GACL_Logging_Priority_Medium, L"  Using basic RDO with k-means clustering (k=%d)\n", maxK);
+                threads.emplace_back(processChunk, chunksProcessed++);
 
-                std::vector<std::vector<uint8_t>> centroids = KMeansRDO::InitializeCentroids(
-                    endpoints,
-                    maxK,
-                    options.usePlusPlus,
-                    options.lossMin,
-                    options.lossMax
-                );
-
-                clustered = KMeansRDO::ClusterEventing(
-                    endpoints,
-                    maxK,
-                    iterations,
-                    numThreads,
-                    centroids
-                );
             }
+            processChunk(chunksProcessed);
 
-            if (clustered.size() < uint64_t(numBlocks * 2))
+            for (auto& t : threads)
             {
-                Utility::Printf(GACL_Logging_Priority_High, L"ERROR: clustered.size()=%zu but expected %u\n", clustered.size(), numBlocks * 2);
-                return RDO_ErrorCode::ClusteredSizeMismatch;
+                t.join();
             }
-            if (modes.size() != numBlocks)
+
+            // Check results from all chunks
+            bool anyAdvancedRDO = false;
+            for (uint32_t chunk = 0; chunk < numChunks; ++chunk)
             {
-                Utility::Printf(GACL_Logging_Priority_High, L"ERROR: modes.size()=%zu but expected %u\n", modes.size(), numBlocks);
-                return RDO_ErrorCode::ModesSizeMismatch;
+                if (chunkResults[chunk].errorCode != RDO_ErrorCode::OK)
+                {
+                    Utility::Printf(GACL_Logging_Priority_High, L"ERROR: Chunk %u/%u failed with error %d\n",
+                        chunk + 1, numChunks, static_cast<int>(chunkResults[chunk].errorCode));
+                    return chunkResults[chunk].errorCode;
+                }
+                if (chunkResults[chunk].usedAdvancedRDO)
+                    anyAdvancedRDO = true;
             }
-            KMeansRDO::ApplyBC1Endpoints(bcData, numBlocks, clustered, modes);
 
+            Utility::Printf(GACL_Logging_Priority_Medium, L"RDO complete - %u chunks processed in parallel\n\n", numChunks);
 
-            Utility::Printf(GACL_Logging_Priority_Medium, L"RDO complete - endpoints reduced from %zu to clustered values\n\n", endpoints.size());
-
-            if (useAdvancedRDO)
+            if (anyAdvancedRDO)
             {
                 return RDO_ErrorCode::OK;
             }

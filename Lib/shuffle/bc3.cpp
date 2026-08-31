@@ -81,6 +81,8 @@ static void WriteShuffledBC3Blockv1(uint8_t*& d1, uint8_t*& d2, uint8_t*& d3,
 static void WriteShuffledBC3Blockv2(uint8_t*& d1, uint8_t*& d2, uint8_t*& d3,
     const uint8_t*& src)
 {
+    const BC3* pp = reinterpret_cast<const BC3*>(src); pp;
+
     *d1++ = (src[0] << 4u) | (src[1] & 0xf);            // Alpha0[0-3],  Alpha1[0-3],    high entropy
     *d1++ = (src[0] & 0xf0) | (src[1] >> 4u);           // Alpha0[4-7], Alpha1[4-7]
     src += 2;
@@ -88,25 +90,23 @@ static void WriteShuffledBC3Blockv2(uint8_t*& d1, uint8_t*& d2, uint8_t*& d3,
     *d2++ = *src++; *d2++ = *src++; *d2++ = *src++;     // aind (6B)
     *d2++ = *src++; *d2++ = *src++; *d2++ = *src++;
 
-    const BC3* b = reinterpret_cast<const BC3*>(src); src += 4;
-    uint32_t C = uint32_t(
-        ((b->F.Color_0R >> 1) << 28) |
-        ((b->F.Color_0G >> 2) << 24) |
-        ((b->F.Color_0B >> 1) << 20) |
-        ((b->F.Color_1R >> 1) << 16) |
-        ((b->F.Color_1G >> 2) << 12) |
-        ((b->F.Color_1B >> 1) << 8) |
-        ((b->F.Color_0R & 1) << 7) |
-        ((b->F.Color_0G & 3) << 5) |
-        ((b->F.Color_0B & 1) << 4) |
-        ((b->F.Color_1R & 1) << 3) |
-        ((b->F.Color_1G & 3) << 1) |
-        ((b->F.Color_1B & 1) << 0));
+    const uint16_t e0 = *reinterpret_cast<const uint16_t*>(src); src += 2;
+    const uint16_t e1 = *reinterpret_cast<const uint16_t*>(src); src += 2;
 
-    *d1++ = (C >> 24u) & 0xffu;                         // d1 bytes 4/6
-    *d1++ = (C >> 16u) & 0xffu;
-    *d1++ = (C >> 8u) & 0xffu;
-    *d1++ = C & 0xffu;
+    static constexpr uint16_t eMajor = 0b1111011110011110ul;
+    static constexpr uint16_t eMinor = uint16_t(~eMajor);
+
+    uint32_t eo =
+        (_pext_u32(e0, eMajor) << 20) |
+        (_pext_u32(e1, eMajor) << 8) |
+        (_pext_u32(e0, eMinor) << 4) |
+        (_pext_u32(e1, eMinor) << 0);
+
+    *d1++ = (eo >> 24u) & 0xffu;                         // d1 bytes 4/6
+    *d1++ = (eo >> 16u) & 0xffu;
+    *d1++ = (eo >> 8u) & 0xffu;
+    *d1++ = eo & 0xffu;
+
 
     *d3++ = *src++; *d3++ = *src++;                 // eind (4B)
     *d3++ = *src++; *d3++ = *src++;

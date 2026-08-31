@@ -109,7 +109,7 @@
 #define WSTR(s) _WSTR(s)
 
 #define GACL_VERSION_MAJOR 1
-#define GACL_VERSION_MINOR 0
+#define GACL_VERSION_MINOR 1
 #define GACL_VERSION_PATCH 0
 #define GACL_VERSION_BUILD   0        // numeric — used in FILEVERSION resource field
 #define GACL_VERSION_LABEL   preview  // pre-release label — used in version strings

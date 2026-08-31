@@ -22,25 +22,25 @@ enum GACL_SHUFFLE_TRANSFORM
     GACL_SHUFFLE_TRANSFORM_NONE = 0,
    
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224          = 1,     // 3 streams (1:1:2):         color_0, color_1, index bit stream   (DSTORAGE_GACL_SHUFFLE_TRANSFORM_BC1)
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224_SC       = 17,    // 3 streams (1:1:2):         color_0, color_1, index bit stream, space curve
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224_SC       = 17,    // 3 streams (1:1:2):         color_0, color_1, index bit stream, space curve (experimental)
 
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_116224       = 2,     // 6 streams (1:1:6:2:2:4)    alpha_0, alpha_1, Alpha index, color_0, color_1, color index stream (DSTORAGE_GACL_SHUFFLE_TRANSFORM_BC3)
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_116224_SC    = 18,    // 6 streams (1:1:6:2:2:4)    alpha_0, alpha_1, Alpha index, color_0, color_1, color index stream, space curve
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_116224_SC    = 18,    // 6 streams (1:1:6:2:2:4)    alpha_0, alpha_1, Alpha index, color_0, color_1, color index stream, space curve (experimental)
 
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116          = 3,     // 3 streams (1:1:6)          red_0, red_1, red index stream (DSTORAGE_GACL_SHUFFLE_TRANSFORM_BC4)
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116_SC       = 19,    // 3 streams (1:1:6)          red_0, red_1, red index stream, space curve
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116_SC       = 19,    // 3 streams (1:1:6)          red_0, red_1, red index stream, space curve (experimental)
 
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116       = 4,     // 6 streams (1:1:6:1:1:6)    red_0, red_1, red index stream, green_0, green_1, green index stream (DSTORAGE_GACL_SHUFFLE_TRANSFORM_BC5)
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116_SC    = 20,    // 6 streams (1:1:6:1:1:6)    red_0, red_1, red index stream, green_0, green_1, green index stream, space curve
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116_SC    = 20,    // 6 streams (1:1:6:1:1:6)    red_0, red_1, red index stream, green_0, green_1, green index stream, space curve (experimental)
 
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT        = 5,	 // mode-specific streams and transforms, control bytes within compressed stream	(better compression, slower reverse transform)
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT        = 5,	 // mode-specific streams and transforms, control bytes within compressed stream	(better compression, slower reverse transform, experimental))
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT_SC     = 21,    // as above, but data is curved, can only be decompressed into a target with dimensionality that supports reverse mapping 	
 
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN         = 6,     // mode-specific transforms, control bytes outside of compressed stream (less compression, trivial+fast reverse transform)
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN         = 6,     // mode-specific transforms, control bytes outside of compressed stream (less compression, trivial+fast reverse transform, experimental)
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN_SC      = 22,    // as above, but data is curved, can only be decompressed into a target with dimensionality that supports reverse mapping 	
 
     GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY             = 7,
-    GACL_SHUFFLE_TRANSFORM_ZSTD_SC               = 23,
+    GACL_SHUFFLE_TRANSFORM_ZSTD_SC               = 23,    // (experimental)
 
 
     // v2 (experimental) shuffle patterns
@@ -118,14 +118,27 @@ enum GACL_SHUFFLE_TRANSFORM
 
 _Success_(dest!=nullptr && src != nullptr)
 GACL_API bool GACL_Shuffle_ApplySpaceCurve(
-    _Out_writes_bytes_opt_(size) uint8_t* dest,
-    _In_reads_opt_(size) const uint8_t* src,
-    size_t size, 
+    _Out_writes_bytes_opt_(sizeBytes) uint8_t* dest,
+    _In_reads_opt_(sizeBytes) const uint8_t* src,
+    size_t sizeBytes,
     size_t elementSizeBytes, 
     size_t widthInPixels, 
     bool forward
 );
 
+/// <summary>
+/// As above, but applies the same curved transform to decoded linear pixel data.
+/// </summary>
+_Success_(dest != nullptr && src != nullptr)
+GACL_API bool GACL_Shuffle_ApplySpaceCurveDecoded(
+    _Out_writes_bytes_opt_(sizeBytes) uint8_t* dest,
+    _In_reads_opt_(sizeBytes) const uint8_t* src,
+    size_t sizeBytes,
+    size_t encodedElementSizeBytes,
+    size_t decodedPixelSizeBytes,
+    size_t widthInPixels,
+    bool forward
+);
 
 GACL_API const wchar_t* GACL_ShuffleCompress_GetFileExtensionForTransform(GACL_SHUFFLE_TRANSFORM transformId);
 

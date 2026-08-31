@@ -69,6 +69,7 @@ namespace gacl
         bool ReverseSpaceCurve;
         bool ForwardSpaceCurve;
         bool DisableSpaceCurve;
+        bool CurvedRDO;
     };
 
     struct ZstdCompressOptions
