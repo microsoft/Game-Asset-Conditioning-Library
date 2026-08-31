@@ -55,7 +55,7 @@ void main(uint3 dtID : SV_DispatchThreadID, uint3 gID : SV_GroupID)
             twoBC1Blocks.z = (e0Pair >> 16) | (e1Pair & 0xFFFF0000);
             twoBC1Blocks.w = indicesPair.y;
         } 
-        else if (transformId == 32 || transformId == 33)                                // micro-pattern 2, and SC variant
+        else if (transformId == 8 || transformId == 24)                                // micro-pattern 2, and SC variant
         {
             uint indicesOffset  = (shuffledBufferSizeInBytes / 2);
 

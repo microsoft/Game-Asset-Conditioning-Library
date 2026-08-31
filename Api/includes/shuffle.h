@@ -44,12 +44,17 @@ enum GACL_SHUFFLE_TRANSFORM
 
 
     // v2 (experimental) shuffle patterns
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44           = 32,	  // 2 streams (1:1):            interleaved color_0 + color_1, index bit stream 
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44_SC,	              // 2 streams (1:1):            As above, with curve
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44           = 8,     // 2 streams (1:1):            interleaved color_0 + color_1, index bit stream 
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44_SC        = 24,    // 2 streams (1:1):            As above, with curve
 
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_664,		          // 3 streams (3:3:2)           alpha_0 + alpha_1 + color_0 + color_1, Alpha index, color index stream
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_664_SC,		          // 3 streams (3:3:2)           alpha_0 + alpha_1 + color_0 + color_1, Alpha index, color index stream
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_664          = 9,     // 3 streams (3:3:2)           alpha_0 + alpha_1 + color_0 + color_1, Alpha index, color index stream
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_664_SC       = 25,    // 3 streams (3:3:2)           alpha_0 + alpha_1 + color_0 + color_1, Alpha index, color index stream
 
+
+    // Curved (_SC) variant of any transform is that transform's id OR'd with this bit, so uncurved
+    // ids occupy 0..15 and curved ids 16..31. Consumers that never enable curved transforms can
+    // therefore persist an id in 4 bits without a remapping table.
+    GACL_SHUFFLE_TRANSFORM_CURVED_BIT             = 0x10,
 
     // masks for API callers
     GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED    = 0x8004,    // This define will change value over time

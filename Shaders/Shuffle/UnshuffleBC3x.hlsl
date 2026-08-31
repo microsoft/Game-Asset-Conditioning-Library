@@ -78,7 +78,7 @@ void main(uint3 dtID : SV_DispatchThreadID)
             bc3Blocks[3].z = (e0Quad.y  >> 16) | (e1Quad.y & 0xFFFF0000);
             bc3Blocks[3].w = colorIndices.w;
         }
-        else if (transformId == 34 || transformId == 35)                                // micro-pattern 2, and SC variant
+        else if (transformId == 9 || transformId == 25)                                // micro-pattern 2, and SC variant
         {
             // v2 has only three streams in a 6:6:4 ratio:
             // stream0[0] - a0.3:0 & a1.3:0               - high entropy alpha bits
