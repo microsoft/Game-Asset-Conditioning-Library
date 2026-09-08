@@ -110,6 +110,7 @@ std::vector<std::vector<uint8_t>> KMeansRDO::ClusterRDOWithLoss(
         if (chunkId == 0)   // only warn once per higher level call, not once per chunk\region
         {
             Utility::Printf(GACL_Logging_Priority_Medium, L"Warning: loss metric %s requires models, but no models provided; using MSE loss instead.\n", LossMetrics::ToString(lossMetric).c_str());
+            Utility::Printf(GACL_Logging_Priority_Medium, L"To enable moded-based perceptual loss metrics, ensure you have run the setup script: Tools\\scripts\\setupCLER.ps1\n");
         }
         lossMetric = LossMetrics::Metric::MSE;
     }
