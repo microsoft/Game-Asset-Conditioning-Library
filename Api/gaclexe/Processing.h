@@ -89,6 +89,15 @@ namespace gacl
         SpaceCurveOptions CurveOptions;
     };
 
+    //  Compresses a file as opaque bytes, with no texture interpretation.  Used for NON-TEXTURE
+    //  content that still needs GACL's compression settings.
+
+    bool ProcessRawFile(
+        const std::wstring& inputFileName,
+        const std::wstring& outputFileName,
+        ProcessingOptions& options,
+        Verbosity verbosity);
+
     bool ProcessTexture(
         const std::wstring& inputBlockCompressedFileName,
         const std::wstring& inputOriginalArtFileName,

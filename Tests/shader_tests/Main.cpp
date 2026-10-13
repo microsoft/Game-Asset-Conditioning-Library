@@ -169,7 +169,7 @@ std::vector<GTestParameters> GetUnshufflingTestParameters()
     return testParams;
 }
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     GT, BCnUnshuffleTest,
     ::testing::ValuesIn(GetUnshufflingTestParameters()), 
     PrintToStringParamName);

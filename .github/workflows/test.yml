@@ -28,7 +28,6 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          submodules: recursive
           fetch-depth: 1
           lfs: false
           
@@ -41,13 +40,33 @@ jobs:
         shell: pwsh
         run: |
           $binDir = "${{ github.workspace }}\out\${{ matrix.configuration }}\${{ matrix.platform }}\bin"
-          $testBins = Get-ChildItem -Path $binDir `
+          $resultsDir = "${{ github.workspace }}\TestResults"
+          New-Item -ItemType Directory -Force -Path $resultsDir | Out-Null
+          $testBins = @(Get-ChildItem -Path $binDir `
             -Filter "*tests.exe" -Recurse
+          )
+          if ($testBins.Count -eq 0) {
+            throw "No native test executables found under $binDir"
+          }
+
           foreach ($test in $testBins) {
-            Push-Location $binDir
-            & $test.FullName `
-              --gtest_output=xml:"${{ github.workspace }}\TestResults\$($test.BaseName).xml"
-            Pop-Location
+            Push-Location $test.DirectoryName
+            try {
+              $arguments = @(
+                "--gtest_output=xml:$resultsDir\$($test.BaseName).xml"
+              )
+              if ($test.BaseName -eq "shader_tests") {
+                $arguments = @("-warp") + $arguments
+              }
+
+              & $test.FullName @arguments
+              if ($LASTEXITCODE -ne 0) {
+                throw "$($test.Name) failed with exit code $LASTEXITCODE"
+              }
+            }
+            finally {
+              Pop-Location
+            }
           }
 
       - name: Publish test results

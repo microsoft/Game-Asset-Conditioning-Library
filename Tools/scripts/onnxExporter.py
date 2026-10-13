@@ -13,9 +13,11 @@ import torch
 import lpips
 import onnx
 
-# Get the directory where this script lives, then navigate to ThirdParty/models
+# Get models directory: prefer GACL_MODELS_DIR env var (set by setupCLER.ps1),
+# fall back to the repo-relative path when running from the source tree.
 script_dir = os.path.dirname(os.path.abspath(__file__))
-models_dir = os.path.join(script_dir, "..", "..", "ThirdParty", "models")
+_default_models_dir = os.path.join(script_dir, "..", "..", "ThirdParty", "models")
+models_dir = os.environ.get("GACL_MODELS_DIR", _default_models_dir)
 
 # Ensure the models directory exists
 os.makedirs(models_dir, exist_ok=True)

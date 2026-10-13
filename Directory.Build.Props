@@ -1,18 +1,101 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!--
+    Toolset selection.
+
+    The solution must build with both VS 2022 (v143) and VS 2026 (v145).  Neither
+    install carries the other's toolset, so the toolset follows whichever Visual
+    Studio is driving the build.  Override with /p:GaclPlatformToolset=vNNN to
+    force a specific toolset (for example to build v143 from a VS 2026 prompt on a
+    machine that also has VS 2022 installed).
+
+    Everything derived from the toolset - PlatformToolset, the vcpkg triplet and the
+    output directories - is keyed off this one property so a single working tree can
+    hold both flavours without stale-object mismatches (LNK2038).
+  -->
+  <PropertyGroup Label="Toolset">
+    <GaclPlatformToolset Condition="'$(GaclPlatformToolset)' == '' and '$(VisualStudioVersion)' == '17.0'">v143</GaclPlatformToolset>
+    <GaclPlatformToolset Condition="'$(GaclPlatformToolset)' == '' and '$(VisualStudioVersion)' == '18.0'">v145</GaclPlatformToolset>
+    <GaclPlatformToolset Condition="'$(GaclPlatformToolset)' == ''">v143</GaclPlatformToolset>
+  </PropertyGroup>
+
   <!-- Applies to all configurations/platforms when imported -->
   <PropertyGroup>
-    <OutDir>$(SolutionDir)bin\$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>$(SolutionDir)bin\obj\$(MSBuildProjectName)\$(Platform)\$(Configuration)\</IntDir>
+    <OutDir>$(SolutionDir)bin\$(GaclPlatformToolset)\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)bin\obj\$(GaclPlatformToolset)\$(MSBuildProjectName)\$(Platform)\$(Configuration)\</IntDir>
+    <_GaclDefaultIntDir>$(IntDir)</_GaclDefaultIntDir>
   </PropertyGroup>
+
+  <PropertyGroup Label="Vcpkg">
+    <VcpkgRoot Condition="'$(VcpkgRoot)'==''">$(VsInstallRoot)\vc\vcpkg\</VcpkgRoot>
+    <VcpkgRoot Condition="!HasTrailingSlash('$(VcpkgRoot)')">$(VcpkgRoot)\</VcpkgRoot>
+    <VcpkgEnableManifest>true</VcpkgEnableManifest>
+    <VcpkgHostTriplet>x64-windows</VcpkgHostTriplet>
+    <VcpkgUseStatic>true</VcpkgUseStatic>
+    <VcpkgUseMD>true</VcpkgUseMD>
+    <!-- Pin the toolset vcpkg builds the ports with.
+
+         vcpkg picks the NEWEST MSVC toolset installed on the machine unless the
+         triplet sets VCPKG_PLATFORM_TOOLSET, and there is no command-line or
+         environment override for it.  On a box with both VS 2022 and VS 2026 that
+         means a VS 2022 build silently links v143 objects against ports compiled
+         with the v145 STL, producing errors such as
+             gmock.lib(gtest-all.cc.obj) : error LNK2019: unresolved external
+             symbol __std_rotate
+         build\triplets holds one triplet per toolset so both flavours can coexist
+         in vcpkg_installed\.  The overlay-triplets option must be passed on every
+         vcpkg invocation, CI or not. -->
+    <VcpkgAdditionalInstallOptions>$(VcpkgAdditionalInstallOptions) "--overlay-triplets=$(MSBuildThisFileDirectory)build\triplets"</VcpkgAdditionalInstallOptions>
+  </PropertyGroup>
+
+  <Import Condition="Exists('$(VcpkgRoot)scripts\buildsystems\msbuild\vcpkg.props')"
+          Project="$(VcpkgRoot)scripts\buildsystems\msbuild\vcpkg.props" />
+
+  <PropertyGroup>
+    <VcpkgPageSchema>$(VcpkgRoot)scripts\buildsystems\msbuild\vcpkg-general.xml</VcpkgPageSchema>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Platform)'=='Win32'">
+    <VcpkgTriplet>x86-windows-static-md</VcpkgTriplet>
+  </PropertyGroup>
+  <!-- Must keep the "-static-md" suffix: vcpkg.targets appends it when absent.
+       x64 is selected in Directory.Build.targets, from PlatformToolset. -->
+  <PropertyGroup Condition="'$(Platform)'=='ARM64'">
+    <VcpkgTriplet>arm64-windows-static-md</VcpkgTriplet>
+  </PropertyGroup>
+
   <PropertyGroup>
       <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
   </PropertyGroup>
+
   <ItemDefinitionGroup>
     <ClCompile>
       <TreatWarningAsError>true</TreatWarningAsError>
       <WarningLevel>Level4</WarningLevel>
       <Optimization Condition="'$(Configuration)' == 'Debug'">Disabled</Optimization>
+      <AdditionalOptions>/Zc:__cplusplus /ZH:SHA_256 /utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
+  </ItemDefinitionGroup>
+
+  <!-- Use /Zi (ProgramDatabase) instead of the default /ZI (EditAndContinue)
+       for Debug builds.  /ZI requires incremental linking, but our CI builds
+       use /INCREMENTAL:NO, which causes LNK4075.  /Zi produces equivalent
+       PDB output without the incremental-link requirement. -->
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
+  </ItemDefinitionGroup>
+
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <ControlFlowGuard>Guard</ControlFlowGuard>
+    </ClCompile>
+  </ItemDefinitionGroup>
+
+  <ItemDefinitionGroup Condition="'$(Platform)'=='x64'">
+    <Link>
+      <CETCompat>true</CETCompat>
+    </Link>
   </ItemDefinitionGroup>
 </Project>

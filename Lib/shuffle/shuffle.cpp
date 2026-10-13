@@ -13,7 +13,11 @@
 #include "../BCnBlockDefs.h"
 #include "../helpers/FormatHelper.h"
 #include "../helpers/Utility.h"
-#include "../ThirdParty/zstd/lib/zstd.h"
+
+#include <intrin.h>
+#include <immintrin.h>
+
+#include <zstd.h>
 
 #include <thread>
 #include <vector>
@@ -34,9 +38,9 @@ bool GACL_Shuffle_ApplySpaceCurve(
 {
     const size_t widthInElements = (widthInPixels + 3) / 4;
     const size_t pitchBytes = elementSizeBytes * widthInElements;
-    
+
     const size_t heightInElements = (sizeBytes + pitchBytes - 1) / pitchBytes;
-    
+
     // 16KB micro tiles in z-order, applicable when height\width in tiles is power of 2
     if ((elementSizeBytes == 8 || elementSizeBytes == 16) &&
         sizeBytes > 16ull * 1024 &&
@@ -45,7 +49,7 @@ bool GACL_Shuffle_ApplySpaceCurve(
     {
         if (dest != nullptr && src != nullptr)
         {
-            // 32 element * 32\64 element micro tile  
+            // 32 element * 32\64 element micro tile
             const size_t tileSizeBytes = 16ull * 1024;
             const size_t tiles = sizeBytes / tileSizeBytes;
 
@@ -53,7 +57,7 @@ bool GACL_Shuffle_ApplySpaceCurve(
             const size_t widthInTiles = widthInElements / tileWidthElements;
             const size_t heightInTiles = tiles / widthInTiles;
 
-            // default mask 
+            // default mask
             size_t maskX = 0xAAAAAAAA;
             size_t maskY = 0x55555555;
             if (widthInTiles > heightInTiles)
@@ -135,7 +139,7 @@ bool GACL_Shuffle_ApplySpaceCurveDecoded(
     {
         if (dest != nullptr && src != nullptr)
         {
-            // 32 element * 32\64 element micro tile  
+            // 32 element * 32\64 element micro tile
             const size_t encodedTileSizeBytes = 16ull * 1024;
             const size_t tileSizeInElements = encodedTileSizeBytes / encodedElementSizeBytes;
             const size_t tiles = (widthInElements * heightInElements) / tileSizeInElements;
@@ -146,7 +150,7 @@ bool GACL_Shuffle_ApplySpaceCurveDecoded(
 
             const size_t tilePitchBytes = tileWidthElements * 4 * decodedPixelSizeBytes;
 
-            // default mask 
+            // default mask
             size_t maskX = 0xAAAAAAAA;
             size_t maskY = 0x55555555;
             if (widthInTiles > heightInTiles)
@@ -201,6 +205,66 @@ bool GACL_Shuffle_ApplySpaceCurveDecoded(
 }
 
 
+namespace
+{
+    /*  Selects the compression parameters GACL uses for a given input size.  Level 0 means "let
+        GACL choose"; the chosen levels are the minimum that enforce btopt strategy and 3 byte
+        matching for each size bucket.  */
+
+    ZSTD_compressionParameters GACL_SelectCompressionParameters(size_t srcBytes, int requestedCompressionLevel)
+    {
+        if (requestedCompressionLevel)
+        {
+            return ZSTD_getCParams(requestedCompressionLevel, srcBytes, 0);
+        }
+
+        if (srcBytes <= 16 * 1024)
+        {
+            return ZSTD_getCParams(12, srcBytes, 0);  // min size to enforce btopt & 3 byte matching
+        }
+        else if (srcBytes <= 256 * 1024)
+        {
+            return ZSTD_getCParams(14, srcBytes, 0);  // min size to enforce btopt & 3 byte matching
+        }
+
+        return ZSTD_getCParams(18, srcBytes, 0);      // min size to enforce btopt & 3 byte matching
+    }
+
+    /*  The single point at which GACL's window-size policy is applied.  Every GACL compression
+        path routes through here, so changing that policy - for example to require an exact window
+        rather than a maximum - is one edit rather than a search.
+
+        This caps only; it never raises a smaller window.  zstd reduces windowLog to fit the source
+        at compression time and never grows it, so the cap reaches the frame as an upper bound.  */
+
+    void GACL_ApplyWindowPolicy(ZSTD_compressionParameters& zParams)
+    {
+        if (zParams.windowLog > GACL_ZSTD_MAX_WINDOW_LOG)
+        {
+            zParams.windowLog = GACL_ZSTD_MAX_WINDOW_LOG;
+        }
+    }
+
+    /*  Applies GACL's parameters and target block size to a context.  */
+
+    size_t GACL_ConfigureCompressionContext(ZSTD_CCtx* cctx, size_t srcBytes, int requestedCompressionLevel, int requestedTargetBlockSize)
+    {
+        ZSTD_compressionParameters zParams = GACL_SelectCompressionParameters(srcBytes, requestedCompressionLevel);
+
+        GACL_ApplyWindowPolicy(zParams);
+
+        size_t status = ZSTD_CCtx_setCParams(cctx, zParams);
+
+        if (!ZSTD_isError(status))
+        {
+            status = ZSTD_CCtx_setParameter(cctx, ZSTD_c_targetCBlockSize, (requestedTargetBlockSize ? requestedTargetBlockSize : GACL_ZSTD_TARGET_COMPRESSED_BLOCK_SIZE));
+        }
+
+        return status;
+    }
+}
+
+
 /*  Default zstd compression init, which will ensure >=btopt strategy and 3 byte matching, along with target block size */
 
 HRESULT GACL_Compression_DefaultInitRoutine(
@@ -219,36 +283,11 @@ HRESULT GACL_Compression_DefaultInitRoutine(
         return E_OUTOFMEMORY;
     }
 
-    int requestedCompressionLevel = int(params->CompressSettings.Default.ZstdCompressionLevel);
-    int requestedTargetBlockSize = int(params->CompressSettings.Default.TargetBlockSize);
-
-    ZSTD_compressionParameters zParams;
-    
-    if (requestedCompressionLevel)
-    {
-        zParams = ZSTD_getCParams(requestedCompressionLevel, params->SizeInBytes, 0);
-    }
-    else
-    {
-        if (params->SizeInBytes <= 16 * 1024)
-        {
-            zParams = ZSTD_getCParams(12, params->SizeInBytes, 0);  // min size to enforce btopt & 3 byte matching
-        }
-        else if (params->SizeInBytes <= 256 * 1024)
-        {
-            zParams = ZSTD_getCParams(14, params->SizeInBytes, 0);  // min size to enforce btopt & 3 byte matching
-        }
-        else    // >256KB
-        {
-            zParams = ZSTD_getCParams(18, params->SizeInBytes, 0);  // min size to enforce btopt & 3 byte matching
-        }
-    }
-    size_t status = ZSTD_CCtx_setCParams(cctx, zParams);
-
-    if (!ZSTD_isError(status))
-    {
-        status = ZSTD_CCtx_setParameter(cctx, ZSTD_c_targetCBlockSize, (requestedTargetBlockSize ? requestedTargetBlockSize : GACL_ZSTD_TARGET_COMPRESSED_BLOCK_SIZE));
-    }
+    size_t status = GACL_ConfigureCompressionContext(
+        cctx,
+        params->SizeInBytes,
+        int(params->CompressSettings.Default.ZstdCompressionLevel),
+        int(params->CompressSettings.Default.TargetBlockSize));
 
     if (!ZSTD_isError(status))
     {
@@ -316,6 +355,91 @@ PGACL_COMPRESSION_COMPRESSROUTINE GACL_Compression_CompressRoutine = &GACL_Compr
 PGACL_COMPRESSION_CLEANUPROUTINE GACL_Compression_CleanupRoutine = &GACL_Compression_DefaultCleanupRoutine;
 
 
+/*  Compress arbitrary data with GACL's constrained zstd settings, no shuffle transform applied  */
+
+_Success_(return == S_OK)
+GACL_API HRESULT GACL_Compression_CompressBuffer(
+    _Out_writes_bytes_to_opt_(sizeInBytes, *destBytesWritten) uint8_t * dest,
+    size_t sizeInBytes,
+    _Out_ size_t * destBytesWritten,
+    _In_reads_bytes_(sizeInBytes) const uint8_t * src,
+    _In_opt_ const GACL_COMPRESS_BUFFER_PARAMETERS * params
+)
+{
+    if (destBytesWritten)
+    {
+        // Report "nothing usable" up front so that every failure and the S_FALSE path leave the caller
+        // with outputs it can act on without inspecting the HRESULT first.
+        *destBytesWritten = 0;
+    }
+
+    if (dest == nullptr || destBytesWritten == nullptr || sizeInBytes == 0 || src == nullptr)
+    {
+        return E_INVALIDARG;
+    }
+
+
+
+    // Drive the shared compression hooks, so a caller that has replaced them gets one handler for
+    // texture and non-texture payloads alike. DXGI_FORMAT_UNKNOWN is the signal to a custom handler
+    // that this is not a BCn stream; the default handler only reads SizeInBytes and CompressSettings.
+    SHUFFLE_COMPRESS_PARAMETERS shuffleParams = {};
+    shuffleParams.SizeInBytes = sizeInBytes;
+    shuffleParams.Format = DXGI_FORMAT_UNKNOWN;
+    shuffleParams.TextureData = src;
+    if (params != nullptr)
+    {
+        shuffleParams.CompressSettings.Default.ZstdCompressionLevel = params->ZstdCompressionLevel;
+        shuffleParams.CompressSettings.Default.TargetBlockSize = params->TargetBlockSize;
+    }
+
+    void* cc = nullptr;
+    size_t compressBound = 0;
+    HRESULT hr = GACL_Compression_InitRoutine(&cc, &compressBound, &shuffleParams);
+    if (FAILED(hr))
+    {
+        return hr;
+    }
+    if (cc == nullptr || compressBound == 0)
+    {
+        if (cc != nullptr)
+        {
+            GACL_Compression_CleanupRoutine(cc);
+        }
+        return E_FAIL;
+    }
+
+    // zstd may expand incompressible input past srcBytes, and the documented contract is that
+    // streams that are not compressible will not copy to the output, and S_FALSE retuned
+    std::vector<uint8_t> scratch(compressBound);
+    size_t compressedBytes = compressBound;
+
+    hr = GACL_Compression_CompressRoutine(cc, scratch.data(), &compressedBytes, src, sizeInBytes);
+
+    const HRESULT cleanupHr = GACL_Compression_CleanupRoutine(cc);
+    if (FAILED(hr))
+    {
+        return hr;
+    }
+    if (FAILED(cleanupHr))
+    {
+        return cleanupHr;
+    }
+
+    // Match GACL_ShuffleCompress_BCn: a result that is not smaller than the input is reported as
+    // S_FALSE with nothing written, so the caller stores the original bytes.
+    if (compressedBytes == 0 || compressedBytes >= sizeInBytes)
+    {
+        return S_FALSE;
+    }
+
+    memcpy_s(dest, sizeInBytes, scratch.data(), compressedBytes);
+
+    *destBytesWritten = compressedBytes;
+    return S_OK;
+}
+
+
 typedef HRESULT (*PSHUFFLE_FUNCTION)(uint8_t* dest, const uint8_t* src, size_t size, size_t version);
 
 HRESULT Shuffle_BC1(uint8_t* dest, const uint8_t* src, size_t size, size_t version);
@@ -374,7 +498,7 @@ HRESULT GACL_ShuffleCompress_BCn(
             *destTransformId = GACL_SHUFFLE_TRANSFORM_NONE;
             return E_INVALIDARG;
             // Note to developers: if you prefer to have Shuffle+Compress to continue on with other possible
-            // transforms, rather than erroring out due to requesting curved transforms for a texture of unsupported 
+            // transforms, rather than erroring out due to requesting curved transforms for a texture of unsupported
             // dimensions, simply comment out the above to lines, and uncomment the below:
             // dataForCurvedTransforms = nullptr;
         }
@@ -422,7 +546,7 @@ HRESULT GACL_ShuffleCompress_BCn(
         break;
 
     case DXGI_FORMAT_BC7_TYPELESS:
-        
+
         return ShuffleCompress_BC7(dest, destTransformId, destBytesWritten, params);
 
     default:

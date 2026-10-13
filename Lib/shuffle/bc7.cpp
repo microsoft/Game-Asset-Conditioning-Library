@@ -15,7 +15,10 @@
 #include "../helpers/FileUtility.h"
 #include "../helpers/FormatHelper.h"
 
-#include "../ThirdParty/zstd/lib/zstd.h"
+#include <intrin.h>
+#include <immintrin.h>
+
+#include <zstd.h>
 
 #include <thread>
 #include <fstream>

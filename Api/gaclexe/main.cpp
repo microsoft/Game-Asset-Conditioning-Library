@@ -12,7 +12,7 @@
 #include "../helpers/Utility.h"
 #include "Processing.h"
 #define ZSTD_STATIC_LINKING_ONLY
-#include "../ThirdParty/zstd/lib/zstd.h"
+#include <zstd.h>
 
 #include <iostream>
 #include <algorithm>
@@ -203,6 +203,12 @@ static void PrintHelp(void)
     printf("                            As \"shufflecompress\", but disabling all shuffle patterns, effectively\n");
     printf("                            resulting in export streams that are only zstd compressed.\n");
     printf("\n");
+    printf("  -cr, --compressraw \n");
+    printf("                            Compress the input file as opaque bytes, with no texture interpretation:\n");
+    printf("                            no DDS parsing, and no --format or --width required.  For NON-TEXTURE\n");
+    printf("                            content that needs the same compression settings GACL applies to\n");
+    printf("                            textures.  Output goes to --output if given, otherwise <input>.zst.\n");
+    printf("\n");
     printf("  -e, --export <basename>   Output base name.  Each mip\\slice will be exported as a\n");
     printf("                            Shuffle+Compressed opaque data stream.\n");
     printf("\n");
@@ -330,6 +336,7 @@ int wmain(size_t argc, const wchar_t* argv[])
     ZstdCompressOptions compressOptions = { 0xff, GACL_ZSTD_TARGET_COMPRESSED_BLOCK_SIZE };
     bool blockBC7Join = false;
     bool blockBC7Split = false;
+    bool compressRaw = false;
 
     for (size_t i = 2; i < argc; )
     {
@@ -383,6 +390,10 @@ int wmain(size_t argc, const wchar_t* argv[])
         {
             shuffleOptions.Enabled = true;
             shuffleOptions.Transform = GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY;
+        }
+        else if (option == L"-cr" || option == L"--compressraw")
+        {
+            compressRaw = true;
         }
         else if (option == L"-sno7s")
         {
@@ -509,14 +520,17 @@ int wmain(size_t argc, const wchar_t* argv[])
         printf("DEBUG: curveOptions.ReverseSpaceCurve = %d\n", curveOptions.ReverseSpaceCurve);
     }
 
+    //  Raw mode is not a transform, so it must be exempt from the transform requirement below.
+    //  Kept as a condition here rather than by moving the dispatch above these checks: reordering
+    //  would move the raw path past every other check too, including ones added later.
 #if GACL_INCLUDE_CLER
-    if (!shuffleOptions.Enabled && !blerOptions.Enabled && !clerOptions.Enabled && !curveOptions.ForwardSpaceCurve && !curveOptions.ReverseSpaceCurve)
+    if (!compressRaw && !shuffleOptions.Enabled && !blerOptions.Enabled && !clerOptions.Enabled && !curveOptions.ForwardSpaceCurve && !curveOptions.ReverseSpaceCurve)
     {
         printf("Error: no transform specified.\n");
         return -1;
     }
 #else
-    if (!shuffleOptions.Enabled && !blerOptions.Enabled && !curveOptions.ForwardSpaceCurve && !curveOptions.ReverseSpaceCurve)
+    if (!compressRaw && !shuffleOptions.Enabled && !blerOptions.Enabled && !curveOptions.ForwardSpaceCurve && !curveOptions.ReverseSpaceCurve)
     {
         printf("Error: no transform specified.\n");
         return -1;
@@ -548,6 +562,21 @@ int wmain(size_t argc, const wchar_t* argv[])
 #else
     ProcessingOptions processingOptions = { shuffleOptions, compressOptions, blerOptions, curveOptions };
 #endif
+
+    if (compressRaw)
+    {
+        //  Raw mode bypasses the texture pipeline, so the texture-mode requirements above do not
+        //  apply to it.
+        std::wstring rawOutputFileName = outputFileName.empty() ? (inputFileName + L".zst") : outputFileName;
+
+        if (!ProcessRawFile(inputFileName, rawOutputFileName, processingOptions, verbosity))
+        {
+            printf("ERROR: Raw compression failed\n");
+            return -1;
+        }
+
+        return 0;
+    }
 
     if (!ProcessTexture(inputFileName, referenceFileName, outputFileName, exportBaseName, bcInputFormat, pixelWidth, processingOptions, verbosity))
     {

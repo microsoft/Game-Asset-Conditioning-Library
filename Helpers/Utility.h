@@ -11,6 +11,7 @@
 #pragma once
 
 #include "gacl.h"
+#include <intrin.h>
 #include <string>
 #include <exception>
 #include <stdarg.h>

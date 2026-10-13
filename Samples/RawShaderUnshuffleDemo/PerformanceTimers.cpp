@@ -12,7 +12,7 @@
 #include "pch.h"
 #include "PerformanceTimers.h"
 
-#include "DirectXHelpers.h"
+#include <directxtk12/DirectXHelpers.h>
 
 #include <exception>
 #include <stdexcept>

@@ -20,7 +20,7 @@ extern "C" {
 enum GACL_SHUFFLE_TRANSFORM
 {
     GACL_SHUFFLE_TRANSFORM_NONE = 0,
-   
+
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224          = 1,     // 3 streams (1:1:2):         color_0, color_1, index bit stream   (DSTORAGE_GACL_SHUFFLE_TRANSFORM_BC1)
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224_SC       = 17,    // 3 streams (1:1:2):         color_0, color_1, index bit stream, space curve (experimental)
 
@@ -34,17 +34,17 @@ enum GACL_SHUFFLE_TRANSFORM
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116_SC    = 20,    // 6 streams (1:1:6:1:1:6)    red_0, red_1, red index stream, green_0, green_1, green index stream, space curve (experimental)
 
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT        = 5,	 // mode-specific streams and transforms, control bytes within compressed stream	(better compression, slower reverse transform, experimental))
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT_SC     = 21,    // as above, but data is curved, can only be decompressed into a target with dimensionality that supports reverse mapping 	
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT_SC     = 21,    // as above, but data is curved, can only be decompressed into a target with dimensionality that supports reverse mapping
 
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN         = 6,     // mode-specific transforms, control bytes outside of compressed stream (less compression, trivial+fast reverse transform, experimental)
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN_SC      = 22,    // as above, but data is curved, can only be decompressed into a target with dimensionality that supports reverse mapping 	
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN_SC      = 22,    // as above, but data is curved, can only be decompressed into a target with dimensionality that supports reverse mapping
 
     GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY             = 7,
     GACL_SHUFFLE_TRANSFORM_ZSTD_SC               = 23,    // (experimental)
 
 
     // v2 (experimental) shuffle patterns
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44           = 32,	  // 2 streams (1:1):            interleaved color_0 + color_1, index bit stream 
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44           = 32,	  // 2 streams (1:1):            interleaved color_0 + color_1, index bit stream
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44_SC,	              // 2 streams (1:1):            As above, with curve
 
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_664,		          // 3 streams (3:3:2)           alpha_0 + alpha_1 + color_0 + color_1, Alpha index, color index stream
@@ -121,8 +121,8 @@ GACL_API bool GACL_Shuffle_ApplySpaceCurve(
     _Out_writes_bytes_opt_(sizeBytes) uint8_t* dest,
     _In_reads_opt_(sizeBytes) const uint8_t* src,
     size_t sizeBytes,
-    size_t elementSizeBytes, 
-    size_t widthInPixels, 
+    size_t elementSizeBytes,
+    size_t widthInPixels,
     bool forward
 );
 
@@ -240,6 +240,59 @@ GACL_API HRESULT GACL_Compression_DefaultCleanupRoutine(
 );
 
 
+
+
+/// <summary>
+///  Optional settings for GACL_Compression_CompressBuffer(). Pass nullptr to accept the GACL defaults.
+///
+///  These are the same knobs as SHUFFLE_COMPRESS_PARAMETERS::CompressSettings::Default, restated
+///  here so a caller compressing non-texture data does not have to construct a texture parameter
+///  block it cannot meaningfully fill in.
+/// </summary>
+
+struct GACL_COMPRESS_BUFFER_PARAMETERS
+{
+    int ZstdCompressionLevel;                                           // Requested compression level. 0 lets GACL pick a level that guarantees the btopt strategy and 3-byte minimum match.
+    int TargetBlockSize;                                                // zstd target block size, used to ensure block-level parallelism. 0 selects GACL_ZSTD_TARGET_COMPRESSED_BLOCK_SIZE.
+};
+
+
+/// <summary>
+/// Compresses an arbitrary data stream with GACL's constrained zstd settings, applying no shuffle
+/// transform.
+///
+/// This is the companion to GACL_ShuffleCompress_BCn() for data that has no applicable shuffle:
+/// non-BCn formats, block compressed data too small or oddly shaped to shuffle usefully, and
+/// general (non-texture) package data. The output can decompressed on the GPU through
+/// DirectStorage with CompressionFormat = DSTORAGE_COMPRESSION_FORMAT_ZSTD and
+/// GaclTransformType = DSTORAGE_GACL_SHUFFLE_TRANSFORM_NONE - there is no reverse transform to
+/// apply. Using this rather than calling zstd directly is what guarantees the 256KB window,
+/// >=btopt strategy, 3-byte minimum match and target block size that the GPU decompressor requires.
+///
+/// Compression goes through the same GACL_Compression_*Routine hooks as GACL_ShuffleCompress_BCn(),
+/// so a caller that has overridden those gets one handler for texture and non-texture data alike.
+/// The internally constructed parameter block reports Format = DXGI_FORMAT_UNKNOWN, which is how a
+/// custom handler can tell that the payload is not a BCn stream.
+///
+/// Like GACL_ShuffleCompress_BCn(), one size covers both buffers: sizeInBytes is the source length
+/// and is always a sufficient destination capacity.  Data that does not compress smaller is
+/// reported as S_FALSE with nothing written, so the caller stores the original bytes.
+/// </summary>
+/// <param name="dest">Destination buffer for compressed data. Untouched unless S_OK is returned.</param>
+/// <param name="sizeInBytes">Byte count of the source buffer, and the capacity of the destination.</param>
+/// <param name="destBytesWritten">On exit, the number of bytes written to the destination. 0 unless S_OK is returned.</param>
+/// <param name="src">Source buffer to compress.</param>
+/// <param name="params">Optional compression settings, see GACL_COMPRESS_BUFFER_PARAMETERS. May be nullptr.</param>
+/// <returns>HRESULT indicating success or failure. S_FALSE indicates uncompressible content, with no compressed data copied to the destination.</returns>
+
+_Success_(return == S_OK)
+GACL_API HRESULT GACL_Compression_CompressBuffer(
+    _Out_writes_bytes_to_opt_(sizeInBytes, *destBytesWritten) uint8_t* dest,
+    size_t sizeInBytes,
+    _Out_ size_t* destBytesWritten,
+    _In_reads_bytes_(sizeInBytes) const uint8_t* src,
+    _In_opt_ const GACL_COMPRESS_BUFFER_PARAMETERS* params
+);
 
 
 /// <summary>

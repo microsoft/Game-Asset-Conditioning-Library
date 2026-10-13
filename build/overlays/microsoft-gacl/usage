@@ -1,0 +1,90 @@
+The GACL package provides CMake targets:
+
+    find_package(GACL CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE GACL::gacl_lib)
+
+Public headers are installed to include/gacl/:
+    #include <gacl/gacl.h>
+    #include <gacl/shuffle.h>
+
+Preprocessor definitions provided by the package:
+    GACL_INCLUDE_BLER=1  (Block-Level Entropy Reduction)
+    GACL_INCLUDE_CLER=1  (Component-Level Entropy Reduction — enabled by default)
+
+Runtime dependency (cler feature):
+    This port includes onnxruntime.dll and onnxruntime_providers_shared.dll
+    (Microsoft.ML.OnnxRuntime 1.24.2). Both must sit next to your executable
+    at runtime.
+
+    Building with the vcpkg toolchain copies onnxruntime.dll next to your
+    executable automatically. It does NOT copy
+    onnxruntime_providers_shared.dll, which has no CMake target and must be
+    named directly.
+
+    To deploy both, including for `cmake --install`:
+
+        include(GNUInstallDirs)
+        if(TARGET OnnxRuntime::OnnxRuntime)
+            get_target_property(_ort_dll OnnxRuntime::OnnxRuntime IMPORTED_LOCATION)
+            get_filename_component(_ort_bin "${_ort_dll}" DIRECTORY)
+            install(FILES
+                "${_ort_bin}/onnxruntime.dll"
+                "${_ort_bin}/onnxruntime_providers_shared.dll"
+                DESTINATION "${CMAKE_INSTALL_BINDIR}")
+        endif()
+
+    The DLLs are also in <your build dir>/vcpkg_installed/<triplet>/bin/ if
+    you prefer to copy them yourself.
+
+To build without CLER (and drop the OnnxRuntime dependency), declare the
+dependency in your manifest with default features off:
+
+    { "name": "microsoft-gacl", "default-features": false }
+
+    (classic mode: vcpkg install microsoft-gacl[core])
+
+CLER is enabled by default. The ONNX models it needs are NOT shipped in the
+package - they are about 65 MB and you generate them once:
+
+    pwsh <your build dir>/vcpkg_installed/<triplet>/tools/microsoft-gacl/setupCLER.ps1 `
+         -ModelsDir "C:\<your project>\ThirdParty\models"
+
+Then point your build at them, or GACL runs without CLER:
+
+    cmake -B build -DGACL_MODELS_DIR="C:\<your project>\ThirdParty\models"
+
+Generating the models needs Python 3.12 and uv, and downloads about 2 GB of
+PyTorch. No GPU is required - the export runs on CPU.
+
+Compressing NON-TEXTURE data (important):
+
+    GACL's hardware-accelerated decompression path requires a zstd window of
+    at most 256 KB (windowLog 18). Data compressed with a larger window still
+    decompresses correctly, but falls off the hardware path and decodes
+    roughly 100x slower. It is a performance cliff, not a corruption bug -
+    nothing fails loudly if you get it wrong.
+
+    If you compress with stock zstd.exe instead of using the GACL APIs or
+    front end tool, set the window explicitly:
+
+        zstd --zstd=wlog=18 <input>
+
+    Two things to know about that flag:
+      - It is not documented upstream. You will not find it in `zstd --help`
+        or in the manual; it works regardless.
+      - Do NOT reach for --long= instead. It exists to make windows LARGER,
+        and setting it low also changes other strategy parameters. It is not
+        a way to spell wlog=18.
+
+    If you LINK libzstd, a command-line flag cannot reach your in-process
+    compression context. Call GACL_Compression_CompressBuffer() instead, or
+    GACL_ShuffleCompress_BCn() for texture data.
+
+    If you need the ZSTD_CCtx itself - for streaming, dictionaries, or a
+    reused context - GACL_Compression_DefaultInitRoutine() hands back one
+    already configured to the settings above, and
+    GACL_Compression_DefaultCleanupRoutine() frees it.
+
+    The emitted frame declares a window of AT MOST 256 KB - zstd reduces it
+    further for small inputs, and a decoder provisioned for 256 KB accepts any
+    frame declaring 256 KB or less.

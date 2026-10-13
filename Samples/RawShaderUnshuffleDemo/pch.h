@@ -48,13 +48,13 @@
 #include <DirectXMath.h>
 #include <DirectXColors.h>
 
-#include "GraphicsMemory.h"
-#include "DescriptorHeap.h"
-#include "ResourceUploadBatch.h"
-#include "RenderTargetState.h"
-#include "SpriteBatch.h"
-#include "SpriteFont.h"
-#include "SimpleMath.h"
+#include <directxtk12/GraphicsMemory.h>
+#include <directxtk12/DescriptorHeap.h>
+#include <directxtk12/ResourceUploadBatch.h>
+#include <directxtk12/RenderTargetState.h>
+#include <directxtk12/SpriteBatch.h>
+#include <directxtk12/SpriteFont.h>
+#include <directxtk12/SimpleMath.h>
 #include "FindMedia.h"
 #include "ReadData.h"
 #include "PerformanceTimers.h"

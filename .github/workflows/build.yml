@@ -25,7 +25,6 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          submodules: recursive
           fetch-depth: 1
           lfs: false
           
@@ -34,24 +33,58 @@ jobs:
           configuration: ${{ matrix.configuration }}
           platform: ${{ matrix.platform }}
 
-      - name: Restore NuGet packages for Sample
-        shell: pwsh
-        run: |
-          nuget restore .\Samples\GameAssetConditioningDemo\GameAssetConditioningDemo.sln `
-            -ConfigFile nuget.config `
-            -PackagesDirectory packages `
-            -Source "https://api.nuget.org/v3/index.json" `
-                  
-      - name: Build Sample
+      - name: Build samples
         shell: pwsh
         run: |
           $out = "${{ github.workspace }}\out\${{ matrix.configuration }}\${{ matrix.platform }}\bin\"
 
           msbuild .\Samples\GameAssetConditioningDemo\GameAssetConditioningDemo.sln `
+            /m `
             /p:Configuration=${{ matrix.configuration }} `
             /p:Platform=${{ matrix.platform }} `
+            /p:GaclPlatformToolset=v143 `
             /p:OutDir="$out"
-        
+          if ($LASTEXITCODE -ne 0) { throw "GameAssetConditioningDemo build failed" }
+
+          msbuild .\Samples\RawShaderUnshuffleDemo\RawShaderUnshuffle.vcxproj `
+            /m `
+            /p:Configuration=${{ matrix.configuration }} `
+            /p:Platform=${{ matrix.platform }} `
+            /p:GaclPlatformToolset=v143 `
+            /p:OutDir="$out"
+          if ($LASTEXITCODE -ne 0) { throw "RawShaderUnshuffle build failed" }
+
+      - name: Validate vcpkg consumer
+        shell: pwsh
+        run: |
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $vcpkgRoot) {
+            $vcpkgRoot = "C:\vcpkg"
+          }
+          $toolchain = Join-Path $vcpkgRoot "scripts\buildsystems\vcpkg.cmake"
+          if (-not (Test-Path $toolchain)) {
+            throw "vcpkg toolchain not found at $toolchain"
+          }
+
+          cmake -S .\Samples\VcpkgConsumer `
+            -B .\Samples\VcpkgConsumer\build `
+            -G "Visual Studio 17 2022" `
+            -A x64 `
+            -DCMAKE_TOOLCHAIN_FILE="$toolchain" `
+            -DVCPKG_OVERLAY_PORTS="${{ github.workspace }}\build\overlays" `
+            -DVCPKG_OVERLAY_TRIPLETS="${{ github.workspace }}\build\triplets" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-v143-static-md
+          if ($LASTEXITCODE -ne 0) { throw "Consumer configure failed" }
+
+          cmake --build .\Samples\VcpkgConsumer\build `
+            --config ${{ matrix.configuration }}
+          if ($LASTEXITCODE -ne 0) { throw "Consumer build failed" }
+
+          ctest --test-dir .\Samples\VcpkgConsumer\build `
+            -C ${{ matrix.configuration }} `
+            --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "Consumer tests failed" }
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:

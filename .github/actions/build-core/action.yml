@@ -1,5 +1,5 @@
 name: Build Core
-description: Checkout, restore, and build GACL
+description: Restore dependencies and build GACL
 
 inputs:
   configuration:
@@ -10,18 +10,23 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Restore NuGet packages
-      shell: pwsh
-      run: |
-        nuget restore gacl.sln `
-          -ConfigFile nuget.config `
-          -PackagesDirectory packages `
-          -Source "https://api.nuget.org/v3/index.json" `
-
     - name: Setup MSBuild (VS 2022)
       uses: microsoft/setup-msbuild@v2
       with:
         vs-version: '17.0'
+
+    - name: Cache vcpkg packages
+      uses: actions/cache@v4
+      with:
+        path: ~/AppData/Local/vcpkg/archives
+        key: ${{ runner.os }}-v143-vcpkg-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'build/overlays/**', 'build/triplets/**') }}
+        restore-keys: |
+          ${{ runner.os }}-v143-vcpkg-
+
+    - name: Restore NuGet packages
+      shell: pwsh
+      run: |
+        Tools\scripts\restorePackages.ps1
 
     - name: Setup CLER
       shell: pwsh
@@ -33,6 +38,8 @@ runs:
       run: |
         msbuild gacl.sln `
           /t:Rebuild `
+          /m `
           /p:Configuration=${{ inputs.configuration }} `
           /p:Platform=${{ inputs.platform }} `
+          /p:GaclPlatformToolset=v143 `
           /p:OutDir=${{ github.workspace }}\out\${{ inputs.configuration }}\${{ inputs.platform }}\bin\
