@@ -66,7 +66,7 @@ target_compile_options(gacl_lib PRIVATE
 )
 
 target_compile_options(gacl_lib PRIVATE
-    $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/Gw /Gy /GL>
+    $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/Gw /Gy>
 )
 
 # CFG (Control Flow Guard) - Release only
