@@ -61,7 +61,6 @@ target_compile_options(gacl_lib PRIVATE
         /ZH:SHA_256
         /utf-8
         /sdl
-        $<$<CONFIG:Release>:/guard:cast /d2CastGuardFailureMode:fastfail>
     >
 )
 
@@ -69,8 +68,9 @@ target_compile_options(gacl_lib PRIVATE
     $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/Gw /Gy>
 )
 
-# CFG (Control Flow Guard) - Release only
-target_link_options(gacl_lib PRIVATE
+# CFG (Control Flow Guard) - Release only. Static libraries have no link step, so this
+# must be a compile option; the consuming image enables CFG with /guard:cf at link time.
+target_compile_options(gacl_lib PRIVATE
     $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/guard:cf>
 )
 
