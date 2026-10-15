@@ -14,11 +14,12 @@
 #include <filesystem>
 #include <iostream>
 #include <fstream>
+#include <random>
 
 #include <DirectXTex.h>
 
 #include <gacl.h>
-#include "../../ThirdParty/zstd/lib/zstd.h"
+#include <zstd.h>
 
 using namespace DirectX;
 using namespace std;
@@ -443,7 +444,7 @@ TEST_P(SC_BC7_Test, LargeBC7_ShuffleCompress) {
 
 // These files were selected in order to yield coverage of the general pattners and BC7 features
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     SC,
     SC_BC7_Test,
     ::testing::Values(
@@ -457,4 +458,110 @@ INSTANTIATE_TEST_CASE_P(
         SC_BC7TestParam{ L"Ladybug_Shell_Roughness_mask.DDS", 7046 }
     )
 );
+
+
+/*  GACL_Compression_CompressBuffer - non-texture data, no shuffle transform  */
+
+// Repetitive enough to compress well, without being so uniform that the result
+// is dominated by RLE of a single byte.
+static vector<uint8_t> MakePatternedBuffer(size_t sizeInBytes)
+{
+    vector<uint8_t> buffer(sizeInBytes);
+    for (size_t i = 0; i < sizeInBytes; i++)
+    {
+        buffer[i] = static_cast<uint8_t>((i / 64) % 17);
+    }
+    return buffer;
+}
+
+// Fixed seed, so an incompressible case cannot vary between runs.
+static vector<uint8_t> MakeRandomBuffer(size_t sizeInBytes)
+{
+    vector<uint8_t> buffer(sizeInBytes);
+    mt19937 rng(12345);
+    for (size_t i = 0; i < sizeInBytes; i++)
+    {
+        buffer[i] = static_cast<uint8_t>(rng());
+    }
+    return buffer;
+}
+
+static void ExpectRoundTrip(const vector<uint8_t>& src, const GACL_COMPRESS_BUFFER_PARAMETERS* params)
+{
+    vector<uint8_t> dest(src.size());
+    size_t destBytesWritten = SIZE_MAX;
+
+    HRESULT hr = GACL_Compression_CompressBuffer(dest.data(), src.size(), &destBytesWritten, src.data(), params);
+
+    ASSERT_EQ(hr, S_OK);
+    EXPECT_GT(destBytesWritten, 0u);
+    EXPECT_LT(destBytesWritten, src.size());       // S_OK is only returned when the result is smaller
+
+    vector<uint8_t> decompressed(src.size());
+    size_t decompressedBytes = ZSTD_decompress(decompressed.data(), decompressed.size(), dest.data(), destBytesWritten);
+
+    ASSERT_FALSE(ZSTD_isError(decompressedBytes));
+    ASSERT_EQ(decompressedBytes, src.size());
+    EXPECT_EQ(0, memcmp(decompressed.data(), src.data(), src.size()));
+}
+
+static void ExpectNotSmaller(const vector<uint8_t>& src)
+{
+    vector<uint8_t> dest(src.size(), 0xCD);
+    size_t destBytesWritten = SIZE_MAX;
+
+    HRESULT hr = GACL_Compression_CompressBuffer(dest.data(), src.size(), &destBytesWritten, src.data(), nullptr);
+
+    EXPECT_EQ(hr, S_FALSE);
+    EXPECT_EQ(destBytesWritten, 0u);
+    EXPECT_EQ(dest, vector<uint8_t>(src.size(), 0xCD));  // destination left untouched
+}
+
+TEST(CompressBuffer, RejectsInvalidArguments) {
+    vector<uint8_t> src = MakePatternedBuffer(4096);
+    vector<uint8_t> dest(src.size());
+    size_t destBytesWritten = SIZE_MAX;
+
+    EXPECT_EQ(GACL_Compression_CompressBuffer(nullptr, src.size(), &destBytesWritten, src.data(), nullptr), E_INVALIDARG);
+    EXPECT_EQ(destBytesWritten, 0u);               // zeroed even on the failure paths
+
+    destBytesWritten = SIZE_MAX;
+    EXPECT_EQ(GACL_Compression_CompressBuffer(dest.data(), src.size(), &destBytesWritten, nullptr, nullptr), E_INVALIDARG);
+    EXPECT_EQ(destBytesWritten, 0u);
+
+    destBytesWritten = SIZE_MAX;
+    EXPECT_EQ(GACL_Compression_CompressBuffer(dest.data(), 0, &destBytesWritten, src.data(), nullptr), E_INVALIDARG);
+    EXPECT_EQ(destBytesWritten, 0u);
+
+    EXPECT_EQ(GACL_Compression_CompressBuffer(dest.data(), src.size(), nullptr, src.data(), nullptr), E_INVALIDARG);
+}
+
+TEST(CompressBuffer, RoundTripsCompressibleData) {
+    ExpectRoundTrip(MakePatternedBuffer(256 * 1024), nullptr);
+}
+
+// Exercises the size buckets GACL_SelectCompressionParameters() switches on.
+TEST(CompressBuffer, RoundTripsAcrossSizeBuckets) {
+    for (size_t sizeInBytes : { size_t(1024), size_t(16 * 1024), size_t(64 * 1024), size_t(1024 * 1024) })
+    {
+        SCOPED_TRACE(sizeInBytes);
+        ExpectRoundTrip(MakePatternedBuffer(sizeInBytes), nullptr);
+    }
+}
+
+TEST(CompressBuffer, RoundTripsWithExplicitParameters) {
+    GACL_COMPRESS_BUFFER_PARAMETERS params = { 19, 1 << 14 };
+    ExpectRoundTrip(MakePatternedBuffer(256 * 1024), &params);
+}
+
+// Not smaller by construction: the zstd frame header alone exceeds the input,
+// so no encoding of these bytes can come in under sizeInBytes.
+TEST(CompressBuffer, ReportsTinyInputAsSFalse) {
+    ExpectNotSmaller(MakePatternedBuffer(4));
+}
+
+// Not smaller because the content carries no redundancy to exploit.
+TEST(CompressBuffer, ReportsRandomDataAsSFalse) {
+    ExpectNotSmaller(MakeRandomBuffer(256 * 1024));
+}
 

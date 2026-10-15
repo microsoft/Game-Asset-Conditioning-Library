@@ -35,19 +35,32 @@ We would love to hear from you - please use [GitHub Issues](https://github.com/m
 
 ---
 
-The GACL preview is buildable via Visual Studio, version 2022 or newer.
+The GACL preview is buildable via Visual Studio, version 2022 or newer. The Visual Studio 2022
+`v143` and Visual Studio 2026 `v145` toolsets are both supported; see
+[Toolset selection](#toolset-selection).
+
+## vcpkg package install
+
+GACL can be consumed as a vcpkg port named `microsoft-gacl`, which installs the public headers
+and static library.
+
+From a manifest-based consumer project:
+
+1. Add `"microsoft-gacl"` to `vcpkg.json`.
+2. Configure with the vcpkg toolchain file.
+3. Use `find_package(GACL CONFIG REQUIRED)` and link to `GACL::gacl_lib`.
+
+See [Samples/VcpkgConsumer/README.md](Samples/VcpkgConsumer/README.md) for a complete consumer
+example.
 
 1. Installation process
 Install latest Visual Studio 2022 from here:  [https://aka.ms/vs/17/release/vs\_enterprise.exe](https://aka.ms/vs/17/release/vs_enterprise.exe)
 Enable "Desktop Development with C++" in Workloads
 2. Software dependencies
    - For lossy ML based implementation:
-      - For model download (highly suggested), run the CLER set up script Tools\\scripts\\setupCLER.ps1
-      - We currently support CPU-based model inference. Check out other ORT nuget packages and execution providers for GPU support: https://onnxruntime.ai/docs/install/
-   - Submodules
-      - zstd is included as a submodule within this repository.  From within your cloned GACL repo, zstd can be pulled down via the following commands:
-         - `git submodule init`
-         - `git submodule update`
+      - For model download (highly suggested), run the CLER set up script `Tools\scripts\setupCLER.ps1`.
+      - We currently support CPU-based model inference. Check out other ORT NuGet packages and execution providers for GPU support: https://onnxruntime.ai/docs/install/
+   - zstd is resolved from the standard vcpkg port. GACL applies its 256 KB window clamp in-library.
 3. The solution file "gacl.sln" can be found in the root folder
 
 # Description of Components
@@ -59,11 +72,7 @@ integration into content pipelines which import textures, and a front end tool i
 
 ## Projects within this solution include:
 
-* lbzstd\_p - Project that imports and builds the zstd submodule, but with modified compression settings intended for broader compatibility with future CPU offload implementations of zstd, with a 256KB window size. Builds to static lib form.
-* libzstd\_p-dll - As above, but builds to dll form.
-* zstd\_p - As above, builds a modified version of the zstd.exe command line tool that limits the window size, which cannot be specified at command
-line.  Note that for optimized performance with CPU offload decompression implementations, it is also advised that developers include the following setting when compressing content:
-  * \--target-compressed-block-size=8192
+* zstd - Consumed via the standard vcpkg port, with GACL enforcing 256 KB-window-aligned compression defaults in-library.
 * gacl\_lib - Core library that contains APIs for RDO and Shuffle transforms, builds into static lib.
 * gacl\_exe - Builds the gacl.exe front end tool that loads textures and applies selected transforms.
 * Tests/... - gtest based projects used for validation.
@@ -74,18 +83,44 @@ line.  Note that for optimized performance with CPU offload decompression implem
 
 ---
 
-Before building, or viewing sources in Visual Studio, the zstd submodule must be initialized by the following git commands:
+Before building in Visual Studio, restore dependencies through vcpkg. The repository configures
+vcpkg through [Directory.Build.Props](Directory.Build.Props), so clone-and-build does not require
+git submodule initialization.
 
+The default package source is nuget.org. If direct access to nuget.org is restricted, set
+`GACL_NUGET_SOURCE` to an approved NuGet v3 service index before restoring or building. The same
+setting is used by the MSBuild package restore and the vcpkg overlay ports:
+
+```powershell
+$env:GACL_NUGET_SOURCE = "https://<approved-nuget-v3-service-index>"
+.\Tools\scripts\restorePackages.ps1
 ```
-git submodule init
-git submodule update
-```
+
+The configured feed must mirror the NuGet packages used by the solution and overlay ports. Leave
+`GACL_NUGET_SOURCE` unset to use the public NuGet service.
 
 Primary build solution can be found at:
 
 `<root>\gacl.sln`
 
 Gtest-based validation projects can be found in the "tests" folder or solution area, and can be directly launched with F5 within Visual Studio.
+
+## Toolset selection
+
+`gacl.sln` builds with either Visual Studio 2022 (`v143`) or Visual Studio 2026 (`v145`).
+The toolset is detected automatically from whichever Visual Studio drives the build. To force a
+specific toolset, pass `/p:GaclPlatformToolset=v143` or `/p:GaclPlatformToolset=v145`.
+
+Toolset-dependent outputs and vcpkg dependencies are kept separate:
+
+| | v143 (VS 2022) | v145 (VS 2026) |
+| --- | --- | --- |
+| Build output | `bin\v143\x64\<Config>\` | `bin\v145\x64\<Config>\` |
+| vcpkg triplet | `x64-windows-v143-static-md` | `x64-windows-v145-static-md` |
+
+The overlay triplets in `build\triplets\` pin `VCPKG_PLATFORM_TOOLSET`. Without that pin, vcpkg
+selects the newest installed MSVC toolset, which can produce incompatible static libraries on a
+machine with both Visual Studio versions installed.
 
 # Primary API
 
@@ -295,4 +330,3 @@ enum class RDO_ErrorCode : int
 ---
 
 The GACL library is the work of Richard Meyer, Meredith Green, Paul Edelstein and Zuoming Shi, with further contributions from Di Tang, Simon Craddick, Danny Chen, and Adeline Braun.
-

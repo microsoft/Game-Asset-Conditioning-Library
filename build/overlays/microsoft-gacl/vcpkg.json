@@ -1,0 +1,32 @@
+{
+  "name": "microsoft-gacl",
+  "version-semver": "1.1.0-preview",
+  "description": "Game Asset Conditioning Library - GPU texture compression and conditioning toolkit",
+  "homepage": "https://github.com/microsoft/Game-Asset-Conditioning-Library",
+  "license": "MIT",
+  "dependencies": [
+    "directx-headers",
+    "directxmath",
+    {
+      "name": "directxtex",
+      "default-features": false
+    },
+    {
+      "name": "vcpkg-cmake",
+      "host": true
+    },
+    {
+      "name": "vcpkg-cmake-config",
+      "host": true
+    },
+    "zstd"
+  ],
+  "default-features": [
+    "cler"
+  ],
+  "features": {
+    "cler": {
+      "description": "Component-Level Entropy Reduction via ONNX Runtime (Microsoft.ML.OnnxRuntime 1.24.2). Disable with \"default-features\": false in your manifest, or microsoft-gacl[core] in classic mode."
+    }
+  }
+}

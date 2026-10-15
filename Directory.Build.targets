@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <!--
+
+    Centralizes additional custom targets.
+
+    This also integrates the Visual C++ Package Manager (VCPKG) into all the projects.
+
+  -->
+
+  <!-- Select the vcpkg triplet from the toolset the project actually compiles
+       with.  This has to happen here rather than in Directory.Build.Props:
+       PlatformToolset is not set until the project body has been evaluated,
+       which is after props but before this file.  vcpkg.targets resolves
+       VcpkgTriplet on import and leaves a non-empty value alone, so setting it
+       ahead of the import below is what makes the choice stick.
+
+       Keying off PlatformToolset means a project is free to pin whatever
+       toolset it likes and still get dependencies built with that same
+       toolset. -->
+  <PropertyGroup Condition="'$(Platform)'=='x64'">
+    <VcpkgTriplet>x64-windows-$(PlatformToolset)-static-md</VcpkgTriplet>
+  </PropertyGroup>
+
+  <!-- Retarget IntDir to the toolset the project actually compiles with, for the
+       same reason as the triplet above.  The condition keeps a project's own
+       IntDir intact: it only rewrites the value Directory.Build.Props supplied. -->
+  <PropertyGroup Condition="'$(IntDir)'=='$(_GaclDefaultIntDir)'">
+    <IntDir>$(SolutionDir)bin\obj\$(PlatformToolset)\$(MSBuildProjectName)\$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+
+  <Import Condition="Exists('$(VcpkgRoot)scripts\buildsystems\msbuild\vcpkg.targets')"
+          Project="$(VcpkgRoot)scripts\buildsystems\msbuild\vcpkg.targets" />
+
+  <Target Name="EnsureVCPKG" BeforeTargets="_CheckForInvalidConfigurationAndPlatform">
+    <PropertyGroup>
+      <ErrorText>This project requires the VCPKG integration support in Visual Studio. Add the Microsoft.VisualStudio.Component.Vcpkg component to your install.</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(VcpkgRoot)')" Text="$(ErrorText)" />
+  </Target>
+
+</Project>

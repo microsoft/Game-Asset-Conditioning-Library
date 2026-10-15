@@ -114,8 +114,8 @@
 #define GACL_VERSION_BUILD   0        // numeric — used in FILEVERSION resource field
 #define GACL_VERSION_LABEL   preview  // pre-release label — used in version strings
 #define GACL_VERSION_NUMBER ((GACL_VERSION_MAJOR << 16) + (GACL_VERSION_MINOR << 8) + GACL_VERSION_PATCH)
-#define GACL_VERSION_STRING STR(GACL_VERSION_MAJOR) "." STR(GACL_VERSION_MINOR) "." STR(GACL_VERSION_PATCH) "." STR(GACL_VERSION_LABEL)
-#define GACL_VERSION_WSTRING WSTR(GACL_VERSION_MAJOR) L"." WSTR(GACL_VERSION_MINOR) L"." WSTR(GACL_VERSION_PATCH) L"." WSTR(GACL_VERSION_LABEL)
+#define GACL_VERSION_STRING STR(GACL_VERSION_MAJOR) "." STR(GACL_VERSION_MINOR) "." STR(GACL_VERSION_PATCH) "-" STR(GACL_VERSION_LABEL)
+#define GACL_VERSION_WSTRING WSTR(GACL_VERSION_MAJOR) L"." WSTR(GACL_VERSION_MINOR) L"." WSTR(GACL_VERSION_PATCH) L"-" WSTR(GACL_VERSION_LABEL)
 
 #ifndef GACL_EXPERIMENTAL
 #define GACL_EXPERIMENTAL 0
@@ -128,6 +128,12 @@
 #define GACL_EXPERIMENTAL_SHUFFLE_ENABLE_BC7_SPLIT_MODE_A       0
 
 #define GACL_ZSTD_TARGET_COMPRESSED_BLOCK_SIZE					(8*1024)
+
+// Maximum zstd window GACL will configure, as a windowLog (1 << 18 == 256KB).
+// Anticipated CPU-offload implementations may have this as a performance boundary,
+// with long fetches (>256KB) having a much higher cost. This is an upper bound, not
+// an exact size - see GACL_Compression_CompressBuffer() in shuffle.h.
+#define GACL_ZSTD_MAX_WINDOW_LOG								(18)
 
 #ifndef GACL_INCLUDE_BLER
 #define GACL_INCLUDE_BLER 1
@@ -181,11 +187,11 @@ void
 /// Default handler will route messages to OutputDebugString.  The gacl.exe front end helper demonstrates
 /// overriding to route messages to standard command line output streams based on message priority and verbosity settings.
 /// </summary>
-/// <param name="callback"></param>
+/// <param name="callback">Routine to receive log messages.  Pass nullptr to disable logging.</param>
 /// <returns></returns>
 
 GACL_API void GACL_Logging_SetCallback(
-	_In_ PGACL_LOGGING_ROUTINE callback
+	_In_opt_ PGACL_LOGGING_ROUTINE callback
 );
 
 #if defined (__cplusplus)

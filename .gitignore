@@ -406,3 +406,8 @@ Tools/scripts/.setupCLER-venv/
 
 [Ii]nternal/
 [Ee]s-metadata.yml
+
+# vcpkg working directories
+vcpkg_installed/
+build/cmake_test/
+Samples/VcpkgConsumer/build*/

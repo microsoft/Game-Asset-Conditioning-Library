@@ -20,7 +20,7 @@ extern "C" {
 enum GACL_SHUFFLE_TRANSFORM
 {
     GACL_SHUFFLE_TRANSFORM_NONE = 0,
-   
+
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224          = 1,     // 3 streams (1:1:2):         color_0, color_1, index bit stream   (DSTORAGE_GACL_SHUFFLE_TRANSFORM_BC1)
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224_SC       = 17,    // 3 streams (1:1:2):         color_0, color_1, index bit stream, space curve (experimental)
 
@@ -34,17 +34,17 @@ enum GACL_SHUFFLE_TRANSFORM
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116_SC    = 20,    // 6 streams (1:1:6:1:1:6)    red_0, red_1, red index stream, green_0, green_1, green index stream, space curve (experimental)
 
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT        = 5,	 // mode-specific streams and transforms, control bytes within compressed stream	(better compression, slower reverse transform, experimental))
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT_SC     = 21,    // as above, but data is curved, can only be decompressed into a target with dimensionality that supports reverse mapping 	
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT_SC     = 21,    // as above, but data is curved, can only be decompressed into a target with dimensionality that supports reverse mapping
 
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN         = 6,     // mode-specific transforms, control bytes outside of compressed stream (less compression, trivial+fast reverse transform, experimental)
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN_SC      = 22,    // as above, but data is curved, can only be decompressed into a target with dimensionality that supports reverse mapping 	
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN_SC      = 22,    // as above, but data is curved, can only be decompressed into a target with dimensionality that supports reverse mapping
 
     GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY             = 7,
     GACL_SHUFFLE_TRANSFORM_ZSTD_SC               = 23,    // (experimental)
 
 
     // v2 (experimental) shuffle patterns
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44           = 32,	  // 2 streams (1:1):            interleaved color_0 + color_1, index bit stream 
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44           = 32,	  // 2 streams (1:1):            interleaved color_0 + color_1, index bit stream
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44_SC,	              // 2 streams (1:1):            As above, with curve
 
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_664,		          // 3 streams (3:3:2)           alpha_0 + alpha_1 + color_0 + color_1, Alpha index, color index stream
@@ -58,55 +58,55 @@ enum GACL_SHUFFLE_TRANSFORM
 
 /// <summary>
 /// This function re-orders texture memory to be screen-adjacent.
-/// 
-/// The space curve is defined as a 16KB region.  
+///
+/// The space curve is defined as a 16KB region.
 /// For 16 byte elements, this means a 32x32 element square (128x128 pixels)
 /// For 8 byte elements, this means a 64x32 element horizontal rectangle (256x128 pixels)
 /// For other size elements, the texture is not eligible for curved transforms currently.
-/// 
-/// These 16KB micro-tiles are then z-ordered across the texture, which means it can only be applied to 
+///
+/// These 16KB micro-tiles are then z-ordered across the texture, which means it can only be applied to
 /// textures that are a power of 2 micro-tiles in each direction.  The below would the micro tile ordering
 /// for a BC7 texture that was 1024x512 pixels:
-/// 
+///
 ///      0   1   4   5  16  17  20  21
-///      
+///
 ///      2   3   6   7  18  19  22  23
-///  
+///
 ///      8   9  12  13  24  25  28  29
-/// 
+///
 ///     10  11  14  15  26  27  30  31
-/// 
+///
 /// The GACL internally uses this function when curved shuffle patterns are selected.  Distance between matches
 /// is reduced, and this reduces the encoding cost of those matches for zstd, typically yielding 1-2% compression.
-/// 
-/// More importantly, when allowing curved transforms, then any RDO applied to the texture should be done after 
+///
+/// More importantly, when allowing curved transforms, then any RDO applied to the texture should be done after
 /// converting to space curve layout.  Block-Level Entropy Reduction at higher setting applied in this way typically
-/// results in 10-20% additional savings due to screen adjacency yielding a higher number of similar (mergeable) 
+/// results in 10-20% additional savings due to screen adjacency yielding a higher number of similar (mergeable)
 /// block before hitting any specified error\deviation limits.
-/// 
-/// Note: Curved transforms are not elligable for all DirectStorage request destinations.  Only a destination 
+///
+/// Note: Curved transforms are not elligable for all DirectStorage request destinations.  Only a destination
 /// type with known dimensionality that follows the same rules as above (power of 2 micro-tiles in each dimension)
 /// are elligable.
-/// 
+///
 /// DirectStorage read requests to read data that include a curved transform will fail for the following destination
-/// types that have no inherent dimensionality: 
-/// 
+/// types that have no inherent dimensionality:
+///
 ///   DSTORAGE_REQUEST_DESTINATION_MEMORY, DSTORAGE_REQUEST_DESTINATION_BUFFER
-/// 
+///
 /// DirectStorage read requests to read data that include a curved transform work for the following destination types
 /// if and only if the details of the request implies a single sub-resource is being loaded, and that subresource meets
 /// the dimensionality restrictions:
-/// 
+///
 ///   DSTORAGE_REQUEST_DESTINATION_MULTIPLE_SUBRESOURCES, DSTORAGE_REQUEST_DESTINATION_MULTIPLE_SUBRESOURCES_RANGE
-/// 
+///
 /// DirectStorage read requests to read data that include a curved transform work for the following destination types
 /// if the updated region meets the dimensionality requirements, though this is generally true for most implementations
 /// of partially resident textures:
 ///
 ///   DSTORAGE_REQUEST_DESTINATION_TEXTURE_REGION, DSTORAGE_REQUEST_DESTINATION_TILES
-/// 
+///
 /// The function can be called without source and destination to test if the stream is elligable for space curve transforms.
-/// 
+///
 /// </summary>
 /// <param name="dest">Destination buffer, optional, filled with curved or uncurved data on exit</param>
 /// <param name="src">Source buffer, optional</param>
@@ -121,8 +121,8 @@ GACL_API bool GACL_Shuffle_ApplySpaceCurve(
     _Out_writes_bytes_opt_(sizeBytes) uint8_t* dest,
     _In_reads_opt_(sizeBytes) const uint8_t* src,
     size_t sizeBytes,
-    size_t elementSizeBytes, 
-    size_t widthInPixels, 
+    size_t elementSizeBytes,
+    size_t widthInPixels,
     bool forward
 );
 
@@ -185,11 +185,11 @@ GACL_API extern PGACL_COMPRESSION_CLEANUPROUTINE GACL_Compression_CleanupRoutine
 
 /// <summary>
 /// Default compression init routine.
-/// 
-/// This function will initialize a zstd compression context that will enforce the following settings 
-/// to maintain compression ratios while enabling future cpu offload implementations of decompression
+///
+/// This function will initialize a zstd compression context that will enforce the following settings
+/// to maintain compression ratios while enabling future CPU-offload implementations of decompression
 /// to achieve higher throughput.
-/// 256KB max window size(enforced via the zstd_p variant lib)
+/// 256KB max window size(enforced at the GACL zstd call site)
 /// Strategy >= btopt(to allow for 3 byte matching)
 /// Min match size = 3
 /// Target block size(smaller blocks allow for more parallelism)
@@ -208,7 +208,7 @@ GACL_API HRESULT GACL_Compression_DefaultInitRoutine(
 
 /// <summary>
 /// Default compress routine
-/// 
+///
 /// Performs zstd compression on the input stream with the context provided
 /// </summary>
 /// <param name="context">Compression context previously returned by the Init routine</param>
@@ -229,7 +229,7 @@ GACL_API HRESULT GACL_Compression_DefaultCompressRoutine(
 
 /// <summary>
 /// Default compression cleanup routine.
-/// 
+///
 /// Frees the zstd compression context.
 /// </summary>
 /// <param name="pContext">Pointer to previously allocated compression context.</param>
@@ -243,6 +243,59 @@ GACL_API HRESULT GACL_Compression_DefaultCleanupRoutine(
 
 
 /// <summary>
+///  Optional settings for GACL_Compression_CompressBuffer(). Pass nullptr to accept the GACL defaults.
+///
+///  These are the same knobs as SHUFFLE_COMPRESS_PARAMETERS::CompressSettings::Default, restated
+///  here so a caller compressing non-texture data does not have to construct a texture parameter
+///  block it cannot meaningfully fill in.
+/// </summary>
+
+struct GACL_COMPRESS_BUFFER_PARAMETERS
+{
+    int ZstdCompressionLevel;                                           // Requested compression level. 0 lets GACL pick a level that guarantees the btopt strategy and 3-byte minimum match.
+    int TargetBlockSize;                                                // zstd target block size, used to ensure block-level parallelism. 0 selects GACL_ZSTD_TARGET_COMPRESSED_BLOCK_SIZE.
+};
+
+
+/// <summary>
+/// Compresses an arbitrary data stream with GACL's constrained zstd settings, applying no shuffle
+/// transform.
+///
+/// This is the companion to GACL_ShuffleCompress_BCn() for data that has no applicable shuffle:
+/// non-BCn formats, block compressed data too small or oddly shaped to shuffle usefully, and
+/// general (non-texture) package data. The output can decompressed on the GPU through
+/// DirectStorage with CompressionFormat = DSTORAGE_COMPRESSION_FORMAT_ZSTD and
+/// GaclTransformType = DSTORAGE_GACL_SHUFFLE_TRANSFORM_NONE - there is no reverse transform to
+/// apply. Using this rather than calling zstd directly is what guarantees the 256KB window,
+/// >=btopt strategy, 3-byte minimum match and target block size that the GPU decompressor requires.
+///
+/// Compression goes through the same GACL_Compression_*Routine hooks as GACL_ShuffleCompress_BCn(),
+/// so a caller that has overridden those gets one handler for texture and non-texture data alike.
+/// The internally constructed parameter block reports Format = DXGI_FORMAT_UNKNOWN, which is how a
+/// custom handler can tell that the payload is not a BCn stream.
+///
+/// Like GACL_ShuffleCompress_BCn(), one size covers both buffers: sizeInBytes is the source length
+/// and is always a sufficient destination capacity.  Data that does not compress smaller is
+/// reported as S_FALSE with nothing written, so the caller stores the original bytes.
+/// </summary>
+/// <param name="dest">Destination buffer for compressed data. Untouched unless S_OK is returned.</param>
+/// <param name="sizeInBytes">Byte count of the source buffer, and the capacity of the destination.</param>
+/// <param name="destBytesWritten">On exit, the number of bytes written to the destination. 0 unless S_OK is returned.</param>
+/// <param name="src">Source buffer to compress.</param>
+/// <param name="params">Optional compression settings, see GACL_COMPRESS_BUFFER_PARAMETERS. May be nullptr.</param>
+/// <returns>HRESULT indicating success or failure. S_FALSE indicates uncompressible content, with no compressed data copied to the destination.</returns>
+
+_Success_(return == S_OK)
+GACL_API HRESULT GACL_Compression_CompressBuffer(
+    _Out_writes_bytes_to_opt_(sizeInBytes, *destBytesWritten) uint8_t* dest,
+    size_t sizeInBytes,
+    _Out_ size_t* destBytesWritten,
+    _In_reads_bytes_(sizeInBytes) const uint8_t* src,
+    _In_opt_ const GACL_COMPRESS_BUFFER_PARAMETERS* params
+);
+
+
+/// <summary>
 /// Transforms a given Block Compressed (BCn) input data stream to improve compressibility, followed by compression.
 ///
 /// Each BCn mode may have multiple transforms that are tried, with the smallest compressed result returned to
@@ -250,7 +303,7 @@ GACL_API HRESULT GACL_Compression_DefaultCleanupRoutine(
 ///
 /// Transforms for which there is no current GPU-based reverse transform within DirectStorage are considered
 /// experimental or proposed for future support.
-/// 
+///
 /// Default compression is zstd, with some specific setting intended to balance compression ratio and
 /// throughput on anticipated future cpu offload implementations of zstd decompression.
 /// </summary>
@@ -269,4 +322,3 @@ GACL_API HRESULT GACL_ShuffleCompress_BCn(
 #if defined (__cplusplus)
 }
 #endif
-

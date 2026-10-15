@@ -8,14 +8,32 @@
 #
 #-------------------------------------------------------------------------------------
 
+<#
+.SYNOPSIS
+    Sets up CLER (Component-Level Entropy Reduction) ONNX models for GACL.
+
+.PARAMETER ModelsDir
+    Directory where ONNX models will be written.
+    Defaults to <repo root>/ThirdParty/models/ when running from the source tree.
+    When installed via vcpkg, pass the desired output path explicitly, e.g.:
+        setupCLER.ps1 -ModelsDir "C:\MyProject\ThirdParty\models"
+#>
+param(
+    [string]$ModelsDir = ""
+)
+
 $ErrorActionPreference = "Stop"
 
-# Path setup: scripts/ -> Tools/ -> repo root
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$ToolsDir = Split-Path -Parent $ScriptDir
-$RepoRoot = Split-Path -Parent $ToolsDir
-$ThirdPartyDir = Join-Path $RepoRoot "ThirdParty"
-$ModelsDir = Join-Path $ThirdPartyDir "models"
+
+# Resolve ModelsDir: use caller-supplied path, or fall back to the repo-relative default.
+if ($ModelsDir -eq "") {
+    # Running from the source tree: scripts/ -> Tools/ -> repo root
+    $ToolsDir = Split-Path -Parent $ScriptDir
+    $RepoRoot = Split-Path -Parent $ToolsDir
+    $ModelsDir = Join-Path $RepoRoot "ThirdParty\models"
+}
+
 $venvPath = Join-Path $ScriptDir ".setupCLER-venv"
 
 # ==========================================================
@@ -30,13 +48,8 @@ Write-Host "  2. Python 3.12 environment with ONNX packages in the venv"
 Write-Host ""
 
 # ==========================================================
-# Create ThirdParty directories
+# Create models directory
 # ==========================================================
-
-if (-not (Test-Path $ThirdPartyDir)) {
-    New-Item -ItemType Directory -Path $ThirdPartyDir -Force | Out-Null
-    Write-Host "Created: $ThirdPartyDir"
-}
 
 if (-not (Test-Path $ModelsDir)) {
     New-Item -ItemType Directory -Path $ModelsDir -Force | Out-Null
@@ -131,6 +144,7 @@ Write-Host "--- Exporting ONNX Models ---"
 Write-Host "You may encounter some expected warnings such as a pretained/weights deprecation, torch.load() security warning, and TracerWarning"
 
 $pythonExe = Join-Path $venvPath "Scripts\python.exe"
+$env:GACL_MODELS_DIR = $ModelsDir
 & $pythonExe "$ScriptDir\onnxExporter.py"
 
 if ($LASTEXITCODE -ne 0) {
@@ -150,8 +164,9 @@ Write-Host ""
 
 Write-Host "--- Cleaning up virtual environment ---"
 
-# Clear the VIRTUAL_ENV variable
+# Clear environment variables set for this session
 $env:VIRTUAL_ENV = $null
+$env:GACL_MODELS_DIR = $null
 
 if (Test-Path $venvPath) {
     Remove-Item $venvPath -Recurse -Force

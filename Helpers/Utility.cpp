@@ -27,14 +27,22 @@ void Utility::DefaultLoggingRoutine(GACL_Logging_Priority msgPri, const wchar_t*
 
 namespace 
 {
+    // Installed by GACL_Logging_SetCallback(nullptr).  Keeping a callable sink here means
+    // the invocation sites in Print() can never call through a null pointer.
+    void NullLoggingRoutine(GACL_Logging_Priority, const wchar_t*)
+    {
+    }
+
     PGACL_LOGGING_ROUTINE LoggingRoutine = &Utility::DefaultLoggingRoutine;
 }
 
 void GACL_Logging_SetCallback(
-    _In_ PGACL_LOGGING_ROUTINE callback
+    _In_opt_ PGACL_LOGGING_ROUTINE callback
 )
 {
-    LoggingRoutine = callback;
+    // A null callback disables logging by installing the internal no-op sink, rather than
+    // clearing the pointer.
+    LoggingRoutine = (callback != nullptr) ? callback : &NullLoggingRoutine;
 }
 
 void Utility::Print(GACL_Logging_Priority msgPri, const wchar_t* msg)

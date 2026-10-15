@@ -12,6 +12,9 @@
 #include "../BCnBlockDefs.h"
 #include "bc7.h"
 
+#include <intrin.h>
+#include <immintrin.h>
+
 #include <chrono>
 #include <cassert>
 #include <algorithm>
@@ -5110,57 +5113,75 @@ void BC7_ModeJoin_RotateColors(const uint8_t* src, size_t srcSize, std::vector<u
 
         switch (mode) {
         case 0:
+        {
             BC7m0 b0 = *reinterpret_cast<const BC7m0*>(pSrc);
             b0.ApplyRotation7bit(altEncoding ? rotationAlt[r] : rotationDefault[r]);        // TODO consider adjusting to non 7bit rotations
             *reinterpret_cast<BC7m0*>(pDest) = b0;
             break;
+        }
 
         case 1:
+        {
             BC7m1 b1 = *reinterpret_cast<const BC7m1*>(pSrc);
             b1.ApplyRotation7bit(altEncoding ? rotationAlt[r] : rotationDefault[r]);
             *reinterpret_cast<BC7m1*>(pDest) = b1;
             break;
+        }
 
 
         case 2:
+        {
             BC7m2 b2 = *reinterpret_cast<const BC7m2*>(pSrc);
             b2.ApplyRotation7bit(altEncoding ? rotationAlt[r] : rotationDefault[r]);
             *reinterpret_cast<BC7m2*>(pDest) = b2;
             break;
+        }
 
         case 3:
+        {
             BC7m3 b3 = *reinterpret_cast<const BC7m3*>(pSrc);
             b3.ApplyRotation7bit(altEncoding ? rotationAlt[r] : rotationDefault[r]);
             *reinterpret_cast<BC7m3*>(pDest) = b3;
             break;
+        }
 
 
         case 4:
+        {
             BC7m4_Derotated b4 = *reinterpret_cast<const BC7m4_Derotated*>(pSrc);
             b4.ApplyRotation7bit(altEncoding ? rotationAlt[r] : rotationDefault[r]);
             *reinterpret_cast<BC7m4_Derotated*>(pDest) = b4;
             break;
+        }
 
         case 5:
+        {
             BC7m5_Derotated b5 = *reinterpret_cast<const BC7m5_Derotated*>(pSrc);
             b5.ApplyRotation7bit(altEncoding ? rotationAlt[r] : rotationDefault[r]);
             *reinterpret_cast<BC7m5_Derotated*>(pDest) = b5;
             break;
+        }
 
         case 6:
+        {
             BC7m6 b6 = *reinterpret_cast<const BC7m6*>(pSrc);
             b6.ApplyRotation7bit(altEncoding ? rotationAlt[r] : rotationDefault[r]);
             *reinterpret_cast<BC7m6*>(pDest) = b6;
             break;
+        }
 
         case 7:
+        {
             BC7m7 b7 = *reinterpret_cast<const BC7m7*>(pSrc);
             b7.ApplyRotation7bit(altEncoding ? rotationAlt[r] : rotationDefault[r]);
             *reinterpret_cast<BC7m7*>(pDest) = b7;
             break;
+        }
 
         default:
+        {
             *reinterpret_cast<__m128i*>(pDest) = *reinterpret_cast<const __m128i*>(pSrc);
+        }
 
         }
     }

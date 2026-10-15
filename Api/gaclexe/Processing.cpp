@@ -16,7 +16,8 @@
 #include "../helpers/Utility.h"
 #include "../helpers/FileUtility.h"
 #include "../helpers/FormatHelper.h"
-#include "../ThirdParty/zstd/lib/zstd.h"
+
+#include <zstd.h>
 
 #include <chrono>
 #include <thread>
@@ -103,6 +104,75 @@ DXGI_FORMAT gacl::IdentifyBCEncodeFormat(const std::string& ident)
 
     return ret;
 }
+
+/*  Raw (non-texture) path.  Deliberately built on GACL_Compression_CompressBuffer() rather than
+    repeating the context setup: the tool and a library caller then get identical behaviour, and
+    GACL's window policy stays defined in exactly one place.  */
+
+bool gacl::ProcessRawFile(
+    const std::wstring& inputFileName,
+    const std::wstring& outputFileName,
+    ProcessingOptions& options,
+    Verbosity verbosity)
+{
+    Utility::ByteArray source = Utility::ReadFileSync(inputFileName.c_str());
+
+    if (source == nullptr || source->empty())
+    {
+        Utility::Printf(GACL_Logging_Priority_High, L"ERROR: Failed to read \"%ws\", or the file is empty\n", inputFileName.c_str());
+        return false;
+    }
+
+    std::vector<uint8_t> compressed(source->size());
+    size_t compressedBytes = 0;
+
+    //  gaclexe uses 0xff to mean "no level requested"; the GACL API uses 0 for the same thing.
+    //  Passing 0xff straight through would reach ZSTD_getCParams as 255 and be clamped to the
+    //  maximum level, silently compressing at 22 instead of the level GACL selects by size.
+    const GACL_COMPRESS_BUFFER_PARAMETERS cp =
+    {
+        (options.CompressOptions.Level == 0xff) ? 0 : int(options.CompressOptions.Level)
+    };
+
+    HRESULT hr = GACL_Compression_CompressBuffer(
+        compressed.data(),
+        compressed.size(),
+        &compressedBytes,
+        source->data(),
+        &cp);
+
+    if (FAILED(hr))
+    {
+        Utility::Printf(GACL_Logging_Priority_High, L"ERROR: Compression failed for \"%ws\" with HRESULT(0x%08X)\n", inputFileName.c_str(), hr);
+        return false;
+    }
+    else if (hr == S_FALSE)
+    {
+        //  Nothing was written and raw mode has no store-the-original fallback, so there is no
+        //  output file to produce - fail rather than exit 0 with no .zst on disk.
+        Utility::Printf(GACL_Logging_Priority_High, L"WARNING: Compression did not reduce the size of \"%ws\", no output will be exported\n", inputFileName.c_str());
+        return false;
+    }
+
+    std::ofstream outFile(outputFileName, std::ios_base::out | std::ios::binary);
+
+    if (!outFile)
+    {
+        Utility::Printf(GACL_Logging_Priority_High, L"ERROR: Failed to open \"%ws\" for writing\n", outputFileName.c_str());
+        return false;
+    }
+
+    outFile.write(reinterpret_cast<const char*>(compressed.data()), std::streamsize(compressedBytes));
+    outFile.close();
+
+    if (verbosity >= Verbosity::eDefault)
+    {
+        Utility::Printf(L"Raw compressed  %zu -> %zu bytes  (%ws)\n", source->size(), compressedBytes, outputFileName.c_str());
+    }
+
+    return true;
+}
+
 
 bool gacl::ProcessTexture(
     const std::wstring& inputBlockCompressedFileName,

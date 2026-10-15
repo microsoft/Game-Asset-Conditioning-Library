@@ -1,0 +1,34 @@
+Game Asset Conditioning Library (GACL) - Third-Party Notices
+=============================================================
+
+This project includes or depends on third-party components.
+The licenses for those components are listed below.
+
+1) Zstandard (zstd)
+   - Upstream: https://github.com/facebook/zstd
+   - License: BSD-3-Clause
+
+2) ONNX Runtime
+   - Upstream: https://github.com/microsoft/onnxruntime
+   - License: MIT
+
+3) DirectXTex
+   - Upstream: https://github.com/microsoft/DirectXTex
+   - License: MIT
+
+4) DirectXMath
+   - Upstream: https://github.com/microsoft/DirectXMath
+   - License: MIT
+
+5) DirectX-Headers
+   - Upstream: https://github.com/microsoft/DirectX-Headers
+   - License: MIT
+
+6) GoogleTest (test-only dependency)
+   - Upstream: https://github.com/google/googletest
+   - License: BSD-3-Clause
+
+For the exact license text and version resolved in a specific build, see:
+- LICENSE in this repository
+- vcpkg metadata for resolved ports
+- Generated SBOM/SPDX artifacts in CI

@@ -1,0 +1,146 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(zstd CONFIG REQUIRED)
+find_dependency(DirectXTex CONFIG REQUIRED)
+find_dependency(directx-headers CONFIG REQUIRED)
+find_dependency(directxmath CONFIG REQUIRED)
+
+set(GACL_ENABLE_CLER @GACL_ENABLE_CLER@)
+if(GACL_ENABLE_CLER)
+    # This package was built with CLER enabled, so require OnnxRuntime at
+    # configure time instead of deferring failure to link time.
+    #
+    # PRECEDENCE, deliberately: CONFIG is tried first and unconditionally, so a config package
+    # always wins over an explicitly set ONNXRUNTIME_ROOT.  A config package is the authoritative
+    # description of an installed dependency and is what vcpkg produces; the alternative rule
+    # (explicit user variable wins) is defensible but would make resolution depend on which of two
+    # things the consumer happened to set.  A documented rule beats a clever one.
+    #
+    # Under vcpkg the port generates an OnnxRuntimeConfig.cmake into the installed tree, so this
+    # attempt succeeds and nothing below runs - the Find module shipped beside this file is
+    # unreachable on that path.  It is installed unconditionally anyway, because the alternative is
+    # conditional install logic for one small file.
+    # find_package, NOT find_dependency, for this one dependency only: find_dependency propagates
+    # failure immediately by design, so the fallback below would never execute after it.  The other
+    # four dependencies keep find_dependency deliberately - they have no fallback and should abort.
+    # Do not make this uniform.
+    find_package(OnnxRuntime QUIET CONFIG)
+
+    # Gate on the TARGET, not on OnnxRuntime_FOUND.  A config package that is found but does not
+    # define OnnxRuntime::OnnxRuntime must still fall through to the module; keying off _FOUND
+    # would accept it and then fail later with a missing target.  Do not simplify this.
+    if(NOT TARGET OnnxRuntime::OnnxRuntime)
+        # FindOnnxRuntime.cmake is installed beside this file.  It searches only ONNXRUNTIME_ROOT
+        # (NO_DEFAULT_PATH), so it resolves nothing unless the consumer sets that variable.
+        # CMAKE_MODULE_PATH is restored afterwards: a package config that mutates global state and
+        # leaves it mutated can shadow the consumer's own resolution elsewhere in their project.
+        set(_gacl_saved_module_path "${CMAKE_MODULE_PATH}")
+        list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
+        find_package(OnnxRuntime QUIET MODULE)
+        set(CMAKE_MODULE_PATH "${_gacl_saved_module_path}")
+        unset(_gacl_saved_module_path)
+
+        if(TARGET OnnxRuntime::OnnxRuntime)
+            message(STATUS "GACL: OnnxRuntime resolved via FindOnnxRuntime module (ONNXRUNTIME_ROOT=${ONNXRUNTIME_ROOT})")
+        endif()
+    else()
+        message(STATUS "GACL: OnnxRuntime resolved via config package")
+    endif()
+
+    if(NOT TARGET OnnxRuntime::OnnxRuntime)
+        # Instructions rather than a diagnosis: a consumer who hits this is stuck now, reads this
+        # text, and may never find the usage file.  vcpkg escape hatch first so a vcpkg consumer
+        # stops reading immediately.
+        if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+            set(_gacl_ort_arch "win-x64")
+        else()
+            set(_gacl_ort_arch "win-x86")
+        endif()
+        # One argument with explicit \n escapes.  Each line ends "\n\" - a newline for the
+        # message, then a backslash continuation that swallows the source file's own line
+        # ending.  This file is CRLF; without the continuation those CRLFs would land inside
+        # the string and ship carriage returns in the error text.
+        message(FATAL_ERROR
+"GACL was built with CLER enabled (GACL_ENABLE_CLER=ON) but OnnxRuntime was not found.\n\
+\n\
+  Consuming GACL through vcpkg needs none of this - the port supplies OnnxRuntime.\n\
+\n\
+  For a plain 'cmake --install' consumer, provide it one of two ways:\n\
+\n\
+  1) Point at an extracted Microsoft.ML.OnnxRuntime NuGet package:\n\
+\n\
+       cmake -DONNXRUNTIME_ROOT=C:/path/to/Microsoft.ML.OnnxRuntime.1.24.2 ...\n\
+\n\
+     GACL is built against 1.24.2.  That directory must contain:\n\
+       build/native/include/onnxruntime_c_api.h\n\
+       runtimes/${_gacl_ort_arch}/native/onnxruntime.lib\n\
+     Download: https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime/1.24.2\n\
+     (a .nupkg is a .zip - rename and extract).\n\
+\n\
+  2) Or put an OnnxRuntimeConfig.cmake defining OnnxRuntime::OnnxRuntime on\n\
+     CMAKE_PREFIX_PATH.\n\
+\n\
+  Then note: outside vcpkg nothing deploys the runtime DLLs for you.  Both\n\
+  onnxruntime.dll and onnxruntime_providers_shared.dll must end up beside your\n\
+  executable, or it will configure and build and then fail at process start.")
+    endif()
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/GACLTargets.cmake")
+
+# The gacl command-line tool, as an imported executable, so a consumer can drive it from their
+# own build:  add_custom_command(OUTPUT ... COMMAND GACL::gacl ...)
+#
+# THE COPY WE WANT IS THE ONE THAT RUNS ON THE BUILD MACHINE, not the one built for the target.
+# gacl.exe is a build-time tool: it is executed by the consumer's build, so it has to match the
+# HOST.  The tools/ directory beside this file belongs to the TARGET triplet, so on a cross
+# build (x64 host producing arm64) it holds an arm64 binary the build cannot run.  vcpkg's answer
+# is a host dependency - { "name": "microsoft-gacl", "host": true } in the consumer manifest -
+# which installs a host-triplet copy alongside the target one.  We look there first.
+#
+# Defined HERE rather than added to EXPORT GACLTargets, and that part is mechanism rather than
+# taste.  vcpkg_copy_tools(... AUTO_CLEAN) copies the tool to tools/${PORT} and then DELETES
+# bin/gacl.exe, which is where install(TARGETS) put it.  An exported target records
+# IMPORTED_LOCATION at install time, and the generated GACLTargets.cmake turns a missing imported
+# file into a FATAL_ERROR, so exporting it would break find_package(GACL) for every vcpkg consumer
+# by pointing at the file vcpkg had just removed.  Locating it afterwards survives the move.
+if(NOT TARGET GACL::gacl)
+    set(_gacl_tool_dirs "")
+
+    # 1. The host-triplet tree, which is the correct answer whenever it exists.  Both variables are
+    #    set by vcpkg's toolchain file; absent them we are not under vcpkg and this contributes
+    #    nothing.
+    if(DEFINED _VCPKG_INSTALLED_DIR AND DEFINED VCPKG_HOST_TRIPLET)
+        list(APPEND _gacl_tool_dirs "${_VCPKG_INSTALLED_DIR}/${VCPKG_HOST_TRIPLET}/tools/microsoft-gacl")
+    endif()
+
+    # 2. The tree beside this config.  Correct only when host and target agree, which is the common
+    #    case and is why it is a fallback rather than the first choice.  CMAKE_CROSSCOMPILING is
+    #    the signal that they do not.
+    if(NOT CMAKE_CROSSCOMPILING)
+        list(APPEND _gacl_tool_dirs
+            "${CMAKE_CURRENT_LIST_DIR}/../../tools/microsoft-gacl"
+            "${CMAKE_CURRENT_LIST_DIR}/../../bin")
+    endif()
+
+    if(_gacl_tool_dirs)
+        find_program(GACL_TOOL_EXECUTABLE NAMES gacl PATHS ${_gacl_tool_dirs} NO_DEFAULT_PATH)
+    endif()
+
+    if(GACL_TOOL_EXECUTABLE)
+        add_executable(GACL::gacl IMPORTED)
+        set_target_properties(GACL::gacl PROPERTIES IMPORTED_LOCATION "${GACL_TOOL_EXECUTABLE}")
+    elseif(CMAKE_CROSSCOMPILING)
+        # Say why rather than leave the target quietly undefined: the consumer's next error would
+        # otherwise be an unrelated-looking 'unknown command GACL::gacl' at generate time.
+        message(STATUS
+            "GACL: cross-compiling and no host-triplet gacl tool found, so GACL::gacl is not "
+            "defined.  Add { \"name\": \"microsoft-gacl\", \"host\": true } to your vcpkg manifest "
+            "if you need to run the tool during your build.")
+    endif()
+
+    unset(_gacl_tool_dirs)
+endif()
+check_required_components(GACL)
