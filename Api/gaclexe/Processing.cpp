@@ -184,6 +184,10 @@ bool gacl::ProcessTexture(
     ProcessingOptions& options,
     Verbosity verbosity)
 {
+#if !GACL_INCLUDE_CLER
+    UNREFERENCED_PARAMETER(inputOriginalArtFileName);
+#endif
+
     ScratchImage si;
     TexMetadata siMeta;
 
@@ -932,6 +936,9 @@ bool gacl::ProcessTexture(
         Utility::Printf(GACL_Logging_Priority_Medium, L"All %zu array items and %zu mip levels processed\n", siMeta.arraySize, siMeta.mipLevels);
         Utility::Printf(GACL_Logging_Priority_Medium, L"=================================================\n\n");
     }
+#else
+    bool genClerScreenSpace = false;
+    bool genClerLinearSpace = false;
 #endif
 
     DirectX::ScratchImage* outImage =
@@ -947,7 +954,7 @@ bool gacl::ProcessTexture(
 #if GACL_INCLUDE_CLER
         DirectX::ScratchImage& srcForUncurvedTransforms = genClerLinearSpace ? clerLinearSpace : genBlerLinearSpace ? blerLinearSpace : si;
 #else
-        DirectX::ScratchImage& srcForUncurvedTransforms = options.BlerOptions.Enabled ? rdoLinearSpace : si;
+        DirectX::ScratchImage& srcForUncurvedTransforms = genBlerLinearSpace ? blerLinearSpace : si;
 #endif
         outImage = (genClerScreenSpace || genBlerScreenSpace) ? &srcForCurvedTransforms : &srcForUncurvedTransforms;
 
