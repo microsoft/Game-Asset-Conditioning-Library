@@ -251,6 +251,12 @@ bool Game::RunAllPermutationsForLoadedTexture()
             {
                 for (uint32_t scIndex = 0; scIndex < std::size(g_useSpaceCurve); ++scIndex)
                 {
+                    // only run curved variants when the texture dimensions are space-curve eligible
+                    if (g_useSpaceCurve[scIndex] && !GACL_Shuffle_ApplySpaceCurve(nullptr, nullptr, bcSizeInBytes, 16, widthPixels, true))
+                    {
+                        continue;
+                    }
+
                     for (uint32_t patternSetIndex = 0; patternSetIndex < std::size(g_patternSets); ++patternSetIndex)
                     {
                         BC7ModeSplitShufflePattern Patterns[8];
@@ -655,10 +661,8 @@ void Game::Unshuffle(GTestParameters params, size_t sizeInBytes)
 
             commandList->SetComputeRoot32BitConstant(0, histogramCount, 0);
             commandList->SetComputeRoot32BitConstant(0, numBlocks, 1);
-            commandList->SetComputeRoot32BitConstant(0, static_cast<uint32_t>(params.width), 2);
-            commandList->SetComputeRoot32BitConstant(0, params.useSpaceCurve, 3);
-            commandList->SetComputeRoot32BitConstant(0, m_offsetIntoHistogram, 4);
-            commandList->SetComputeRoot32BitConstant(0, m_offsetIntoBinning, 5);
+            commandList->SetComputeRoot32BitConstant(0, m_offsetIntoHistogram, 2);
+            commandList->SetComputeRoot32BitConstant(0, m_offsetIntoBinning, 3);
 
             commandList->SetComputeRootShaderResourceView(1, m_shuffledBuffer->GetGPUVirtualAddress());
             commandList->SetComputeRootUnorderedAccessView(2, m_scratchBuffer->GetGPUVirtualAddress());

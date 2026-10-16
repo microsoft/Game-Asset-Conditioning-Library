@@ -123,6 +123,7 @@ struct BC7ModeSplitShuffleOptions
     BC7ModeSplitShufflePattern Patterns[8];
     uint8_t EndpointOrderStrategy;
     uint32_t RotationRegionSize;
+    uint32_t SpaceCurveWidthInPixels;   // 0 if the source is linear, else the width the source was space curved with (recorded in the stream header, max 16384)
 };
 
 

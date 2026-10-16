@@ -2768,10 +2768,25 @@ union ModeSplitStartByte
         uint8_t ModeEncoding : 1;
         uint8_t StaticFields : 1;
         uint8_t LowEntropyFields : 1;
-        uint8_t Reserved : 1;
+        uint8_t ExtensionByte : 1;      // ModeSplitExtensionByte follows the start byte
     };
 };
 static_assert(sizeof(ModeSplitStartByte) == 1, "Split mode header byte struct must remain byte size");
+
+union ModeSplitExtensionByte
+{
+    uint8_t Raw;
+    struct
+    {
+        // Blocks are in 16KB space curve tiles of 32x32 blocks (128x128 pixels), z-ordered across the texture.
+        // 0 = linear (a single tile wide texture is an identity curve), else width in pixels = 128 << SpaceCurveWidthInTilesLog2
+        uint8_t SpaceCurveWidthInTilesLog2 : 3;
+        uint8_t Reserved : 5;
+    };
+};
+static_assert(sizeof(ModeSplitExtensionByte) == 1, "Split mode extension byte struct must remain byte size");
+
+constexpr size_t ModeSplitCurveTileWidthInPixels = 128;
 
 /*
     LUT entry:
@@ -4298,7 +4313,13 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
     //  1 Byte
     //      4 bits - size of mode LUT
     //      4 bits - global options
-    //          0x1 = global statics byte follows
+    //          0x1 = mode B encoding
+    //          0x2 = global statics byte follows
+    //          0x4 = global low entropy byte follows
+    //          0x8 = extension byte follows (space curve width)
+    //  [1 byte extension]
+    //  [1 byte global statics]
+    //  [1 byte global low entropy]
     //  N bytes LUT[0....n]
     //     4 bits - BC7 mode (most common)
     //     4 bits - Shuffle Pattern\options
@@ -4311,12 +4332,27 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
 
     std::vector<uint8_t> header;
 
+    ModeSplitExtensionByte extensionByte = {};
+    if (opt.SpaceCurveWidthInPixels)
+    {
+        const size_t widthInTiles = ((opt.SpaceCurveWidthInPixels + 3) / 4) / 32;
+        unsigned long widthInTilesLog2 = 0;
+        _BitScanForward64(&widthInTilesLog2, widthInTiles);
+        assert(widthInTiles == (1ull << widthInTilesLog2) && widthInTilesLog2 <= 7);
+        extensionByte.SpaceCurveWidthInTilesLog2 = static_cast<uint8_t>(widthInTilesLog2);
+    }
+
     ModeSplitStartByte byte1A = {};
     byte1A.ModesUsed = modesUsed;
     byte1A.StaticFields = (metrics.Statics ? 1u : 0u);
     byte1A.LowEntropyFields = (metrics.LowEntropy ? 1u : 0u);
+    byte1A.ExtensionByte = (extensionByte.Raw ? 1u : 0u);
     header.push_back(byte1A.Raw);
 
+    if (byte1A.ExtensionByte)
+    {
+        header.push_back(extensionByte.Raw);
+    }
     if (byte1A.StaticFields)
     {
         header.push_back(metrics.Statics);
@@ -4454,7 +4490,7 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
 
 void BC7_ModeSplit_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8_t>& dest, size_t destSize, const uint8_t* ref)
 {
-    UNREFERENCED_PARAMETER(ref); // useful when debugging
+    UNREFERENCED_PARAMETER(ref); // useful when debugging, compared per block against the Transform source (curved, if the header records a space curve)
     BC7ModeSplitShuffleOptions opt = {};
     BC7TextureMetrics metrics = {};
 
@@ -4473,6 +4509,16 @@ void BC7_ModeSplit_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8
     const uint8_t* pLut = src + 1;
     size_t lutBytes = 0;
 
+    if (firstByte.ExtensionByte)
+    {
+        ModeSplitExtensionByte extensionByte = *reinterpret_cast<const ModeSplitExtensionByte*>(pLut);
+        assert(extensionByte.Reserved == 0);
+        if (extensionByte.SpaceCurveWidthInTilesLog2)
+        {
+            opt.SpaceCurveWidthInPixels = static_cast<uint32_t>(ModeSplitCurveTileWidthInPixels << extensionByte.SpaceCurveWidthInTilesLog2);
+        }
+        pLut++;
+    }
     if (firstByte.StaticFields)
     {
         metrics.Statics = *pLut;
@@ -5301,6 +5347,15 @@ void BC7_ModeSplit_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8
                 assert(reinterpret_cast<uint64_t*>(dest.data() + i * 16)[1] == reinterpret_cast<const uint64_t*>(ref + i * 16)[1]);
             }
         }
+    }
+
+    if (opt.SpaceCurveWidthInPixels)
+    {
+        std::vector<uint8_t> uncurved(destSize);
+        const bool uncurveApplied = GACL_Shuffle_ApplySpaceCurve(uncurved.data(), dest.data(), destSize, 16, opt.SpaceCurveWidthInPixels, false);
+        assert(uncurveApplied);
+        UNREFERENCED_PARAMETER(uncurveApplied);
+        memcpy(dest.data(), uncurved.data(), destSize);
     }
 }
 
