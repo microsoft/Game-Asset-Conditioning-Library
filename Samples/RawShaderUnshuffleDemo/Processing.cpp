@@ -121,9 +121,11 @@ void ProcessTexture(
 
         vector<uint8_t> curved(srcSize);
 
+        // The space curve is only applied when the texture dimensions are eligible
+        bool curveApplied = false;
         if (shuffleParams.useSpaceCurve)
         {
-            GACL_Shuffle_ApplySpaceCurve(curved.data(), src, srcSize, 16, bcTextureWidthInPixels, true);
+            curveApplied = GACL_Shuffle_ApplySpaceCurve(curved.data(), src, srcSize, 16, bcTextureWidthInPixels, true);
             src = curved.data();
         }
 
@@ -135,6 +137,7 @@ void ProcessTexture(
         opt.ModeTransform = shuffleParams.modeTransform;
         opt.EndpointOrderStrategy = shuffleParams.endpointOrderStrategy;
         opt.RotationRegionSize = shuffleParams.ChunkSize;
+        opt.SpaceCurveWidthInPixels = curveApplied ? static_cast<uint32_t>(bcTextureWidthInPixels) : 0u;   // recorded in the stream header
         memcpy(opt.Patterns, shuffleParams.Patterns, std::size(opt.Patterns) * sizeof(BC7ModeSplitShufflePattern));
 
         // Call the GACL library to shuffle
@@ -152,10 +155,8 @@ void ProcessTexture(
         memcpy(shuffledBuffer.data(), &splitModeB[0], shuffledBufferSizeInBytes);
 
         // Report the BC7 mode-split transform so the caller can imply the format (BC7) and select the matching
-        // unshuffle path. The curved variant is reported only when the space curve was actually applied above.
-        bcnTransformId = shuffleParams.useSpaceCurve ?
-            GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT_SC :
-            GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT;
+        // unshuffle path. Any space curve applied above is recorded in the shuffled stream's header.
+        bcnTransformId = GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT;
     }
     else
     {

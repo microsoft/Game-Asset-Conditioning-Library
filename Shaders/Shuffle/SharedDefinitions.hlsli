@@ -30,7 +30,7 @@
     UAV(u0)"
 
 #define ModeBinningCS_RS "\
-    RootConstants(num32BitConstants = 6, b0),\
+    RootConstants(num32BitConstants = 4, b0),\
     SRV(t0),\
     UAV(u0),\
     UAV(u1),\
@@ -83,6 +83,8 @@ struct CommonHeader
     uint chunkSize;
     
     PerModeData perModeData[BC7_MODES_COUNT];
+    
+    uint spaceCurveWidthInPixels;   // from the stream header, 0 = linear
 };
 
 struct ModeCountsStruct

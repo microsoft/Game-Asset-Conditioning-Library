@@ -92,7 +92,6 @@ static GBaseFormat TransformToShaderFormat(GACL_SHUFFLE_TRANSFORM transformId)
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116_SC:
         return GBaseFormat::BC5;
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT:
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT_SC:
         return GBaseFormat::BC7;
 #ifdef NEWBC1345
     case GACL_SHUFFLE_TRANSFORM_ZSTD_SC:
@@ -136,7 +135,6 @@ static const wchar_t* TransformIdToString(GACL_SHUFFLE_TRANSFORM transformId)
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116:  return L"ZSTD_BC5_116116";
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116_SC: return L"ZSTD_BC5_116116_SC";
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT:   return L"ZSTD_BC7_SPLIT";
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT_SC: return L"ZSTD_BC7_SPLIT_SC";
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN:    return L"ZSTD_BC7_JOIN";
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN_SC: return L"ZSTD_BC7_JOIN_SC";
     case GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY:        return L"ZSTD_ONLY";
@@ -150,6 +148,7 @@ static const wchar_t* TransformIdToString(GACL_SHUFFLE_TRANSFORM transformId)
 }
 
 // Returns true when the transform id's shuffled stream holds space-curved data (the "_SC" variants).
+// BC7 split records any space curve in its stream header instead.
 static bool TransformIsCurved(GACL_SHUFFLE_TRANSFORM transformId)
 {
     switch (transformId)
@@ -158,7 +157,6 @@ static bool TransformIsCurved(GACL_SHUFFLE_TRANSFORM transformId)
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_116224_SC:
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116_SC:
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116_SC:
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT_SC:
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN_SC:
     case GACL_SHUFFLE_TRANSFORM_ZSTD_SC:
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44_SC:
@@ -289,7 +287,7 @@ void Game::LoadImageAndShuffle(const std::wstring& ddsPathWStr)
     m_bcTextureWidthInPixels = 0u;
 
     // Ask the library to pick a transform from the requested group (see kRequestedTransformGroup). For BC7 the group
-    // value is ignored and ProcessTexture reports one of the mode-split transforms based on space-curve use.
+    // value is ignored and ProcessTexture reports the mode-split transform.
     m_bcnTransformId = kRequestedTransformGroup;
 
     ProcessTexture(
@@ -313,6 +311,12 @@ void Game::LoadImageAndShuffle(const std::wstring& ddsPathWStr)
     // The base format is implied by the transform id ProcessTexture selected. BC7 uses the multi-pass mode-split
     // unshuffle; BC1\3\4\5 use the single-pass shaders.
     m_baseFormat = TransformToShaderFormat(m_bcnTransformId);
+
+    // Display only: BC7 split records any space curve in its stream header (start byte bit 7 flags the extension
+    // byte, whose low 3 bits hold log2 of the curve width in 128 px tiles, 0 = linear).
+    m_useSpaceCurveEffective = (m_baseFormat == GBaseFormat::BC7) ?
+        ((shuffledBuffer[0] & 0x80) != 0 && (shuffledBuffer[1] & 0x7) != 0) :
+        TransformIsCurved(m_bcnTransformId);
 
     if (m_baseFormat == GBaseFormat::BC7)
     {
@@ -652,10 +656,8 @@ void Game::Unshuffle()
 
         commandList->SetComputeRoot32BitConstant(0, histogramCount, 0);
         commandList->SetComputeRoot32BitConstant(0, numBlocks, 1);
-        commandList->SetComputeRoot32BitConstant(0, static_cast<uint32_t>(m_bcTextureWidthInPixels), 2);
-        commandList->SetComputeRoot32BitConstant(0, g_shuffleParams.useSpaceCurve, 3);
-        commandList->SetComputeRoot32BitConstant(0, m_offsetIntoHistogram, 4);
-        commandList->SetComputeRoot32BitConstant(0, m_offsetIntoBinning, 5);
+        commandList->SetComputeRoot32BitConstant(0, m_offsetIntoHistogram, 2);
+        commandList->SetComputeRoot32BitConstant(0, m_offsetIntoBinning, 3);
 
         commandList->SetComputeRootShaderResourceView(1, m_shuffledBuffer->GetGPUVirtualAddress());
         commandList->SetComputeRootUnorderedAccessView(2, m_scratchBuffer->GetGPUVirtualAddress());
@@ -1385,7 +1387,7 @@ void Game::RenderUI()
     }
     else
     {
-        swprintf_s(info, L"Space Curve: allowed, %s", TransformIsCurved(m_bcnTransformId) ? L"true" : L"false");
+        swprintf_s(info, L"Space Curve: allowed, %s", m_useSpaceCurveEffective ? L"true" : L"false");
     }
     m_font->DrawString(m_spriteBatch.get(), info, DirectX::SimpleMath::Vector2(xText, yText));
     yText += 35.0f;

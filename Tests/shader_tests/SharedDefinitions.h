@@ -66,6 +66,8 @@ struct CommonHeader
     uint32_t chunkSize;
 
     PerModeData perModeData[BC7_MODES_COUNT];
+
+    uint32_t spaceCurveWidthInPixels;   // from the stream header, 0 = linear
 };
 
 struct ModeCountsStruct

@@ -14,8 +14,6 @@ struct Constants
 {
     uint histogramCount;
     uint blockCount;
-    uint bcTextureWidthPixels;
-    bool applySpaceCurveInverse;
     uint offsetIntoHistogram;
     uint offsetIntoBinning;
 };
@@ -42,7 +40,7 @@ groupshared uint gs_scrapSizeBitsPerMode[BC7_MODES_COUNT];
 groupshared uint gs_headerSizeBytes;
 groupshared uint gs_bitsPerMode;
 groupshared uint gs_bc7SizeInBytes;
-groupshared uint gs_checkIfSpaceCurveInversePossible;
+groupshared uint gs_spaceCurveWidthInPixels;
 
 groupshared ModeCountsStruct gs_modePrefixSumUpToPreviousGroup;
 
@@ -80,12 +78,14 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gid : SV_GroupID, uint gindex 
         gs_bitsPerMode = ModeTransformBCountToModeBits[modesUsedCount];
         gs_bc7SizeInBytes = constants.blockCount * 16;
 
-        const uint widthInBlocks = (constants.bcTextureWidthPixels + 3) / 4;
-        const uint pitchBytes = 16u * widthInBlocks;
+        // Space curve width recorded in the stream header (0 = linear), only inverted when the dimensions are eligible
+        const uint spaceCurveWidthInPixels = scratchBuffer.Load(16u + (32u * BC7_MODES_COUNT)); // CommonHeader.spaceCurveWidthInPixels
+        const uint widthInBlocks = (spaceCurveWidthInPixels + 3) / 4;
+        const uint pitchBytes = max(16u * widthInBlocks, 1u);
         const uint heightInBlocks = (gs_bc7SizeInBytes + pitchBytes - 1) / pitchBytes;
-        gs_checkIfSpaceCurveInversePossible =
+        gs_spaceCurveWidthInPixels =
             (gs_bc7SizeInBytes > 16384u && countbits(widthInBlocks) == 1u &&
-             widthInBlocks >= 32u && countbits(heightInBlocks) == 1u && heightInBlocks >= 32u) ? 1u : 0u;
+             widthInBlocks >= 32u && countbits(heightInBlocks) == 1u && heightInBlocks >= 32u) ? spaceCurveWidthInPixels : 0u;
 
         // This needs to be a loop, since the wave might have less than 9 active threads.
         [unroll(BC7_MODES_COUNT)]
@@ -208,9 +208,9 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gid : SV_GroupID, uint gindex 
     
     // Doing space curve inverse transform.
     uint finalBlockID = DTid.x;
-    if (constants.applySpaceCurveInverse && gs_checkIfSpaceCurveInversePossible != 0u)
+    if (gs_spaceCurveWidthInPixels != 0u)
     {
-        finalBlockID = ReverseSpaceCurveFor16ByteBlock(gs_bc7SizeInBytes, constants.bcTextureWidthPixels, finalBlockID);
+        finalBlockID = ReverseSpaceCurveFor16ByteBlock(gs_bc7SizeInBytes, gs_spaceCurveWidthInPixels, finalBlockID);
     }
     
     // Write the current block's ID into the address
