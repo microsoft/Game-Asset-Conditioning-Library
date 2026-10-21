@@ -4335,7 +4335,13 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
     ModeSplitExtensionByte extensionByte = {};
     if (opt.SpaceCurveWidthInPixels)
     {
-        const size_t widthInTiles = ((opt.SpaceCurveWidthInPixels + 3) / 4) / 32;
+        const size_t widthInBlocks = (static_cast<size_t>(opt.SpaceCurveWidthInPixels) + 3) / 4;
+        if (widthInBlocks < 32 || (widthInBlocks & (widthInBlocks - 1)) != 0 ||
+            opt.SpaceCurveWidthInPixels > 16384)
+        {
+            throw E_INVALIDARG;
+        }
+        const size_t widthInTiles = widthInBlocks / 32;
         unsigned long widthInTilesLog2 = 0;
         _BitScanForward64(&widthInTilesLog2, widthInTiles);
         assert(widthInTiles == (1ull << widthInTilesLog2) && widthInTilesLog2 <= 7);
