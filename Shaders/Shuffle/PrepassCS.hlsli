@@ -59,6 +59,12 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gId : SV_GroupID, uint gindex 
         uint modeEncodingFlag = (Byte0 >> 4) & 0x1u;
         uint staticFieldsFlag = (Byte0 >> 5) & 0x1u;
         uint lowEntropyFlag = (Byte0 >> 6) & 0x1u;
+        uint extensionByteFlag = (Byte0 >> 7) & 0x1u;
+        
+        // Extension byte bits [0-2] are the space curve width in 128 pixel tiles (log2), 0 = linear
+        uint extensionByte = (extensionByteFlag) ? fetchNextByte(currentByteIndex++, shuffledBuffer) : 0u;
+        uint spaceCurveWidthInTilesLog2 = extensionByte & 0x7u;
+        uint spaceCurveWidthInPixels = (spaceCurveWidthInTilesLog2 != 0u) ? (128u << spaceCurveWidthInTilesLog2) : 0u;
         
         uint globalStatics = (staticFieldsFlag) ? fetchNextByte(currentByteIndex++, shuffledBuffer) : 0u;
         uint globalLowEntropy = (lowEntropyFlag) ? fetchNextByte(currentByteIndex++, shuffledBuffer) : 0u;
@@ -66,6 +72,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gId : SV_GroupID, uint gindex 
         if (DTid.x == 0u)
         {
             scratchBuffer.Store(4u, modesUsedCount);
+            scratchBuffer.Store(16u + (32u * BC7_MODES_COUNT), spaceCurveWidthInPixels); // CommonHeader.spaceCurveWidthInPixels
             //scratchBuffer.Store(x, header.modeEncoding);
         }
         

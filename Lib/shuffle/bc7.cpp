@@ -882,6 +882,22 @@ static void strat_BC7_JoinModeRot(const uint8_t* src, size_t srcSize, BC7ModeJoi
 
 static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplitShuffleOptions* opt, BC7TextureMetrics* metrics, SHUFFLE_COMPRESS_PARAMETERS* params, vector<uint8_t>* compressedDataA, vector<uint8_t>* compressedDataB, HRESULT* errorOut)
 {
+#if _DEBUG
+    // Reverse yields linear data, so re-apply any space curve before comparing against the (possibly curved) source
+    auto validateReverse = [&](const vector<uint8_t>& shuffled)
+    {
+        std::vector<uint8_t> unshuffled(srcSize);
+        BC7_ModeSplit_Reverse(shuffled.data(), shuffled.size(), unshuffled, unshuffled.size(), src);
+        if (opt->SpaceCurveWidthInPixels)
+        {
+            std::vector<uint8_t> recurved(srcSize);
+            GACL_Shuffle_ApplySpaceCurve(recurved.data(), unshuffled.data(), srcSize, 16, opt->SpaceCurveWidthInPixels, true);
+            unshuffled.swap(recurved);
+        }
+        assert(memcmp(unshuffled.data(), src, unshuffled.size()) == 0);
+    };
+#endif
+
     std::vector<uint8_t> outA, outB;
     thread compressTaskA;
 
@@ -901,9 +917,7 @@ static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplit
     {
         CompressTask(outB.data(), outB.size(), compressedDataB, *params, *errorOut);
 #if _DEBUG
-        std::vector<uint8_t> unshuffled(srcSize);
-        BC7_ModeSplit_Reverse(outB.data(), outB.size(), unshuffled, unshuffled.size(), src);
-        assert(memcmp(unshuffled.data(), src, unshuffled.size()) == 0);
+        validateReverse(outB);
 #endif
     }
     else
@@ -915,9 +929,7 @@ static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplit
     {
         compressTaskA.join();
 #if _DEBUG
-        std::vector<uint8_t> unshuffled(srcSize);
-        BC7_ModeSplit_Reverse(outA.data(), outA.size(), unshuffled, unshuffled.size(), src);
-        assert(memcmp(unshuffled.data(), src, unshuffled.size()) == 0);
+        validateReverse(outA);
 #endif
 
     }
@@ -956,7 +968,6 @@ HRESULT ShuffleCompress_BC7(
 
     const bool bIncludeSplitMode =
         *destTransformId == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT ||
-        *destTransformId == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT_SC ||
         //destTransformId == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED ||                  // Experimental transform, temporarily removed from supported list
         *destTransformId == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL;
 
@@ -973,6 +984,12 @@ HRESULT ShuffleCompress_BC7(
 
     if (srcForCurvedTransforms != nullptr)
     {
+        // mode-split streams record the space curve width in their header, which supports up to 16384 pixels (the D3D12 maximum)
+        if (params.CurvedTransforms.WidthInPixels > 16384)
+        {
+            return E_INVALIDARG;
+        }
+
         encodedStreamIsCurved = true;
         bool skipCurveApplication = (params.CurvedTransforms.DataIsCurved == true);
         if (!skipCurveApplication)
@@ -1124,6 +1141,12 @@ HRESULT ShuffleCompress_BC7(
         { mt, { ColorPlane4bit, EndpointPairSignificantBitInderleaved, ColorPlane4bit, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved}, 2, _64MB}
     };
 
+
+    // mode-split streams record any space curve in the stream header
+    for (SplitStrat* ss : { &ss1, &ss1r, &ss1o1r, &ss1o2r, &ss2, &ss2o1r, &ss2o2r, &ss3, &ss3o1r, &ss3o2r, &ss4, &ss4o1r, &ss4o2r, &ss5, &ss5r, &ss7, &ss7o1r, &ss7o2r })
+    {
+        ss->Options.SpaceCurveWidthInPixels = encodedStreamIsCurved ? static_cast<uint32_t>(params.CurvedTransforms.WidthInPixels) : 0u;
+    }
 
     if (bIncludeSplitMode)  // skip mode-split shuffles if the caller has explicitly requested only mode-join
     {
@@ -1315,7 +1338,7 @@ HRESULT ShuffleCompress_BC7(
         }
         else
         {
-            *destTransformId = encodedStreamIsCurved ? GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT_SC : GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT;
+            *destTransformId = GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT;   // any space curve is recorded in the stream header
         }
     }
     return S_OK;

@@ -252,14 +252,8 @@ HRESULT ValidateRoundTripShuffleCompress(filesystem::path file, GACL_SHUFFLE_TRA
                 compareUncurved = true;
                 break;
 
-            case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT:
+            case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT:     // reverse also undoes any space curve recorded in the stream header
                 BC7_ModeSplit_Reverse(uncompressed.data(), ucBytes, unshuffled, srcImgSize, nullptr/*img->pixels*/);
-                break;
-
-            case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT_SC:
-                BC7_ModeSplit_Reverse(uncompressed.data(), ucBytes, unshuffled, srcImgSize, nullptr /*img->pixels*/);
-                GACL_Shuffle_ApplySpaceCurve(uncurved.data(), unshuffled.data(), srcImgSize, 16, img->width, false);
-                compareUncurved = true;
                 break;
 
             default:
@@ -438,7 +432,7 @@ TEST_P(SC_BC7_Test, LargeBC7_ShuffleCompress) {
     HRESULT hr = ValidateRoundTripShuffleCompress(filepath, tid, true, sc);
 
     EXPECT_EQ(hr, S_OK);
-    EXPECT_TRUE(tid == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT || tid == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT_SC);
+    EXPECT_EQ(tid, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT);
     EXPECT_EQ(sc.size(), p.size);    // known size for this asset shuffle compressed in this way
 }
 
@@ -448,14 +442,14 @@ INSTANTIATE_TEST_SUITE_P(
     SC,
     SC_BC7_Test,
     ::testing::Values(
-        SC_BC7TestParam{ L"Ladybug_Body_Spec_mask.DDS",  22219 },
-        SC_BC7TestParam{ L"Ladybug_Body_albedo.DDS",  3740646 },
-        SC_BC7TestParam{ L"gerberaSingleLeaf_sss.DDS", 897656 },
-        SC_BC7TestParam{ L"Ladybug_DetailSkin_normal.DDS", 421368 },
-        SC_BC7TestParam{ L"BlackboardEraser_albedo.DDS", 507255 },
-        SC_BC7TestParam{ L"GerberaLeafHigh_normal.DDS", 815678 },
-        SC_BC7TestParam{ L"LetterBlock_LetterA_albedo.DDS", 2170355 },
-        SC_BC7TestParam{ L"Ladybug_Shell_Roughness_mask.DDS", 7046 }
+        SC_BC7TestParam{ L"Ladybug_Body_Spec_mask.DDS",  22204 },
+        SC_BC7TestParam{ L"Ladybug_Body_albedo.DDS",  3740881 },
+        SC_BC7TestParam{ L"gerberaSingleLeaf_sss.DDS", 897619 },
+        SC_BC7TestParam{ L"Ladybug_DetailSkin_normal.DDS", 421399 },
+        SC_BC7TestParam{ L"BlackboardEraser_albedo.DDS", 507243 },
+        SC_BC7TestParam{ L"GerberaLeafHigh_normal.DDS", 815669 },
+        SC_BC7TestParam{ L"LetterBlock_LetterA_albedo.DDS", 2170380 },
+        SC_BC7TestParam{ L"Ladybug_Shell_Roughness_mask.DDS", 7044 }
     )
 );
 
