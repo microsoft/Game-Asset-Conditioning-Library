@@ -126,7 +126,10 @@ void ProcessTexture(
         if (shuffleParams.useSpaceCurve)
         {
             curveApplied = GACL_Shuffle_ApplySpaceCurve(curved.data(), src, srcSize, 16, bcTextureWidthInPixels, true);
-            src = curved.data();
+            if (curveApplied)
+            {
+                src = curved.data();
+            }
         }
 
         BC7TextureMetrics metrics = {};
