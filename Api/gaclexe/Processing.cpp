@@ -238,7 +238,7 @@ bool gacl::ProcessTexture(
     const bool isSpaceCurveEligible = GACL_Shuffle_ApplySpaceCurve(nullptr, nullptr,
         ((siMeta.width + 3) / 4) * ((siMeta.height + 3) / 4) * elementSize, elementSize, (siMeta.width + 3) & ~3ull, true);
 
-    if (verbosity >= Verbosity::eVerbose)
+    if (verbosity >= Verbosity::eVerbose && baseFormat == DXGI_FORMAT_BC7_TYPELESS)
     {
         CountBC7Modes(si, true, nullptr);
     }
@@ -993,6 +993,10 @@ bool gacl::ProcessTexture(
 
                     const size_t mipSize = elementSize * blocksX * blocksY;
 
+                    // mips under 64KB (other than a lone image) start a "tail" stream holding the rest of the item's mip chain, which is contiguous
+                    const bool isTail = !(mipSize >= (64*1024ull) || (siMeta.mipLevels == 1 && siMeta.arraySize == 1));  // TODO decide on "tail" size
+                    const size_t streamSize = isTail ? remainingSize : mipSize;
+
                     const bool mipIsCurvedTransformEligible = GACL_Shuffle_ApplySpaceCurve(nullptr, nullptr, mipSize, elementSize, blocksX * 4, true);
                     const bool mipHasCurvedRdoData = (genBlerScreenSpace || genClerScreenSpace) && mipIsCurvedTransformEligible;
                     const DirectX::Image* imgForCurve = (genBlerScreenSpace || genClerScreenSpace) ? srcForCurvedTransforms.GetImage(mip, item, 0) : nullptr;
@@ -1001,11 +1005,11 @@ bool gacl::ProcessTexture(
                     int tbs = options.CompressOptions.TargetBlockSize;
                     if (zstdCompressionLevel == 0xff)
                     {
-                        if (mipSize > 256 * 1024ull)
+                        if (streamSize > 256 * 1024ull)
                         {
                             zstdCompressionLevel = 18;
                         }
-                        else if (mipSize > 16 * 1024ull)
+                        else if (streamSize > 16 * 1024ull)
                         {
                             zstdCompressionLevel = 14;
                         }
@@ -1024,7 +1028,7 @@ bool gacl::ProcessTexture(
                     HRESULT status = S_OK;
                     bool sizeReduced;
                     size_t bytesProcessed = 0;
-                    if (mipSize >= (64*1024ull) || (siMeta.mipLevels == 1 && siMeta.arraySize == 1))  // TODO decide on "tail" size
+                    if (!isTail)
                     {
                         compressed.resize(mipSize);
 
@@ -1041,13 +1045,14 @@ bool gacl::ProcessTexture(
                             params
                             );
 
-                        sizeReduced = SUCCEEDED(status);
+                        // S_FALSE: nothing smaller than the source (no compressed data), so it's stored uncompressed like a failure
+                        sizeReduced = status == S_OK;
                         const wchar_t* ext = sizeReduced ? GACL_ShuffleCompress_GetFileExtensionForTransform(transformID) : L"uncompressed";
 
                         bytesProcessed = mipSize;
                         if (!exportBaseName.empty())
                         {
-                            wchar_t fileNamePostfix[20];
+                            wchar_t fileNamePostfix[64];
                             if (siMeta.mipLevels > 1 && siMeta.arraySize > 1)
                             {
                                 swprintf_s(fileNamePostfix, _countof(fileNamePostfix), L".item%I64u.mip%I64u.%ws", item, mip, ext);
@@ -1071,15 +1076,15 @@ bool gacl::ProcessTexture(
                     }
                     else
                     {
-                        compressed.resize(remainingSize);
+                        compressed.resize(streamSize);
 
-                        SHUFFLE_COMPRESS_PARAMETERS params = { mipSize, siMeta.format, imgNoCurve->pixels, {zstdCompressionLevel, tbs}};
+                        SHUFFLE_COMPRESS_PARAMETERS params = { streamSize, siMeta.format, imgNoCurve->pixels, {zstdCompressionLevel, tbs}};
 
                         status = GACL_ShuffleCompress_BCn(compressed.data(), &transformID, &compressedBytes, params);
-                        sizeReduced = SUCCEEDED(status);
+                        sizeReduced = status == S_OK;
                         const wchar_t* ext = sizeReduced ? GACL_ShuffleCompress_GetFileExtensionForTransform(transformID) : L"uncompressed";
-                        outputDerivedFileName = exportBaseName + L".tail." + ext;
-                        bytesProcessed = remainingSize;
+                        outputDerivedFileName = exportBaseName + (siMeta.arraySize > 1 ? L".item" + to_wstring(item) : wstring()) + L".tail." + ext;
+                        bytesProcessed = streamSize;
                     }
                     
                     remainingSize -= bytesProcessed;

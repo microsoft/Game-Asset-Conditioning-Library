@@ -210,7 +210,9 @@ static void PrintHelp(void)
     printf("                            textures.  Output goes to --output if given, otherwise <input>.zst.\n");
     printf("\n");
     printf("  -e, --export <basename>   Output base name.  Each mip\\slice will be exported as a\n");
-    printf("                            Shuffle+Compressed opaque data stream.\n");
+    printf("                            Shuffle+Compressed opaque data stream.  In mipmapped or array\n");
+    printf("                            textures, each item's mips under 64KB are combined into one\n");
+    printf("                            \".tail\" stream.\n");
     printf("\n");
     printf("  -sno7s,                   Disable BC7 mode Split shuffle (Higher reverse time cost).\n");
     printf("\n");

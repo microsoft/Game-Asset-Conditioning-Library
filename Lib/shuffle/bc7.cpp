@@ -11,6 +11,8 @@
 #include "gacl.h"
 #include "../BCnBlockDefs.h"
 #include "bc7.h"
+#include "streamheader.h"
+#include "bcnex.h"
 #include "../helpers/Utility.h"
 #include "../helpers/FileUtility.h"
 #include "../helpers/FormatHelper.h"
@@ -496,16 +498,43 @@ void BC7_CollectTextureMetrics(const uint8_t* src, size_t srcSize, BC7TextureMet
     size_t endpointPairsPerMode[] = { 3, 2, 3, 2, 1, 1, 1, 2 };
     m.LowEntropy = uint8_t(~m.Statics);
 
+    // Number of most-frequent values whose combined share must meet the thresholds below to flag a field as low-entropy.
+    constexpr size_t kLowEntropyTopN = 3;
+#ifndef GACL_LET
+#define GACL_LET 55
+#endif
+    constexpr size_t kLowEntropyThresholdNum = GACL_LET;   // LET: Join threshold (top-3 >= 55%)
+    constexpr size_t kLowEntropyThresholdDen = 100;
+
+    // SPLITLE: Split consumes the per-mode masks (M[mode].LowEntropy); Join consumes the group-wide mask,
+    // which is reduced from per-mode masks evaluated with the Join threshold above.
+    constexpr size_t kSplitLowEntropyTopN = kLowEntropyTopN;
+    constexpr size_t kSplitLowEntropyThresholdNum = 75;
+    constexpr size_t kSplitLowEntropyThresholdDen = kLowEntropyThresholdDen;
 
     uint8_t LowEntropyOrdered[8] = {};
 
+    // A mode must clear BOTH an absolute floor (enough samples for the top-N stat to be meaningful)
+    // AND a relative floor (a meaningful share of the whole group) before it's allowed to evaluate/reduce
+    // the global LowEntropy mask.  Guards against a handful of stray blocks skewing the whole-group flag.
+#ifndef GACL_LEMA
+#define GACL_LEMA 16    // LEM: absolute mode-count floor for the LE significance gate
+#endif
+#ifndef GACL_LEMR
+#define GACL_LEMR 512   // LEM: relative floor block_count / GACL_LEMR
+#endif
+    constexpr size_t kLowEntropyModeMinAbsolute = GACL_LEMA;
+    constexpr size_t kLowEntropyModeMinRelativeDen = GACL_LEMR; // block_count / 512
+    uint8_t joinModeLowEntropyPerMode[8] = {};
+
     for (size_t mode = 0; mode < 8; mode++)
     {
-        if (m.ModeCounts[mode] > 16)
+        if (m.ModeCounts[mode] > kLowEntropyModeMinAbsolute && m.ModeCounts[mode] > block_count / kLowEntropyModeMinRelativeDen)
         {
-            const size_t endpointFieldsInMode = mode < 6 ? 6 : 8;
+            const size_t endpointFieldsInMode = mode < 4 ? 6 : 8;   // modes 4-7 carry alpha endpoints
             const size_t endpointPairsInMode = endpointPairsPerMode[mode];
             const uint8_t endpointMaxInMode = fieldMaxPerMode[mode];
+            uint8_t joinModeLowEntropy = 0;
 
             for (size_t e = 0; e < endpointFieldsInMode; e++)
             {
@@ -516,7 +545,20 @@ void BC7_CollectTextureMetrics(const uint8_t* src, size_t srcSize, BC7TextureMet
                 memcpy(sortedValues, M[mode].Totals.EC[e], sizeof(size_t) * endpointMaxInMode);
                 std::sort(sortedValues, sortedValues + endpointMaxInMode, std::greater<size_t>());
 
-                if (sortedValues[0] + sortedValues[1] >= m.ModeCounts[mode] * endpointPairsInMode * 8 / 10)  //  <--  80% threshold in 2 values means low entropy
+                size_t topNSum = 0;
+                for (size_t t = 0; t < kLowEntropyTopN && t < endpointMaxInMode; t++)
+                    topNSum += sortedValues[t];
+
+                if (topNSum >= m.ModeCounts[mode] * endpointPairsInMode * kLowEntropyThresholdNum / kLowEntropyThresholdDen)  //  <-- threshold in top-N values means low entropy
+                {
+                    joinModeLowEntropy |= uint8_t(1 << e);
+                }
+
+                size_t splitTopNSum = 0;
+                for (size_t t = 0; t < kSplitLowEntropyTopN && t < endpointMaxInMode; t++)
+                    splitTopNSum += sortedValues[t];
+
+                if (splitTopNSum >= m.ModeCounts[mode] * endpointPairsInMode * kSplitLowEntropyThresholdNum / kSplitLowEntropyThresholdDen)
                 {
                     m.M[mode].LowEntropy |= (1 << e);
                 }
@@ -525,15 +567,48 @@ void BC7_CollectTextureMetrics(const uint8_t* src, size_t srcSize, BC7TextureMet
                 memcpy(sortedOrderedValues, M[mode].Totals.OC[e], sizeof(size_t) * endpointMaxInMode);
                 std::sort(sortedOrderedValues, sortedOrderedValues + endpointMaxInMode, std::greater<size_t>());
 
-                if (sortedOrderedValues[0] + sortedOrderedValues[1] >= m.ModeCounts[mode] * endpointPairsInMode * 8 / 10)  //  <--  80% threshold in 2 values means low entropy
+                size_t topNOrderedSum = 0;
+                for (size_t t = 0; t < kLowEntropyTopN && t < endpointMaxInMode; t++)
+                    topNOrderedSum += sortedOrderedValues[t];
+
+                if (topNOrderedSum >= m.ModeCounts[mode] * endpointPairsInMode * kLowEntropyThresholdNum / kLowEntropyThresholdDen)  //  <-- threshold in top-N values means low entropy
                 {
                     LowEntropyOrdered[mode] |= (1 << e);
                 }
             }
-        }
 
-        m.LowEntropy &= (m.M[mode].LowEntropy | m.M[mode].Statics);
+            // Only modes that met the min-sample guard above reduce the global LowEntropy mask; letting every mode
+            // reduce it (unused modes AND in 0) wiped the mask almost always.
+            // RGB-only modes (0-3) have no alpha, so treat alpha as "don't care" (matches the statics combine).
+            m.LowEntropy &= (joinModeLowEntropy | m.M[mode].Statics | (mode < 4 ? 0xC0 : 0));
+            joinModeLowEntropyPerMode[mode] = joinModeLowEntropy;
+        }
     }
+
+#ifndef GACL_PMM
+#define GACL_PMM 6      // PMM: per-mode Join masks, OR of: 1 = group mask, 2 = mode statics, 4 = mode LE flags, 8 = mode Split LE flags (75%)
+#endif
+#ifndef GACL_PMMT
+#define GACL_PMMT 2     // PMMT: with PMM, per-mode masks only in a separate Join trial (2 = replaces hc Alpha, 3 = replaces hc Alpha+Blue)
+#endif
+#if GACL_PMM
+    // Every mode that passed the LE gate already covers the group-wide mask, so with bit 1 the mode bits only add
+    // flags; modes with fewer than two blocks keep the group mask.
+    {
+        const uint8_t group = m.Statics | m.LowEntropy;
+        for (size_t mode = 0; mode < 8; mode++)
+        {
+            uint8_t mm = group;
+            if (m.ModeCounts[mode] > 1)
+            {
+                mm = uint8_t(((GACL_PMM & 1) ? group : 0) | ((GACL_PMM & 2) ? m.M[mode].Statics : 0) |
+                    ((GACL_PMM & 4) ? joinModeLowEntropyPerMode[mode] : 0) | ((GACL_PMM & 8) ? m.M[mode].LowEntropy : 0));
+            }
+            m.JoinModeMask[mode] = uint8_t(mode < 4 ? (mm & 0x3f) : mm);
+        }
+        m.JoinModeMasks = !GACL_PMMT;
+    }
+#endif
 
     // note the best bit-spend strategies for endpoint re-ordering.
     for (size_t mode = 0; mode < 8; mode++)
@@ -844,7 +919,153 @@ static void strat_BC7_NoShuffle(const uint8_t* src, size_t srcSize, SHUFFLE_COMP
     CompressTask(src, srcSize, compressedData, *params, *errorOut);
 }
 
-static void strat_BC7_JoinMode(const uint8_t* src, size_t srcSize, BC7ModeJoinShuffleOptions* opt, BC7TextureMetrics* metrics, SHUFFLE_COMPRESS_PARAMETERS* params, vector<uint8_t>* compressedData, HRESULT* errorOut)
+#ifndef GACL_JOINCHK
+#define GACL_JOINCHK 0  // verify every Join candidate decodes (header, layout and field transforms) in release builds
+#endif
+
+// Curve-only BC7_EX stream (BCnEx_EncodeCurveOnly): the curved blocks unshuffled behind a stream header. Leaves
+// compressedData empty when there is no room for the header.
+static void strat_BC7_CurveOnly(const uint8_t* src, size_t srcSize, uint8_t curveWidthTiles, SHUFFLE_COMPRESS_PARAMETERS* params, vector<uint8_t>* compressedData, HRESULT* errorOut, size_t* codedOut)
+{
+    vector<uint8_t> stream;
+    if (!BCnEx_EncodeCurveOnly(src, srcSize, uint8_t(GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN), curveWidthTiles, stream, nullptr, codedOut))
+    {
+        compressedData->resize(0);
+        return;
+    }
+#if _DEBUG || GACL_JOINCHK
+    vector<uint8_t> back;
+    if (!BCnEx_Decode(stream.data(), stream.size(), uint8_t(GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX), back, false) || back.size() != srcSize || memcmp(back.data(), src, srcSize) != 0)
+    {
+        Utility::Printf(GACL_Logging_Priority_High, L"BC7 curve-only round trip failed.\n");
+        assert(false);
+        *errorOut = E_FAIL;
+        compressedData->resize(0);
+        return;
+    }
+#endif
+    CompressTask(stream.data(), stream.size(), compressedData, *params, *errorOut);
+}
+
+// Join streams with no statics mask, space curve or byte remap need no parameters and are stored without a
+// header (GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN). All others carry an in-stream parameter header (..._BC7_EX).
+static bool BC7_JoinNeedsHeader(const BC7TextureMetrics& metrics, uint8_t curveWidthTiles)
+{
+    uint8_t any = 0;
+    for (size_t mode = 0; mode < 8; mode++)
+    {
+        any |= BC7_JoinModeMask(metrics, mode);
+    }
+    return any != 0 || curveWidthTiles != 0 || metrics.JoinRemap != 0;
+}
+
+#ifndef GACL_JHC
+#define GACL_JHC 1      // Join stream headers may code blocks themselves when the stream has too few duplicate blocks (streamheader.h)
+#endif
+
+// Places the parameter header in front of a Join-shuffled stream. The header is added after the shuffle so a
+// decoder can read it without knowing the parameters. Returns false when there is no room for the header within
+// BCNEX_MAX_HEADER_BLOCKS blocks (the GPU decoder's limit), or when the curve doesn't fit the stream
+// (GACL_Shuffle_ApplySpaceCurve's geometry), which the decoders would reject.
+static bool BC7_JoinAddHeader(vector<uint8_t>& shuffled, const BC7TextureMetrics& metrics, uint8_t curveWidthTiles, size_t* codedOut)
+{
+    if (curveWidthTiles && !GACL_Shuffle_ApplySpaceCurve(nullptr, nullptr, shuffled.size(), 16, size_t(curveWidthTiles) * 128, true))
+    {
+        return false;
+    }
+    vector<StreamHeaderParam> hp;
+    if (curveWidthTiles)
+    {
+        hp.push_back({ GACL_STREAMHEADER_PARAM_CURVE_WIDTH_TILES, { curveWidthTiles } });
+    }
+    // modes 0-3 have no alpha, so their alpha flags don't matter
+    vector<uint8_t> modeMasks(8);
+    bool uniform = true;
+    for (size_t mode = 0; mode < 8; mode++)
+    {
+        const uint8_t care = mode < 4 ? 0x3f : 0xff;
+        modeMasks[mode] = BC7_JoinModeMask(metrics, mode) & care;
+        uniform = uniform && modeMasks[mode] == (BC7_JoinModeMask(metrics, 7) & care);
+    }
+    if (!uniform)
+    {
+        hp.push_back({ GACL_STREAMHEADER_PARAM_BC7_JOIN_MODE_STATICS, modeMasks });
+    }
+    else if (BC7_JoinModeMask(metrics, 7))
+    {
+        hp.push_back({ GACL_STREAMHEADER_PARAM_BC7_JOIN_STATICS, { BC7_JoinModeMask(metrics, 7) } });
+    }
+    if (metrics.JoinRemap)
+    {
+        hp.push_back({ GACL_STREAMHEADER_PARAM_BC7_JOIN_REMAP, { metrics.JoinRemap } });
+    }
+
+    vector<uint8_t> withHeader;
+    StreamHeaderInfo info;
+    if (!StreamHeader_Encode(shuffled.data(), shuffled.size(), 16, uint8_t(GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN), hp, withHeader, &info,
+        GACL_JHC ? BC7_JoinBlockCode() : nullptr) || info.HeaderBlocks > BCNEX_MAX_HEADER_BLOCKS)
+    {
+        return false;
+    }
+
+    *codedOut = info.Coded.size();
+    shuffled.swap(withHeader);
+    return true;
+}
+
+bool BC7_JoinStream_Encode(const uint8_t* src, size_t srcSize, const BC7TextureMetrics& metrics, uint8_t curveWidthTiles,
+    vector<uint8_t>& dest, uint8_t* transformIdOut, size_t* codedOut)
+{
+    dest.clear();
+    if (src == nullptr || srcSize == 0 || srcSize % 16 != 0)
+    {
+        return false;
+    }
+
+    // the same steps as a Join candidate of the BC7 shuffle (strat_BC7_JoinMode)
+    BC7TextureMetrics m = metrics;
+    BC7ModeJoinShuffleOptions opt = { false };
+    vector<uint8_t> reordered45, ctrl;
+    BC7_Mode45_ReorderRGBA(src, srcSize, reordered45);
+    BC7_ModeJoin_Transform(reordered45.data(), reordered45.size(), dest, opt, m, ctrl);
+
+    const bool header = BC7_JoinNeedsHeader(m, curveWidthTiles);
+    size_t coded = 0;
+    if (header && !BC7_JoinAddHeader(dest, m, curveWidthTiles, &coded))
+    {
+        dest.clear();
+        return false;
+    }
+    if (transformIdOut)
+    {
+        *transformIdOut = uint8_t(header ? GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX : GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN);
+    }
+    if (codedOut)
+    {
+        *codedOut = coded;
+    }
+    return true;
+}
+
+#if _DEBUG || GACL_JOINCHK
+// Decodes a finished Join candidate the way a consumer would (by transform id) and compares it with the shuffle
+// input. Builds whose Join field transforms have no reverse skip the check.
+static bool BC7_JoinVerify(const vector<uint8_t>& stream, bool header, uint8_t curveWidthTiles, const uint8_t* src, size_t srcSize)
+{
+    if (BC7_ModeJoin_FieldConfig() < 0)
+    {
+        return true;
+    }
+    vector<uint8_t> decoded;
+    uint8_t decodedCurveWidthTiles = 0;
+    const uint8_t id = uint8_t(header ? GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX : GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN);
+    return BC7_JoinStream_Decode(stream.data(), stream.size(), id, decoded, false, &decodedCurveWidthTiles) &&
+        decodedCurveWidthTiles == curveWidthTiles && decoded.size() == srcSize && memcmp(decoded.data(), src, srcSize) == 0;
+}
+#endif
+
+// codedOut (optional) receives the number of blocks the stream header had to code itself (0 when the candidate is dropped)
+static void strat_BC7_JoinMode(const uint8_t* src, size_t srcSize, BC7ModeJoinShuffleOptions* opt, BC7TextureMetrics* metrics, uint8_t curveWidthTiles, SHUFFLE_COMPRESS_PARAMETERS* params, vector<uint8_t>* compressedData, HRESULT* errorOut, size_t* codedOut = nullptr)
 {
     std::vector<uint8_t> shuffled, reordered45;
     std::vector<uint8_t> ctrl;
@@ -859,10 +1080,28 @@ static void strat_BC7_JoinMode(const uint8_t* src, size_t srcSize, BC7ModeJoinSh
 
     BC7_ModeJoin_Transform(reordered45.data(), reordered45.size(), shuffled, *opt, *metrics, ctrl);
 
-    vector<uint8_t> unshuffled;
-    BC7_ModeJoin_Reverse(shuffled.data(), shuffled.size(), unshuffled, *opt, *metrics, ctrl);     // verify reversible
+    const bool header = BC7_JoinNeedsHeader(*metrics, curveWidthTiles);
+    size_t coded = 0;
+    if (header && !BC7_JoinAddHeader(shuffled, *metrics, curveWidthTiles, &coded))
+    {
+        compressedData->resize(0);      // no room for the header: candidate dropped
+        return;
+    }
+    if (codedOut)
+    {
+        *codedOut = coded;
+    }
 
-    assert(memcmp(unshuffled.data(), reordered45.data(), unshuffled.size()) == 0);
+#if _DEBUG || GACL_JOINCHK
+    if (!BC7_JoinVerify(shuffled, header, curveWidthTiles, src, srcSize))
+    {
+        Utility::Printf(GACL_Logging_Priority_High, L"BC7 Join round trip failed.\n");
+        assert(false);
+        *errorOut = E_FAIL;
+        compressedData->resize(0);
+        return;
+    }
+#endif
 
     CompressTask(shuffled.data(), shuffled.size(), compressedData, *params, *errorOut);
 }
@@ -882,7 +1121,7 @@ static void strat_BC7_JoinModeRot(const uint8_t* src, size_t srcSize, BC7ModeJoi
 
 static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplitShuffleOptions* opt, BC7TextureMetrics* metrics, SHUFFLE_COMPRESS_PARAMETERS* params, vector<uint8_t>* compressedDataA, vector<uint8_t>* compressedDataB, HRESULT* errorOut)
 {
-#if _DEBUG
+#if _DEBUG || GACL_JOINCHK
     // Reverse yields linear data, so re-apply any space curve before comparing against the (possibly curved) source
     auto validateReverse = [&](const vector<uint8_t>& shuffled)
     {
@@ -894,7 +1133,11 @@ static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplit
             GACL_Shuffle_ApplySpaceCurve(recurved.data(), unshuffled.data(), srcSize, 16, opt->SpaceCurveWidthInPixels, true);
             unshuffled.swap(recurved);
         }
-        assert(memcmp(unshuffled.data(), src, unshuffled.size()) == 0);
+        if (memcmp(unshuffled.data(), src, unshuffled.size()) != 0)
+        {
+            Utility::Printf(GACL_Logging_Priority_High, L"BC7 Split round trip failed.\n");
+            assert(false);
+        }
     };
 #endif
 
@@ -916,7 +1159,7 @@ static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplit
     if (outB.size() <= srcSize)
     {
         CompressTask(outB.data(), outB.size(), compressedDataB, *params, *errorOut);
-#if _DEBUG
+#if _DEBUG || GACL_JOINCHK
         validateReverse(outB);
 #endif
     }
@@ -928,7 +1171,7 @@ static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplit
     if (opt->ModeTransform == BC7ModeSplitModeTransformA || opt->ModeTransform == BC7ModeSplitModeTransformAny && outA.size() <= srcSize)
     {
         compressTaskA.join();
-#if _DEBUG
+#if _DEBUG || GACL_JOINCHK
         validateReverse(outA);
 #endif
 
@@ -966,6 +1209,16 @@ HRESULT ShuffleCompress_BC7(
         destBytesWritten == nullptr)
         return E_INVALIDARG;
 
+#if _DEBUG || GACL_JOINCHK
+    static const size_t joinSelfTestFailures = BC7_ModeJoin_ReverseSelfTest();
+    if (joinSelfTestFailures)
+    {
+        Utility::Printf(GACL_Logging_Priority_High, L"BC7 Join reverse self-test: %zu failures.\n", joinSelfTestFailures);
+        assert(false);
+        return E_FAIL;
+    }
+#endif
+
     const bool bIncludeSplitMode =
         *destTransformId == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT ||
         //destTransformId == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED ||                  // Experimental transform, temporarily removed from supported list
@@ -973,7 +1226,7 @@ HRESULT ShuffleCompress_BC7(
 
     const bool bIncludeJoinMode =
         *destTransformId == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN ||
-        *destTransformId == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN_SC ||
+        *destTransformId == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX ||
         //destTransformId == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED ||                  // Experimental transform, temporarily removed from supported list
         *destTransformId == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL;
 
@@ -1022,13 +1275,19 @@ HRESULT ShuffleCompress_BC7(
     BC7_CollectTextureMetrics((srcForCurvedTransforms ? srcForCurvedTransforms : srcforUncurvedTransforms), srcSize, metrics);
     ADDTASK(strat_BC7_NoShuffle, srcforUncurvedTransforms, srcSize, &params, &noShuffle, &hr);
 
-    bool bIncludeCurvedZstdOnly = nullptr != srcForCurvedTransforms &&
-        (*destTransformId == GACL_SHUFFLE_TRANSFORM_ZSTD_SC || *destTransformId == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL);
+    // curved streams record the texture width in 16KB micro-tiles (32 BC7 blocks each) in the stream header
+    const size_t curveTiles = encodedStreamIsCurved ? ((params.CurvedTransforms.WidthInPixels + 3) / 4) / 32 : 0;
+    const uint8_t curveWidthTiles = uint8_t(curveTiles);
+
+    // the curve-only EX stream (no shuffle) replaces the former ZSTD_SC transform
+    const bool bIncludeCurvedZstdOnly = curveTiles >= 1 && curveTiles <= 255 &&
+        (*destTransformId == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX || *destTransformId == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL);
 
     vector<uint8_t> curvedNoShuffle;
+    size_t codedCurved = 0;
     if (bIncludeCurvedZstdOnly)
     {
-        ADDTASK(strat_BC7_NoShuffle, srcForCurvedTransforms, srcSize, &params, &curvedNoShuffle, &hr);
+        ADDTASK(strat_BC7_CurveOnly, srcForCurvedTransforms, srcSize, curveWidthTiles, &params, &curvedNoShuffle, &hr, &codedCurved);
     }
 
 
@@ -1036,19 +1295,42 @@ HRESULT ShuffleCompress_BC7(
     const uint8_t* src = encodedStreamIsCurved ? srcForCurvedTransforms : srcforUncurvedTransforms;
 
     // join-mode compressed output vectors
-    vector<uint8_t> joinMode, joinModeNM, joinModeAlt, joinModeRot16, joinModeRot256;
-    if (bIncludeJoinMode)    // skip mode-join shuffles if the caller has explicitly requested only mode-split
+    vector<uint8_t> joinMode, joinModeNM, joinModeAlt, joinModeRot256;
+
+    // Join trial metrics live at function scope: worker threads hold pointers to them until the join below.
+    // Hardcoded-assumption Join candidates plus a no-statics trial (HCN).
+    BC7TextureMetrics blankMetrics = {};
+#ifndef GACL_HCA
+#define GACL_HCA 0      // HCA: mask of the "hc Alpha" Join trial (PMMT 2 runs the per-mode mask trial in its place)
+#endif
+    BC7TextureMetrics hcAlphaMetrics = {}; hcAlphaMetrics.LowEntropy = GACL_HCA;
+#ifndef GACL_HCAB
+#define GACL_HCAB 0xC3  // HCAB: mask of the "hc Alpha+Blue" Join trial
+#endif
+    BC7TextureMetrics hcAlphaBlueMetrics = {}; hcAlphaBlueMetrics.LowEntropy = GACL_HCAB;
+#if GACL_PMMT
+    BC7TextureMetrics& pmmMetrics = GACL_PMMT == 2 ? hcAlphaMetrics : hcAlphaBlueMetrics;
+    pmmMetrics = metrics;
+    pmmMetrics.JoinModeMasks = true;
+#endif
+    BC7ModeJoinShuffleOptions optJoin = { false };
+    // blocks each Join trial's stream header had to code itself (streamheader.h coded entries)
+    size_t codedJoin = 0, codedNM = 0, codedAlt = 0, codedRot256 = 0;
+    if (bIncludeJoinMode && curveTiles <= 255)    // skip mode-join shuffles if the caller has explicitly requested only mode-split
     {
-        BC7TextureMetrics blankMetrics = {};
-
-        BC7ModeJoinShuffleOptions optJoin = { false };
         BC7ModeJoinShuffleOptions optJoinAlt = { true };
+        (void)&optJoinAlt;
+        (void)&strat_BC7_JoinModeRot;
 
-        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &metrics, &params, &joinMode, &hr);
-        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &blankMetrics, &params, &joinModeNM, &hr);
-        //ADDTASKstrat_BC7_JoinMode, src, srcSize, &optJoinAlt, &metrics, &params, &joinModeAlt, &hr);
-        ADDTASK(strat_BC7_JoinModeRot, src, srcSize, &optJoin, &metrics, &params, 16 * 1024, &joinModeRot16, &hr);
-        ADDTASK(strat_BC7_JoinModeRot, src, srcSize, &optJoin, &metrics, &params, 256 * 1024, &joinModeRot256, &hr);
+        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &metrics, curveWidthTiles, &params, &joinMode, &hr, &codedJoin);
+        // a zero hc mask would duplicate the no-statics trial, so the trial is dropped
+#if GACL_HCA || GACL_PMMT == 2
+        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &hcAlphaMetrics, curveWidthTiles, &params, &joinModeNM, &hr, &codedNM);
+#endif
+#if GACL_HCAB || GACL_PMMT == 3
+        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &hcAlphaBlueMetrics, curveWidthTiles, &params, &joinModeRot256, &hr, &codedRot256);
+#endif
+        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &blankMetrics, curveWidthTiles, &params, &joinModeAlt, &hr, &codedAlt);   // HCN: no-statics trial
     }
     
     struct SplitStrat{
@@ -1142,10 +1424,17 @@ HRESULT ShuffleCompress_BC7(
     };
 
 
-    // mode-split streams record any space curve in the stream header
+    // mode-split streams record any space curve, index prediction and section layout in the stream header.  The section layout trials
+    // use the requested zstd level (capped at 18, the default for large sources), else the size based default level
+    const int requestedZstdLevel = int(params.CompressSettings.Default.ZstdCompressionLevel);
+    const int defaultZstdLevel = srcSize <= 16 * 1024 ? 12 : (srcSize <= 256 * 1024 ? 14 : 18);     // as GACL_Compression_DefaultInitRoutine
+    const int sectionTrialLevel = requestedZstdLevel > 0 ? (std::min)(requestedZstdLevel, 18) : defaultZstdLevel;
     for (SplitStrat* ss : { &ss1, &ss1r, &ss1o1r, &ss1o2r, &ss2, &ss2o1r, &ss2o2r, &ss3, &ss3o1r, &ss3o2r, &ss4, &ss4o1r, &ss4o2r, &ss5, &ss5r, &ss7, &ss7o1r, &ss7o2r })
     {
         ss->Options.SpaceCurveWidthInPixels = encodedStreamIsCurved ? static_cast<uint32_t>(params.CurvedTransforms.WidthInPixels) : 0u;
+        ss->Options.IndexPrediction = 1;
+        ss->Options.SectionLayout = 1;
+        ss->Options.SectionTrialLevel = static_cast<uint8_t>(sectionTrialLevel);
     }
 
     if (bIncludeSplitMode)  // skip mode-split shuffles if the caller has explicitly requested only mode-join
@@ -1246,9 +1535,80 @@ HRESULT ShuffleCompress_BC7(
         return hr;
     }
 
+#ifndef GACL_JHF
+#define GACL_JHF 1      // JHF: header-free Join fallback
+#endif
+    // JHF: when the curved no-statics trial has too few duplicate blocks to hold the parameter header (so it is dropped, or
+    // its header codes blocks itself), the trial is also redone on the uncurved blocks, which needs no header
+    // (GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN)
+    vector<uint8_t> joinLinear;
+#if GACL_JHF
+    if (bIncludeJoinMode && encodedStreamIsCurved && curveTiles <= 255 && (joinModeAlt.empty() || codedAlt > 0))
+    {
+        BC7TextureMetrics linearMetrics = {};
+        strat_BC7_JoinMode(srcforUncurvedTransforms, srcSize, &optJoin, &linearMetrics, 0, &params, &joinLinear, &hr);
+        if (!SUCCEEDED(hr))
+        {
+            Utility::Printf(GACL_Logging_Priority_High, L"Fatal shuffle+compress error.\n");
+            *destTransformId = GACL_SHUFFLE_TRANSFORM_NONE;
+            return hr;
+        }
+    }
+#endif
+
+    // Byte remap (bc7joinremap.h): about 0.5% smaller Join streams, but the GPU Join decode loses about a fifth of its
+    // throughput undoing it, so it is only tried above the default zstd level (where the encoder trades speed for size).
+    // It needs the stream header (parameter 4), so it redoes the best header-capable Join trial, with each set.
+    vector<uint8_t> joinRemapAlt;
+    BC7TextureMetrics remapMetrics = {};
+    size_t codedRemap = 0;
+    const bool joinRemapTried = bIncludeJoinMode && curveTiles <= 255 && requestedZstdLevel > defaultZstdLevel && BC7_ModeJoin_RemapSets() > 0;
+    if (joinRemapTried)
+    {
+        const vector<uint8_t>* bj = nullptr;
+        for (auto b : { &joinMode, &joinModeNM, &joinModeAlt, &joinModeRot256 })
+        {
+            if (b->size() > 0 && (!bj || b->size() < bj->size()))
+            {
+                bj = b;
+            }
+        }
+        if (bj)
+        {
+            const BC7TextureMetrics& bm = bj == &joinMode ? metrics : bj == &joinModeNM ? hcAlphaMetrics :
+                bj == &joinModeRot256 ? hcAlphaBlueMetrics : blankMetrics;
+            const unsigned sets = BC7_ModeJoin_RemapSets();
+            vector<vector<uint8_t>> alts(sets + 1);
+            vector<BC7TextureMetrics> altMetrics(sets + 1, bm);
+            vector<size_t> altCoded(sets + 1);
+            tasks.clear();
+            for (unsigned s = 1; s <= sets; s++)
+            {
+                altMetrics[s].JoinRemap = uint8_t(s);
+                ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &altMetrics[s], curveWidthTiles, &params, &alts[s], &hr, &altCoded[s]);
+            }
+            for (auto& task : tasks) task.join();
+            if (!SUCCEEDED(hr))
+            {
+                Utility::Printf(GACL_Logging_Priority_High, L"Fatal shuffle+compress error.\n");
+                *destTransformId = GACL_SHUFFLE_TRANSFORM_NONE;
+                return hr;
+            }
+            for (unsigned s = 1; s <= sets; s++)
+            {
+                if (alts[s].size() > 0 && (joinRemapAlt.empty() || alts[s].size() < joinRemapAlt.size()))
+                {
+                    joinRemapAlt.swap(alts[s]);
+                    remapMetrics = altMetrics[s];
+                    codedRemap = altCoded[s];
+                }
+            }
+        }
+    }
+
     size_t bestSize = srcSize;
     const uint8_t* best = src;
-    for (auto b : { &noShuffle, &curvedNoShuffle, &joinMode, &joinModeNM, &joinModeAlt, &joinModeRot16, &joinModeRot256 })
+    for (auto b : { &noShuffle, &curvedNoShuffle, &joinMode, &joinModeNM, &joinModeAlt, &joinLinear, &joinModeRot256, &joinRemapAlt })
     {
         if (b->size() < bestSize && b->size() > 0)
         {
@@ -1284,15 +1644,31 @@ HRESULT ShuffleCompress_BC7(
 
     if (bIncludeCurvedZstdOnly)
     {
-        Utility::Printf(L"No Shuffle [curved]  %s                                %u%c  \n", compressionStr, curvedNoShuffle.size(), (bestSize > curvedNoShuffle.size() ? L'!' : L' '));
+        if (curvedNoShuffle.empty())
+        {
+            Utility::Printf(L"No Shuffle [curved]  %s                                -  (no duplicate blocks to make room for the stream header)\n", compressionStr);
+        }
+        else
+        {
+            Utility::Printf(L"No Shuffle [curved]  %s                                %u%c  \n", compressionStr, curvedNoShuffle.size(), (best == curvedNoShuffle.data() ? L'*' : L' '));
+        }
     }
     if (bIncludeJoinMode)
     {
-        Utility::Printf(L"Join..........................................................%u%c  \n", joinMode.size(), (best == joinMode.data() ? L'*' : L' '));
-        Utility::Printf(L"Join (no metrics)                                             %u%c  \n", joinModeNM.size(), (best == joinModeNM.data() ? L'*' : L' '));
-        Utility::Printf(L"Join (Alt)                                                    %u%c  \n", joinModeAlt.size(), (best == joinModeAlt.data() ? L'*' : L' '));
-        Utility::Printf(L"Join (4K rot)                                                 %u%c  \n", joinModeRot16.size(), (best == joinModeRot16.data() ? L'*' : L' '));
-        Utility::Printf(L"Join (256K rot)                                               %u%c  \n", joinModeRot256.size(), (best == joinModeRot256.data() ? L'*' : L' '));
+        Utility::Printf(L"Join (metrics)..............................................%u%c  \n", joinMode.size(), (best == joinMode.data() ? L'*' : L' '));
+#if GACL_PMMT == 2
+        Utility::Printf(L"Join (per-mode)                                               %u%c  \n", joinModeNM.size(), (best == joinModeNM.data() ? L'*' : L' '));
+#endif
+        Utility::Printf(L"Join (hc None)                                                %u%c  \n", joinModeAlt.size(), (best == joinModeAlt.data() ? L'*' : L' '));
+        if (!joinLinear.empty())
+        {
+            Utility::Printf(L"Join (hc None, linear)                                        %u%c  \n", joinLinear.size(), (best == joinLinear.data() ? L'*' : L' '));
+        }
+        Utility::Printf(L"Join (hc Alpha+Blue)                                          %u%c  \n", joinModeRot256.size(), (best == joinModeRot256.data() ? L'*' : L' '));
+        if (joinRemapTried)
+        {
+            Utility::Printf(L"Join (byte remap %u)                                          %u%c  \n", unsigned(remapMetrics.JoinRemap), joinRemapAlt.size(), (best == joinRemapAlt.data() ? L'*' : L' '));
+        }
     }
     if (bIncludeSplitMode)
     {
@@ -1325,16 +1701,38 @@ HRESULT ShuffleCompress_BC7(
             *destTransformId = GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY;
         }
         else if (best == curvedNoShuffle.data())
-        { 
-            *destTransformId = GACL_SHUFFLE_TRANSFORM_ZSTD_SC;
+        {
+            *destTransformId = GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX;      // curve-only stream (BCNEX_UNSHUFFLED, header transform BC5_116116)
+            if (codedCurved)
+            {
+                Utility::Printf(L"Header coded blocks                                           %u\n", unsigned(codedCurved));
+            }
+        }
+        else if (best == joinLinear.data())
+        {
+            *destTransformId = GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN;
         }
         else if (best == joinMode.data() ||
             best == joinModeNM.data() ||
             best == joinModeAlt.data() ||
-            best == joinModeRot16.data() ||
-            best == joinModeRot256.data())
+            best == joinModeRot256.data() ||
+            best == joinRemapAlt.data())
         {
-            *destTransformId = encodedStreamIsCurved ? GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN_SC : GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN;
+            const BC7TextureMetrics& bestMetrics =
+                best == joinMode.data() ? metrics :
+                best == joinModeNM.data() ? hcAlphaMetrics :
+                best == joinModeRot256.data() ? hcAlphaBlueMetrics :
+                best == joinRemapAlt.data() ? remapMetrics : blankMetrics;
+            *destTransformId = BC7_JoinNeedsHeader(bestMetrics, curveWidthTiles) ? GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX : GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN;
+            const size_t bestCoded =
+                best == joinMode.data() ? codedJoin :
+                best == joinModeNM.data() ? codedNM :
+                best == joinModeRot256.data() ? codedRot256 :
+                best == joinRemapAlt.data() ? codedRemap : codedAlt;
+            if (bestCoded)
+            {
+                Utility::Printf(L"Header coded blocks                                           %u\n", unsigned(bestCoded));
+            }
         }
         else
         {

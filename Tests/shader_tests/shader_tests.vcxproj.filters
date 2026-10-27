@@ -115,6 +115,36 @@
     <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC5x.hlsl">
       <Filter>Shaders\BC1345</Filter>
     </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBCnEx.hlsl">
+      <Filter>Shaders\BC1345</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC1Ex.hlsl">
+      <Filter>Shaders\BC1345</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC3Ex.hlsl">
+      <Filter>Shaders\BC1345</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC4Ex.hlsl">
+      <Filter>Shaders\BC1345</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC5Ex.hlsl">
+      <Filter>Shaders\BC1345</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC7Ex.hlsl">
+      <Filter>Shaders\BC1345</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC1Headerless.hlsl">
+      <Filter>Shaders\BC1345</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC3Headerless.hlsl">
+      <Filter>Shaders\BC1345</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC4Headerless.hlsl">
+      <Filter>Shaders\BC1345</Filter>
+    </FxCompile>
+    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC5Headerless.hlsl">
+      <Filter>Shaders\BC1345</Filter>
+    </FxCompile>
     <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCSMode0.hlsl">
       <Filter>Shaders\UnshufflePerMode</Filter>
     </FxCompile>
@@ -142,16 +172,22 @@
     <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCSMode8.hlsl">
       <Filter>Shaders\UnshufflePerMode</Filter>
     </FxCompile>
-    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleCurveOnly.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
     <FxCompile Include="..\..\Shaders\Shuffle\PrepassB.hlsl">
       <Filter>Shaders\PrepassShaders</Filter>
     </FxCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
+    <None Include="..\..\Shaders\Shuffle\BC7JoinDecode.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\..\Shaders\Shuffle\BC7JoinTables.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
     <None Include="..\..\Shaders\Shuffle\BC7ScratchLayout.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\..\Shaders\Shuffle\BCnExTables.hlsli">
       <Filter>Shaders</Filter>
     </None>
     <None Include="..\..\Shaders\Shuffle\BinningPassCommonCS.hlsli">
@@ -161,6 +197,9 @@
       <Filter>Shaders</Filter>
     </None>
     <None Include="..\..\Shaders\Shuffle\EndpointOrderingHelpers.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\..\Shaders\Shuffle\IndexPredictionHelpers.hlsli">
       <Filter>Shaders</Filter>
     </None>
     <None Include="..\..\Shaders\Shuffle\PrefixSumCommonCS.hlsli">

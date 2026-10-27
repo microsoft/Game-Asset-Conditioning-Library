@@ -4,6 +4,10 @@
 // Advanced Technology Group (ATG)
 // Copyright (C) Microsoft Corporation. All rights reserved.
 //--------------------------------------------------------------------------------------
+// DEPRECATED: superseded by UnshuffleBCnEx.hlsl, which reverses the same linear transform (4), BC5_2266 (0x0A) and
+// GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_EX (0x0E) streams. The curved id below (20) is a retired _SC id that the library
+// no longer produces; curved BCn streams are now EX streams that record the curve width in their header.
+//--------------------------------------------------------------------------------------
 #include "Shared.hlsli"
 #include "SharedDefinitions.hlsli"
 

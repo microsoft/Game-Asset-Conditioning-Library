@@ -138,6 +138,11 @@
     <ClInclude Include="..\..\Lib\RDO_B\ClusterBlocks_BruteForce.h" />
     <ClInclude Include="..\..\Lib\RDO_B\ClusterBlocks_Common.h" />
     <ClInclude Include="..\..\Lib\shuffle\bc7.h" />
+    <ClInclude Include="..\..\Lib\shuffle\streamheader.h" />
+    <ClInclude Include="..\..\Lib\shuffle\bcnex.h" />
+    <ClInclude Include="..\..\Lib\shuffle\bc5blockcode.h" />
+    <ClInclude Include="..\..\Lib\shuffle\bc7joinblockcode.h" />
+    <ClInclude Include="..\..\Lib\shuffle\bc7joinremap.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\Helpers\FileUtility.cpp" />
@@ -153,8 +158,12 @@
     <ClCompile Include="..\..\Lib\shuffle\bc5.cpp" />
     <ClCompile Include="..\..\Lib\shuffle\bc7.cpp" />
     <ClCompile Include="..\..\Lib\shuffle\bc7modejoin.cpp" />
+    <ClCompile Include="..\..\Lib\shuffle\bc7modejoinlayout.cpp" />
+    <ClCompile Include="..\..\Lib\shuffle\bc7modejoinreverse.cpp" />
     <ClCompile Include="..\..\Lib\shuffle\bc7modesplit.cpp" />
+    <ClCompile Include="..\..\Lib\shuffle\bcnex.cpp" />
     <ClCompile Include="..\..\Lib\shuffle\shuffle.cpp" />
+    <ClCompile Include="..\..\Lib\shuffle\streamheader.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

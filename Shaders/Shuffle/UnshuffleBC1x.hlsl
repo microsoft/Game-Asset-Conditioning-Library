@@ -4,6 +4,10 @@
 // Advanced Technology Group (ATG)
 // Copyright (C) Microsoft Corporation. All rights reserved.
 //--------------------------------------------------------------------------------------
+// DEPRECATED: superseded by UnshuffleBCnEx.hlsl, which reverses the same linear transforms (1, 8) as well as
+// GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_EX (0x0B) streams. The curved ids below (17, 24) are retired _SC ids that the
+// library no longer produces; curved BCn streams are now EX streams that record the curve width in their header.
+//--------------------------------------------------------------------------------------
 #include "Shared.hlsli"
 #include "SharedDefinitions.hlsli"
 
@@ -55,7 +59,7 @@ void main(uint3 dtID : SV_DispatchThreadID, uint3 gID : SV_GroupID)
             twoBC1Blocks.z = (e0Pair >> 16) | (e1Pair & 0xFFFF0000);
             twoBC1Blocks.w = indicesPair.y;
         } 
-        else if (transformId == 32 || transformId == 33)                                // micro-pattern 2, and SC variant
+        else if (transformId == 8 || transformId == 24)                                // micro-pattern 2, and SC variant
         {
             uint indicesOffset  = (shuffledBufferSizeInBytes / 2);
 
@@ -116,7 +120,7 @@ void main(uint3 dtID : SV_DispatchThreadID, uint3 gID : SV_GroupID)
             twoBC1Blocks = srcBuffer.Load4(firstBlockIndex * 4);
         }
 
-        if (transformId == 17 || transformId == 33)                                        // curved data requiring reversal
+        if (transformId == 17 || transformId == 24)                                        // curved data requiring reversal
         {
 #if USE_SCALAR_REVERSAL
             uint groupBaseBlockID = ReverseSpaceCurveFor8ByteBlock(shuffledBufferSizeInBytes, widthInPixels, gID.x * 256 * BLOCKS_PER_PAIR);
@@ -129,7 +133,7 @@ void main(uint3 dtID : SV_DispatchThreadID, uint3 gID : SV_GroupID)
             dstBuffer[bufferOffsetInElements + finalBlockID + 0] = twoBC1Blocks.xy;
             dstBuffer[bufferOffsetInElements + finalBlockID + 1] = twoBC1Blocks.zw;
         }
-        else  //      transformId == 1 or transformId == 32 or invalid transform           // linear data in, linear data out
+        else  //      transformId == 1 or transformId == 8 or invalid transform            // linear data in, linear data out
         {
             dstBuffer[bufferOffsetInElements + threadIndex * BLOCKS_PER_PAIR + 0] = twoBC1Blocks.xy;
             dstBuffer[bufferOffsetInElements + threadIndex * BLOCKS_PER_PAIR + 1] = twoBC1Blocks.zw;
