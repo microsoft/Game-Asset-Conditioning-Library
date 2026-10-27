@@ -18,8 +18,7 @@
 // Byte 15 is coded as byte15 >> (m + 1), its low m + 1 bits being implied by the mode. The block is coded byte-remapped
 // with set 1 (bc7joinremap.h), the stream's own remap or, without one, applied for coding (BC7_JoinBlockCode's Map).
 // kBC7JoinBlockCode[m][p] packs the 9 bucket code lengths, (length - 1) in 3 bits each, bucket 0 lowest (512 bytes).
-// Trained on the (remapped) Join streams of the Insects BC7 256x256 tiles (some with alpha) that are not in corpus C and have no
-// duplicate block (14,076 Join trial streams, 57,655,296 blocks; x_genblockcode.ps1). Modes 0 and 2 did not occur (flat codes).
+// Modes 0 and 2 have flat codes.
 constexpr uint32_t kBC7JoinBlockCode[8][16] =
 {
     { 0x249249b, 0x249249b, 0x249249b, 0x249249b, 0x249249b, 0x249249b, 0x249249b, 0x249249b, 0x249249b, 0x249249b, 0x249249b, 0x249249b, 0x249249b, 0x249249b, 0x249249b, 0x249249b },

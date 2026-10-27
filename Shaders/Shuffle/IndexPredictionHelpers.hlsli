@@ -1,8 +1,11 @@
 //--------------------------------------------------------------------------------------
 // IndexPredictionHelpers.hlsli
 //
-// Advanced Technology Group (ATG)
-// Copyright (C) Microsoft Corporation. All rights reserved.
+// Game Asset Conditioning Library - Microsoft toolkit for game asset compression
+//
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+//
 //--------------------------------------------------------------------------------------
 
 // Inverse of the BC7 mode split index prediction (SplitIndexPrediction in Lib\shuffle\bc7modesplit.cpp), enabled by

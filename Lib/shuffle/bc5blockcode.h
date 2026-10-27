@@ -18,22 +18,17 @@
 // below its leading one; there is one class (no class bits). BC1 has its own code (kBC1BlockCode); BC3, BC4 and BC5
 // share kBC5BlockCode, BC4 using entries 0-7.
 // kBC5BlockCode[p] packs the 9 bucket code lengths, (length - 1) in 3 bits each, bucket 0 lowest (64 bytes).
-// Trained only on non-RDO streams that need coded blocks (RDO-encoded streams almost always have enough duplicates):
-// the 3,564 Insects BC5 64 KB tiles (64x64 blocks) whose duplicates leave no room for the header. Four rounds of
-// encoding them (linear and space curve) with the current code (at first, from the bucket histograms of all their
-// blocks), then rebuilding it from the coded blocks' bucket histograms plus 0.3x those of all their blocks (scaled to
-// the same total), +0.5 per bucket; Huffman lengths are at most 8.
+// Trained only on non-RDO streams that need coded blocks (RDO-encoded streams almost always have enough duplicates).
 constexpr uint32_t kBC5BlockCode[16] =
 {
     0x029cdfd, 0x109cbbf, 0x129396a, 0x18d46d1, 0x34ab760, 0x255bb18, 0x2ad68b0, 0x34ab760,
     0x029cbbf, 0x109cbbf, 0x24d2521, 0x145eb31, 0x44ab758, 0x2512899, 0x14958e9, 0x34ab760
 };
 
-// BC1's code, packed as kBC5BlockCode (32 bytes). Trained the same way on the 4,998 non-RDO BC1 64 KB tiles (128x64
-// blocks) that need coded blocks, 52 from Insects and 4,946 from 511 game textures whose non-solid blocks rarely repeat
-// one of the previous 16 blocks' index bits (RDO encoders make them repeat), with 0.1x the bucket histograms of all
-// their blocks. Against kBC5BlockCode's first 8 entries it fits a header in 1.5x as many of them, with a third fewer
-// coded blocks in the tiles both fit.
+// BC1's code, packed as kBC5BlockCode (32 bytes). Trained on non-RDO BC1 64 KB tiles (128x64 blocks) that need coded
+// blocks: game textures whose non-solid blocks rarely repeat one of the previous 16 blocks' index bits (RDO encoders
+// make them repeat). Against kBC5BlockCode's first 8 entries it fits a header in 1.5x as many of them, with a third
+// fewer coded blocks in the tiles both fit.
 constexpr uint32_t kBC1BlockCode[8] =
 {
     0x02a4b36, 0x02ae775, 0x02b4935, 0x10b797b, 0x4712452, 0x49ae888, 0x49656c8, 0x47244d0
