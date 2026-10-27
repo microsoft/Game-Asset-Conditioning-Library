@@ -187,6 +187,14 @@ runtime, the reverse stages (decompression + unshuffle) are required to restore 
 Currently shuffles for BC1\\3\\4\\5 are supported, with unshuffle operations supported within DirectStorage 1.4.  Experimental BC7 support is
 included in the GACL, but runtime unshuffle support is not currently available.
 
+Experimental shuffle transforms, requested with `GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL` (gacl.exe `-sce`) or a specific transform ID,
+add alternate BC1\\3\\5 shuffle patterns (`ZSTD_BC1_44`, `ZSTD_BC3_664`, `ZSTD_BC5_2266`), the headerless BC7 Join transform, and the
+extensible `_EX` transforms, one per format (`ZSTD_BC1_EX` to `ZSTD_BC7_EX`, transform IDs 0x0B-0x0F).  An `_EX` stream begins with a small
+header that names its shuffle pattern and carries its parameters, such as the space curve width of a curved stream.  The header takes the place
+of duplicate blocks (streams with too few duplicates code some blocks into the header), so the stream stays the size of the texture data.
+BC1\\3\\4\\5 `_EX` streams also use index prediction.  GPU unshuffle shaders for these transforms and for BC7 Split, with their thread group
+dispatch, are in [Shaders/Shuffle](Shaders/Shuffle/readme.md); DirectStorage 1.4 supports transform IDs 0x01-0x04.
+
 Shuffle+Compress will generally yield up to a relative 10% reduction in compressed stream size, as compared to the same stream compressed with zstd without
 shuffling.  Savings can vary widely by texture.
 
@@ -247,7 +255,8 @@ eligible for curved space transforms.  Curved textures are arranged as a z-order
 Each screen-adjacent set of 4 (2x2) micro tiles represent a screen-adjacent 64KB block.  Likewise sets of 16 (4x4) micro tiles represent screen
 adjacent 256KB blocks.  One API allows for converting textures to (forward) or from (reverse) curved space, so that RDO or other
 compression-improvement operations can be completed in curved space.  Future releases of DirectStorage will include unshuffle shaders that include
-support for reversing curved data.
+support for reversing curved data.  The experimental `_EX` transforms record the curve width in the stream header, and their unshuffle shaders
+reverse the curve.
 
 ```
 bool GACL_Shuffle_ApplySpaceCurve(
