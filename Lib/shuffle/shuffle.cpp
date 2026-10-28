@@ -23,6 +23,7 @@
 #include <thread>
 #include <vector>
 #include <atomic>
+#include <algorithm>
 
 
 /* Applies or reverses a screen space adjacency curve to texture data to improve compression later */
@@ -579,6 +580,7 @@ HRESULT GACL_ShuffleCompress_BCn(
         size_t CodedBlocks = 0;             // header blocks the EX header codes
         std::vector<uint8_t> Data;
         int Prediction = -1;                // EX index prediction mask, -1 = the transform's default
+        std::vector<uint8_t> Stream;        // the stream Data compresses, kept for a two-stage search (empty: Src)
     };
 
     const uint8_t* const linear = params.TextureData;
@@ -623,14 +625,40 @@ HRESULT GACL_ShuffleCompress_BCn(
         candidates.push_back(c);
     }
 
+    const bool defaultCompression = GACL_Compression_InitRoutine == &GACL_Compression_DefaultInitRoutine &&
+        GACL_Compression_CompressRoutine == &GACL_Compression_DefaultCompressRoutine &&
+        GACL_Compression_CleanupRoutine == &GACL_Compression_DefaultCleanupRoutine;
+    const int requestedZstdLevel = int(params.CompressSettings.Default.ZstdCompressionLevel);
+    const int defaultZstdLevel = params.SizeInBytes <= 16 * 1024 ? 12 : (params.SizeInBytes <= 256 * 1024 ? 14 : 18);     // as GACL_Compression_DefaultInitRoutine
+    const int finalZstdLevel = requestedZstdLevel != 0 ? requestedZstdLevel : defaultZstdLevel;
+
+    // BC1 two-stage search.  With GACL's default zstd routines and a final level above 3 up to the size default, zstd level 3 first
+    // compresses every candidate to rank them, and only the 4 smallest distinct ones are compressed again at the final level, plus the
+    // smallest without coded blocks if all 4 have them (the coded-block gate below compares with it).  On BC1 VT tile groups and
+    // non-RDO textures that costs under 0.001% of their size, for about 0.85x their BC1 CPU.  Above the default level every
+    // candidate is compressed at the final level.
+    constexpr int rankZstdLevel = 3;
+    constexpr size_t rankFinalists = 4;
+    size_t includedCount = 0;
+    for (const Candidate& c : candidates)
+    {
+        includedCount += c.Included ? 1 : 0;
+    }
+    const bool twoStage = baseFormat == DXGI_FORMAT_BC1_TYPELESS && defaultCompression && includedCount > rankFinalists &&
+        finalZstdLevel > rankZstdLevel && finalZstdLevel <= defaultZstdLevel;
+    SHUFFLE_COMPRESS_PARAMETERS rankParams = params;
+    rankParams.CompressSettings.Default.ZstdCompressionLevel = rankZstdLevel;
+    // the parameters every candidate is first compressed with
+    const SHUFFLE_COMPRESS_PARAMETERS* const candParams = twoStage ? &rankParams : &params;
+
     std::vector<std::thread> tasks;
     std::atomic<HRESULT> lastError = S_OK;
 
-    auto compressTask = [&](std::vector<uint8_t>& dest, const uint8_t* src, size_t srcBytes)
+    auto compressTask = [&](std::vector<uint8_t>& dest, const uint8_t* src, size_t srcBytes, const SHUFFLE_COMPRESS_PARAMETERS* compressParams)
         {
             void* cc = nullptr;
             size_t compressedBytes;
-            HRESULT hr = GACL_Compression_InitRoutine(&cc, &compressedBytes, &params);
+            HRESULT hr = GACL_Compression_InitRoutine(&cc, &compressedBytes, compressParams);
 
             if (SUCCEEDED(hr) && cc != nullptr)
             {
@@ -687,18 +715,26 @@ HRESULT GACL_ShuffleCompress_BCn(
                         lastError = E_FAIL;
                     }
 #endif
-                    compressTask(c.Data, stream.data(), stream.size());
+                    compressTask(c.Data, stream.data(), stream.size(), candParams);
+                    if (twoStage)
+                    {
+                        c.Stream.swap(stream);
+                    }
                 }
             }
             else if (c.Pattern != GACL_SHUFFLE_TRANSFORM_NONE)
             {
                 std::vector<uint8_t> shuffled(params.SizeInBytes);
                 pShuffle(shuffled.data(), c.Src, params.SizeInBytes, c.Version);
-                compressTask(c.Data, shuffled.data(), params.SizeInBytes);
+                compressTask(c.Data, shuffled.data(), params.SizeInBytes, candParams);
+                if (twoStage)
+                {
+                    c.Stream.swap(shuffled);
+                }
             }
             else
             {
-                compressTask(c.Data, c.Src, params.SizeInBytes);
+                compressTask(c.Data, c.Src, params.SizeInBytes, candParams);
             }
             }));
     }
@@ -707,18 +743,66 @@ HRESULT GACL_ShuffleCompress_BCn(
     {
         for (auto& task : tasks) task.join();
 
+        // the two-stage search's finalists, the smallest distinct candidates at the ranking level, are compressed again at the final level
+        if (twoStage && SUCCEEDED(status) && SUCCEEDED(lastError.load()))
+        {
+            std::vector<Candidate*> order;
+            for (Candidate& c : candidates)
+            {
+                if (c.Included && c.Data.size() > 0)
+                {
+                    order.push_back(&c);
+                }
+            }
+            std::stable_sort(order.begin(), order.end(), [](const Candidate* x, const Candidate* y) { return x->Data.size() < y->Data.size(); });
+            std::vector<Candidate*> finalists;
+            bool coded = false, uncoded = false;
+            for (Candidate* c : order)
+            {
+                if (finalists.size() == rankFinalists)
+                {
+                    break;
+                }
+                // identical compressed streams come from identical streams
+                const bool duplicate = std::any_of(finalists.begin(), finalists.end(), [c](const Candidate* f)
+                    { return f->Data.size() == c->Data.size() && memcmp(f->Data.data(), c->Data.data(), c->Data.size()) == 0; });
+                if (!duplicate)
+                {
+                    finalists.push_back(c);
+                    (c->CodedBlocks > 0 ? coded : uncoded) = true;
+                }
+            }
+            if (coded && !uncoded)
+            {
+                const auto firstUncoded = std::find_if(order.begin(), order.end(), [](const Candidate* c) { return c->CodedBlocks == 0; });
+                if (firstUncoded != order.end())
+                {
+                    finalists.push_back(*firstUncoded);
+                }
+            }
+            std::vector<std::thread> finalTasks;
+            for (Candidate* c : finalists)
+            {
+                finalTasks.push_back(std::thread([&, c] {
+                    compressTask(c->Data, c->Stream.empty() ? c->Src : c->Stream.data(), c->Stream.empty() ? params.SizeInBytes : c->Stream.size(), &params);
+                    }));
+            }
+            for (auto& task : finalTasks) task.join();
+            for (Candidate& c : candidates)
+            {
+                if (std::find(finalists.begin(), finalists.end(), &c) == finalists.end())
+                {
+                    c.Data.clear();
+                }
+            }
+        }
+
         if (SUCCEEDED(status) && SUCCEEDED(lastError.load()))
         {
-            const bool defaultCompression = GACL_Compression_InitRoutine == &GACL_Compression_DefaultInitRoutine &&
-                GACL_Compression_CompressRoutine == &GACL_Compression_DefaultCompressRoutine &&
-                GACL_Compression_CleanupRoutine == &GACL_Compression_DefaultCleanupRoutine;
-
             // Coded blocks slow the GPU decode (UnshuffleBCnEx.hlsl): BC1 streams with them take about four times a
             // headerless stream's latency. So at or below the default zstd level (and with custom compression routines,
             // which have no zstd level) a BC1 stream with coded blocks must be at least 1% smaller than the best stream
             // without them, else that stream (or the uncompressed texture) ships; above it the smallest stream wins.
-            const int requestedZstdLevel = int(params.CompressSettings.Default.ZstdCompressionLevel);
-            const int defaultZstdLevel = params.SizeInBytes <= 16 * 1024 ? 12 : (params.SizeInBytes <= 256 * 1024 ? 14 : 18);     // as GACL_Compression_DefaultInitRoutine
             const bool gateCoded = baseFormat == DXGI_FORMAT_BC1_TYPELESS && (!defaultCompression || requestedZstdLevel <= defaultZstdLevel);
             size_t uncodedSize = params.SizeInBytes;
             for (const Candidate& c : candidates)
