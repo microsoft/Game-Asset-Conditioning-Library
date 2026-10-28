@@ -926,6 +926,13 @@ static void strat_BC7_NoShuffle(const uint8_t* src, size_t srcSize, SHUFFLE_COMP
 #define GACL_JOINCHK 0  // verify every Join candidate decodes (header, layout and field transforms) in release builds
 #endif
 
+// Developer knob, disabled by default for its encode time vs compression trade-off: also try the 7 endpoint ordering variants of
+// the Split strategies (o1r and o2r of 1 and 7, o2r of 2 and 4, o1r of 3) where the content gate doesn't limit the Split search.  On
+// held-out samples of BC7 VT tile groups they saved 0-0.008% (RDO) and 0.022% (non-RDO) of the size, for about 1.4-1.75x the CPU.
+#ifndef GACL_SPLIT_ORDER_VARIANTS
+#define GACL_SPLIT_ORDER_VARIANTS 0
+#endif
+
 // Join streams with no statics mask, space curve or byte remap need no parameters and are stored without a
 // header (GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN). All others carry an in-stream parameter header (..._BC7_EX).
 static bool BC7_JoinNeedsHeader(const BC7TextureMetrics& metrics, uint8_t curveWidthTiles)
@@ -1469,6 +1476,14 @@ HRESULT ShuffleCompress_BC7(
     SplitStrat ss1r = { L"Stable(4,5,6), EQSBI(1,3,7), EP4b(0,2) r  ",
         { mt, { EndpointPair4bit, EndpointQuadSignificantBitInderleaved, EndpointPair4bit, EndpointQuadSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointQuadSignificantBitInderleavedAlt }, 0, _64MB }
     };
+#if GACL_SPLIT_ORDER_VARIANTS
+    SplitStrat ss1o1r = { L"Stable(4,5,6), EQSBI(1,3,7), EP4b(0,2) o1r",
+        { mt, { EndpointPair4bit, EndpointQuadSignificantBitInderleaved, EndpointPair4bit, EndpointQuadSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointQuadSignificantBitInderleavedAlt }, 1, _64MB }
+    };
+    SplitStrat ss1o2r = { L"Stable(4,5,6), EQSBI(1,3,7), EP4b(0,2) o2r",
+        { mt, { EndpointPair4bit, EndpointQuadSignificantBitInderleaved, EndpointPair4bit, EndpointQuadSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointQuadSignificantBitInderleavedAlt }, 2, _64MB }
+    };
+#endif
 
 
     // Strategy #2 - prefer stable island, endpoint quad, then 4 bit color plane
@@ -1478,11 +1493,21 @@ HRESULT ShuffleCompress_BC7(
     SplitStrat ss2o1r = { L"Stable(4,5,6), EQSBI(1,3,7), CP4b(0,2) o1r",
         { mt, { ColorPlane4bit, EndpointQuadSignificantBitInderleaved, ColorPlane4bit, EndpointQuadSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointQuadSignificantBitInderleavedAlt}, 1, _64MB }
     };
+#if GACL_SPLIT_ORDER_VARIANTS
+    SplitStrat ss2o2r = { L"Stable(4,5,6), EQSBI(1,3,7), CP4b(0,2) o2r",
+        { mt, { ColorPlane4bit, EndpointQuadSignificantBitInderleaved, ColorPlane4bit, EndpointQuadSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointQuadSignificantBitInderleavedAlt}, 2, _64MB }
+    };
+#endif
 
     // Strategy #3 - prefer endpoint pair interleave 
     SplitStrat ss3 = { L"EPSBI(0,1,2,3,4,5,6,7)    ",
         { mt, { EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved}, 0, 0}
     };
+#if GACL_SPLIT_ORDER_VARIANTS
+    SplitStrat ss3o1r = { L"EPSBI(0,1,2,3,4,5,6,7) o1r",
+        { mt, { EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved}, 1, _64MB}
+    };
+#endif
     SplitStrat ss3o2r = { L"EPSBI(0,1,2,3,4,5,6,7) o2r",
         { mt, { EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved}, 2, _64MB}
     };
@@ -1494,6 +1519,11 @@ HRESULT ShuffleCompress_BC7(
     SplitStrat ss4o1r = { L"Stable(4,5,6), EPSBI(1,3,7), CP4b(0,2) o1r",
         { mt, { ColorPlane4bit, EndpointPairSignificantBitInderleaved, ColorPlane4bit, EndpointPairSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointPairSignificantBitInderleaved}, 1, _64MB}
     };
+#if GACL_SPLIT_ORDER_VARIANTS
+    SplitStrat ss4o2r = { L"Stable(4,5,6), EPSBI(1,3,7), CP4b(0,2) o2r",
+        { mt, { ColorPlane4bit, EndpointPairSignificantBitInderleaved, ColorPlane4bit, EndpointPairSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointPairSignificantBitInderleaved}, 2, _64MB}
+    };
+#endif
 
     // Strategy #5 - placing the smaller stable region of mode 7 quads at a different byte edge.  #2 does the same
     // (EQSBIA in mode 7), so only the rotated variant is tried
@@ -1505,6 +1535,14 @@ HRESULT ShuffleCompress_BC7(
     SplitStrat ss7 = { L"EPSBI(1,3,4,5,6,7), CP4b(0,2)    ",
         { mt, { ColorPlane4bit, EndpointPairSignificantBitInderleaved, ColorPlane4bit, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved}, 0, 0}
     };
+#if GACL_SPLIT_ORDER_VARIANTS
+    SplitStrat ss7o1r = { L"EPSBI(1,3,4,5,6,7), CP4b(0,2) o1r",
+        { mt, { ColorPlane4bit, EndpointPairSignificantBitInderleaved, ColorPlane4bit, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved}, 1, _64MB}
+    };
+    SplitStrat ss7o2r = { L"EPSBI(1,3,4,5,6,7), CP4b(0,2) o2r",
+        { mt, { ColorPlane4bit, EndpointPairSignificantBitInderleaved, ColorPlane4bit, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved}, 2, _64MB}
+    };
+#endif
 
 
     // mode-split streams record any space curve, index prediction and section layout in the stream header.  The section layout trials
@@ -1516,7 +1554,11 @@ HRESULT ShuffleCompress_BC7(
     // the strategies share section trial results: a mode's sections recur across strategies with the same pattern, ordering and rotation
     BC7ModeSplitTrialCache splitTrialCache;
     StreamOutputCache splitOutputCache;
-    for (SplitStrat* ss : { &ss1, &ss1r, &ss2, &ss2o1r, &ss3, &ss3o2r, &ss4, &ss4o1r, &ss5r, &ss7 })
+    for (SplitStrat* ss : { &ss1, &ss1r, &ss2, &ss2o1r, &ss3, &ss3o2r, &ss4, &ss4o1r, &ss5r, &ss7
+#if GACL_SPLIT_ORDER_VARIANTS
+        , &ss1o1r, &ss1o2r, &ss2o2r, &ss3o1r, &ss4o2r, &ss7o1r, &ss7o2r
+#endif
+        })
     {
         ss->Options.SpaceCurveWidthInPixels = encodedStreamIsCurved ? static_cast<uint32_t>(params.CurvedTransforms.WidthInPixels) : 0u;
         ss->Options.IndexPrediction = 1;
@@ -1540,8 +1582,9 @@ HRESULT ShuffleCompress_BC7(
         });
 
         // the endpoint ordering variants (o1r, o2r) that never gained over the other strategies on samples of BC7 VT tile groups are
-        // not tried.  The content gate's fast path tries 5 of the strategies below, its safe path 7 (fewer where the ordering variants
-        // don't apply): the others gained least on those samples
+        // not tried, unless GACL_SPLIT_ORDER_VARIANTS restores them (in their former order) where the content gate is off.  The content
+        // gate's fast path tries 5 of the strategies below, its safe path 7 (fewer where the ordering variants don't apply): the others
+        // gained least on those samples
         auto addSplit = [&](SplitStrat& ss, bool onFast, bool onSafe)
         {
             if ((gate == ContentGate::Fast && !onFast) || (gate == ContentGate::Safe && !onSafe))
@@ -1553,21 +1596,59 @@ HRESULT ShuffleCompress_BC7(
         };
         addSplit(ss1, false, true);
         addSplit(ss1r, true, true);
+#if GACL_SPLIT_ORDER_VARIANTS
+        if (maxOrderStrategies > 0)
+        {
+            addSplit(ss1o1r, false, false);
+            if (maxOrderStrategies > 1)
+            {
+                addSplit(ss1o2r, false, false);
+            }
+        }
+#endif
         addSplit(ss2, false, false);
         if (maxOrderStrategies > 0)
         {
             addSplit(ss2o1r, true, true);
+#if GACL_SPLIT_ORDER_VARIANTS
+            if (maxOrderStrategies > 1)
+            {
+                addSplit(ss2o2r, false, false);
+            }
+#endif
         }
         addSplit(ss3, true, true);
+#if GACL_SPLIT_ORDER_VARIANTS
+        if (maxOrderStrategies > 0)
+        {
+            addSplit(ss3o1r, false, false);
+        }
+#endif
         if (maxOrderStrategies > 1)
         {
             addSplit(ss3o2r, true, true);
         }
         addSplit(ss7, false, false);
+#if GACL_SPLIT_ORDER_VARIANTS
+        if (maxOrderStrategies > 0)
+        {
+            addSplit(ss7o1r, false, false);
+            if (maxOrderStrategies > 1)
+            {
+                addSplit(ss7o2r, false, false);
+            }
+        }
+#endif
         addSplit(ss4, true, true);
         if (maxOrderStrategies > 0)
         {
             addSplit(ss4o1r, false, true);
+#if GACL_SPLIT_ORDER_VARIANTS
+            if (maxOrderStrategies > 1)
+            {
+                addSplit(ss4o2r, false, false);
+            }
+#endif
         }
         addSplit(ss5r, false, false);
     }
