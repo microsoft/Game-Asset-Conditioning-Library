@@ -412,6 +412,7 @@
       <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">6.0</ShaderModel>
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">-Qembed_debug %(AdditionalOptions)</AdditionalOptions>
     </FxCompile>
+    <None Include="..\..\Shaders\Shuffle\BC7ScratchLayout.hlsli" />
     <None Include="..\..\Shaders\Shuffle\BinningPassCommonCS.hlsli" />
     <None Include="..\..\Shaders\Shuffle\DerotationHelpers.hlsli" />
     <None Include="..\..\Shaders\Shuffle\EndpointOrderingHelpers.hlsli" />

@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include "BC7ScratchLayout.hlsli"
+
 // This value will determine the size of the histograms (how many blocks are in each histogram)
 // and also the threadgroup count for every pass except prefix sum.
 // Temporary workaround - This is fixed to 256 to make sure the dispatch limit for d3d12 won't be an issue for 16k textures
@@ -30,7 +32,7 @@
     UAV(u0)"
 
 #define ModeBinningCS_RS "\
-    RootConstants(num32BitConstants = 6, b0),\
+    RootConstants(num32BitConstants = 4, b0),\
     SRV(t0),\
     UAV(u0),\
     UAV(u1),\
@@ -83,6 +85,8 @@ struct CommonHeader
     uint chunkSize;
     
     PerModeData perModeData[BC7_MODES_COUNT];
+    
+    uint spaceCurveWidthInPixels;   // from the stream header, 0 = linear
 };
 
 struct ModeCountsStruct

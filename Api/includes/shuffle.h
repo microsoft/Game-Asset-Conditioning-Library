@@ -33,8 +33,7 @@ enum GACL_SHUFFLE_TRANSFORM
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116       = 4,     // 6 streams (1:1:6:1:1:6)    red_0, red_1, red index stream, green_0, green_1, green index stream (DSTORAGE_GACL_SHUFFLE_TRANSFORM_BC5)
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116_SC    = 20,    // 6 streams (1:1:6:1:1:6)    red_0, red_1, red index stream, green_0, green_1, green index stream, space curve (experimental)
 
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT        = 5,	 // mode-specific streams and transforms, control bytes within compressed stream	(better compression, slower reverse transform, experimental))
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT_SC     = 21,    // as above, but data is curved, can only be decompressed into a target with dimensionality that supports reverse mapping
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT        = 5,     // mode-specific streams and transforms, control bytes within compressed stream	(better compression, slower reverse transform, experimental))
 
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN         = 6,     // mode-specific transforms, control bytes outside of compressed stream (less compression, trivial+fast reverse transform, experimental)
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN_SC      = 22,    // as above, but data is curved, can only be decompressed into a target with dimensionality that supports reverse mapping
@@ -83,27 +82,6 @@ enum GACL_SHUFFLE_TRANSFORM
 /// converting to space curve layout.  Block-Level Entropy Reduction at higher setting applied in this way typically
 /// results in 10-20% additional savings due to screen adjacency yielding a higher number of similar (mergeable)
 /// block before hitting any specified error\deviation limits.
-///
-/// Note: Curved transforms are not elligable for all DirectStorage request destinations.  Only a destination
-/// type with known dimensionality that follows the same rules as above (power of 2 micro-tiles in each dimension)
-/// are elligable.
-///
-/// DirectStorage read requests to read data that include a curved transform will fail for the following destination
-/// types that have no inherent dimensionality:
-///
-///   DSTORAGE_REQUEST_DESTINATION_MEMORY, DSTORAGE_REQUEST_DESTINATION_BUFFER
-///
-/// DirectStorage read requests to read data that include a curved transform work for the following destination types
-/// if and only if the details of the request implies a single sub-resource is being loaded, and that subresource meets
-/// the dimensionality restrictions:
-///
-///   DSTORAGE_REQUEST_DESTINATION_MULTIPLE_SUBRESOURCES, DSTORAGE_REQUEST_DESTINATION_MULTIPLE_SUBRESOURCES_RANGE
-///
-/// DirectStorage read requests to read data that include a curved transform work for the following destination types
-/// if the updated region meets the dimensionality requirements, though this is generally true for most implementations
-/// of partially resident textures:
-///
-///   DSTORAGE_REQUEST_DESTINATION_TEXTURE_REGION, DSTORAGE_REQUEST_DESTINATION_TILES
 ///
 /// The function can be called without source and destination to test if the stream is elligable for space curve transforms.
 ///

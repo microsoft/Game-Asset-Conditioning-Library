@@ -59,6 +59,12 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gId : SV_GroupID, uint gindex 
         uint modeEncodingFlag = (Byte0 >> 4) & 0x1u;
         uint staticFieldsFlag = (Byte0 >> 5) & 0x1u;
         uint lowEntropyFlag = (Byte0 >> 6) & 0x1u;
+        uint extensionByteFlag = (Byte0 >> 7) & 0x1u;
+        
+        // Extension byte bits [0-2] are the space curve width in 128 pixel tiles (log2), 0 = linear
+        uint extensionByte = (extensionByteFlag) ? fetchNextByte(currentByteIndex++, shuffledBuffer) : 0u;
+        uint spaceCurveWidthInTilesLog2 = extensionByte & 0x7u;
+        uint spaceCurveWidthInPixels = (spaceCurveWidthInTilesLog2 != 0u) ? (128u << spaceCurveWidthInTilesLog2) : 0u;
         
         uint globalStatics = (staticFieldsFlag) ? fetchNextByte(currentByteIndex++, shuffledBuffer) : 0u;
         uint globalLowEntropy = (lowEntropyFlag) ? fetchNextByte(currentByteIndex++, shuffledBuffer) : 0u;
@@ -66,6 +72,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gId : SV_GroupID, uint gindex 
         if (DTid.x == 0u)
         {
             scratchBuffer.Store(4u, modesUsedCount);
+            scratchBuffer.Store(GACL_BC7_SC_WIDTH_OFFSET, spaceCurveWidthInPixels);
             //scratchBuffer.Store(x, header.modeEncoding);
         }
         
@@ -96,7 +103,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gId : SV_GroupID, uint gindex 
             if (DTid.x == 0u)
             {
                 // Set these to defaults, may later be overwritten
-                scratchBuffer.Store(16u + (32 * mode) + 12u, packedInfo); // modeStatics and lowEntropy
+                scratchBuffer.Store(GACL_BC7_PER_MODE_OFFSET + (GACL_BC7_PER_MODE_STRIDE * mode) + GACL_BC7_PACKED_DATA_OFFSET, packedInfo); // modeStatics and lowEntropy
                 scratchBuffer.Store(16u + (32 * mode) + 4u, 0u); // modeRotationByteAddress
                 
                 scratchBuffer.Store(16u + (32 * mode) + 16u, modePattern);
@@ -143,7 +150,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gId : SV_GroupID, uint gindex 
                 // If either modeLowEntropy, modeStatics or endpointOrderBytes are set, overwrite packedInfo
                 if (DTid.x == 0u && (modeStatics || modeLowEntropy || endpointOrderBytes))
                 {
-                    scratchBuffer.Store(16u + (32 * mode) + 12u, packedInfo);
+                    scratchBuffer.Store(GACL_BC7_PER_MODE_OFFSET + (GACL_BC7_PER_MODE_STRIDE * mode) + GACL_BC7_PACKED_DATA_OFFSET, packedInfo);
                 }
                 
                 uint rotation = (nextByte >> 4) & 0x1u;

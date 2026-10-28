@@ -35,6 +35,7 @@ void ShuffleBC7Texture(
     memcpy(opt.Patterns, shuffleParams.Patterns, sizeof(opt.Patterns));
     opt.EndpointOrderStrategy = (BC7ModeSplitFieldOrderStrategy)shuffleParams.endpointOrderStrategy;
     opt.RotationRegionSize = shuffleParams.ChunkSize;
+    opt.SpaceCurveWidthInPixels = shuffleParams.useSpaceCurve ? static_cast<uint32_t>(m_bcTextureWidthInPixels) : 0u;   // recorded in the stream header
 
     // Call the GACL lib to do the shuffling
     vector<uint8_t> splitModeA, splitModeB;

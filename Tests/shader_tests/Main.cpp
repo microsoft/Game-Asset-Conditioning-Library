@@ -139,6 +139,12 @@ std::vector<GTestParameters> GetUnshufflingTestParameters()
             {
                 for (uint32_t scIndex = 0; scIndex < std::size(g_useSpaceCurve); ++scIndex)
                 {
+                    // only run curved variants for resolutions that are space-curve eligible (16 byte elements)
+                    if (g_useSpaceCurve[scIndex] && !std::get<3>(g_testResolutions[resIndex]))
+                    {
+                        continue;
+                    }
+
                     for (uint32_t patternSetIndex = 0; patternSetIndex < std::size(g_patternSets); ++patternSetIndex)
                     {
                         GTestParameters params = { GBaseFormat::BC7 };

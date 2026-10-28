@@ -169,6 +169,9 @@
     <None Include="FullScreenQuad.hlsli">
       <Filter>Shaders</Filter>
     </None>
+    <None Include="..\..\Shaders\Shuffle\BC7ScratchLayout.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
     <None Include="..\..\Shaders\Shuffle\BinningPassCommonCS.hlsli">
       <Filter>Shaders\BinningPassShaders</Filter>
     </None>

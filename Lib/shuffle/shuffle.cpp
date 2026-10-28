@@ -833,9 +833,6 @@ const wchar_t* GACL_ShuffleCompress_GetFileExtensionForTransform(
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT:
         return L"gacl.bc7s";
 
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT_SC:
-        return L"gacl.bc7ss";
-
     case GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY:
         return L"zstd";   // No shuffle, compressed only
 

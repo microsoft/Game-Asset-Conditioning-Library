@@ -75,7 +75,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gid : SV_GroupID)
     uint4 rawOut = 0;
     
     /// HEADER INFO - this is mode uniform, so also uniform across this wave
-    uint packedInfo = scratchBuffer.Load(16u + (32 * mode) + 12u);
+    uint packedInfo = scratchBuffer.Load(GACL_BC7_PER_MODE_OFFSET + (GACL_BC7_PER_MODE_STRIDE * mode) + GACL_BC7_PACKED_DATA_OFFSET);
     uint modeStatics = packedInfo & 0xFF;
     uint lowEntropy = (packedInfo >> 8u) & 0xFF;
     uint endpointOrderBytes = (packedInfo >> 16u) & 0xFFFF;
