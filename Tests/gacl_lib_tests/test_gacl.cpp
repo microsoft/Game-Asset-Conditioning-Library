@@ -1,4 +1,4 @@
-// gacl_lib_tests\test_gacl.cpp
+﻿// gacl_lib_tests\test_gacl.cpp
 //
 // Game Asset Conditioning Library - Microsoft toolkit for game asset compression
 //
@@ -2461,4 +2461,111 @@ TEST(ShuffleTables, BCnExShaderTables)
         os << "#endif\n";
         EXPECT_TRUE(same) << "Shaders/Shuffle/BCnExTables.hlsli is out of date; regenerated: " << path.string();
     }
+}
+
+
+// Folder mode is separate from the fixed-size regression fixtures above.
+#include "../ContentInput.h"
+#include <fstream>
+
+void RegisterLibraryContent(const std::filesystem::path& input)
+{
+    ContentInput::Register(input, [](const ContentInput::File& file) {
+        std::ifstream stream(file.path, std::ios::binary);
+        if (!stream) throw std::runtime_error("Cannot open input");
+        const auto size = std::filesystem::file_size(file.path);
+        if (size > static_cast<uintmax_t>((std::numeric_limits<std::streamsize>::max)()))
+            throw std::runtime_error("File exceeds supported stream size");
+        std::vector<uint8_t> bytes(static_cast<size_t>(size));
+        if (!bytes.empty() && !stream.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size())))
+            throw std::runtime_error("Input read failed");
+        if (bytes.empty()) throw ContentInput::Unsupported("GACL compression requires a nonempty file");
+
+        // Exercise the public arbitrary-buffer API on every file, irrespective of extension.
+        std::vector<uint8_t> compressed(bytes.size());
+        size_t written = 0;
+        const HRESULT result = GACL_Compression_CompressBuffer(compressed.data(), bytes.size(), &written, bytes.data(), nullptr);
+        ASSERT_TRUE(result == S_OK || result == S_FALSE) << "Buffer compression HRESULT " << result;
+        if (result == S_OK)
+        {
+            ASSERT_GT(written, 0u);
+            ASSERT_LE(written, compressed.size());
+            std::vector<uint8_t> decoded(bytes.size());
+            const size_t count = ZSTD_decompress(decoded.data(), decoded.size(), compressed.data(), written);
+            ASSERT_FALSE(ZSTD_isError(count)) << ZSTD_getErrorName(count);
+            ASSERT_EQ(count, bytes.size());
+            EXPECT_EQ(decoded, bytes);
+        }
+        else EXPECT_EQ(written, 0u); // Documented store-original fallback, not a test skip.
+
+        if (ContentInput::Extension(file.path) != L".dds") return;
+        TexMetadata metadata;
+        ScratchImage image;
+        ASSERT_TRUE(SUCCEEDED(LoadFromDDSFile(file.path.c_str(), DDS_FLAGS_NONE, &metadata, image))) << "Malformed DDS";
+        const auto* first = image.GetImage(0, 0, 0);
+        ASSERT_NE(first, nullptr);
+        // Generic byte roundtrip already covers other formats. The public BCn
+        // shuffle path is additionally validated on every supported subresource.
+        switch (metadata.format)
+        {
+        case DXGI_FORMAT_BC1_UNORM: case DXGI_FORMAT_BC1_UNORM_SRGB:
+        case DXGI_FORMAT_BC3_UNORM: case DXGI_FORMAT_BC3_UNORM_SRGB:
+        case DXGI_FORMAT_BC4_UNORM: case DXGI_FORMAT_BC4_SNORM:
+        case DXGI_FORMAT_BC5_UNORM: case DXGI_FORMAT_BC5_SNORM:
+        case DXGI_FORMAT_BC7_UNORM: case DXGI_FORMAT_BC7_UNORM_SRGB: break;
+        default: testing::Test::RecordProperty("texture_validation", "buffer-only: no supported BCn shuffle"); return;
+        }
+        for (size_t index = 0; index < image.GetImageCount(); ++index)
+        {
+            const auto& subresource = image.GetImages()[index];
+            SHUFFLE_COMPRESS_PARAMETERS parameters{};
+            parameters.TextureData = subresource.pixels;
+            parameters.SizeInBytes = subresource.slicePitch;
+            parameters.Format = metadata.format;
+            parameters.CompressSettings.Default = { 0, 0 };
+            compressed.resize(subresource.slicePitch);
+            GACL_SHUFFLE_TRANSFORM transform;
+            switch (metadata.format)
+            {
+            case DXGI_FORMAT_BC1_UNORM: case DXGI_FORMAT_BC1_UNORM_SRGB: transform = GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224; break;
+            case DXGI_FORMAT_BC3_UNORM: case DXGI_FORMAT_BC3_UNORM_SRGB: transform = GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_116224; break;
+            case DXGI_FORMAT_BC4_UNORM: case DXGI_FORMAT_BC4_SNORM: transform = GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116; break;
+            case DXGI_FORMAT_BC5_UNORM: case DXGI_FORMAT_BC5_SNORM: transform = GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116; break;
+            default: transform = GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT; break;
+            }
+            written = 0;
+            const HRESULT status = GACL_ShuffleCompress_BCn(compressed.data(), &transform, &written, parameters);
+            ASSERT_TRUE(status == S_OK || status == S_FALSE) << "BCn shuffle HRESULT " << status;
+            if (status == S_FALSE) { EXPECT_EQ(written, 0u); continue; }
+            ASSERT_GT(written, 0u);
+            ASSERT_LE(written, compressed.size());
+            std::vector<uint8_t> decoded(subresource.slicePitch);
+            const size_t count = ZSTD_decompress(decoded.data(), decoded.size(), compressed.data(), written);
+            ASSERT_FALSE(ZSTD_isError(count)) << ZSTD_getErrorName(count);
+            if (transform == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT)
+                ASSERT_GT(count, 0u); // Mode-split streams have variable uncompressed length.
+            else ASSERT_EQ(count, subresource.slicePitch);
+            if (transform != GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY)
+            {
+                std::vector<uint8_t> originalOrder(decoded.size());
+                switch (transform)
+                {
+                case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224: UnshuffleBC1v1(originalOrder.data(), decoded.data(), decoded.size()); break;
+                case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_116224: UnshuffleBC3v1(originalOrder.data(), decoded.data(), decoded.size()); break;
+                case GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116: UnshuffleBC4v1(originalOrder.data(), decoded.data(), decoded.size()); break;
+                case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116: UnshuffleBC5v1(originalOrder.data(), decoded.data(), decoded.size()); break;
+                case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT:
+                    {
+                        void BC7_ModeSplit_Reverse(const uint8_t*, size_t, std::vector<uint8_t>&, size_t, const uint8_t*);
+                        BC7_ModeSplit_Reverse(decoded.data(), count, originalOrder, subresource.slicePitch, nullptr);
+                        break;
+                    }
+                default: FAIL() << "Unexpected selected transform " << transform;
+                }
+                decoded.swap(originalOrder);
+            }
+            EXPECT_EQ(0, memcmp(decoded.data(), subresource.pixels, decoded.size()));
+        }
+        testing::Test::RecordProperty("texture_subresources", static_cast<int>(image.GetImageCount()));
+    });
 }

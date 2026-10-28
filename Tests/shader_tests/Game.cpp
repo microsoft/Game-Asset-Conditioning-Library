@@ -13,7 +13,10 @@
 #include "bcnex.h"
 #include "bcnexblockcode.h"
 #include "streamheader.h"
+#include "../ContentInput.h"
 #include <filesystem>
+#include <limits>
+#include <sstream>
 
 extern void ExitGame() noexcept;
 
@@ -1531,6 +1534,115 @@ static bool InflateSplitRemapLengths(std::vector<uint8_t>& s, size_t blockCount)
     return true;
 }
 
+GTestParameters Game::LoadContent(const std::filesystem::path& path, const std::string& name)
+{
+    if (_wcsicmp(path.extension().c_str(), L".dds") != 0)
+        throw ContentInput::Unsupported("GPU unshuffle accepts DDS files only");
+
+    TexMetadata metadata = {};
+    ScratchImage image;
+    const HRESULT hr = LoadFromDDSFile(path.c_str(), DDS_FLAGS_NONE, &metadata, image);
+    if (FAILED(hr))
+    {
+        if (hr == HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED))
+            throw ContentInput::Unsupported("DDS encoding or pixel format is not supported by DirectXTex");
+        std::ostringstream message;
+        message << "Cannot load DDS (malformed, truncated, or unreadable), HRESULT=0x"
+            << std::hex << static_cast<unsigned long>(hr);
+        throw std::runtime_error(message.str());
+    }
+
+    if (metadata.dimension != TEX_DIMENSION_TEXTURE2D || metadata.arraySize != 1 || metadata.IsCubemap())
+        throw ContentInput::Unsupported("GPU unshuffle requires a single non-cubemap 2D DDS texture");
+
+    const DXGI_FORMAT baseFormat = Utility::GetBaseFormat(metadata.format);
+    if (baseFormat != DXGI_FORMAT_BC1_TYPELESS && baseFormat != DXGI_FORMAT_BC3_TYPELESS &&
+        baseFormat != DXGI_FORMAT_BC4_TYPELESS && baseFormat != DXGI_FORMAT_BC5_TYPELESS &&
+        baseFormat != DXGI_FORMAT_BC7_TYPELESS)
+        throw ContentInput::Unsupported("GPU unshuffle supports BC1, BC3, BC4, BC5, and BC7 variants only");
+
+    if (!metadata.width || !metadata.height || !metadata.mipLevels)
+        throw std::runtime_error("DDS has invalid dimensions or no mip levels");
+    if (metadata.width % 4 || metadata.height % 4)
+        throw ContentInput::Unsupported("Existing GPU comparison path requires complete 4x4 texture blocks");
+    if (metadata.width > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
+        metadata.height > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION)
+        throw ContentInput::Unsupported("DDS dimensions exceed the D3D12 2D texture limit");
+
+    // Mip 0 only. Copy block rows using the loader's actual pitch, not DDS header guesses.
+    const Image* firstMip = image.GetImage(0, 0, 0);
+    if (!firstMip || !firstMip->pixels)
+        throw std::runtime_error("DDS mip 0 is missing");
+    const size_t blockBytes = (baseFormat == DXGI_FORMAT_BC1_TYPELESS ||
+        baseFormat == DXGI_FORMAT_BC4_TYPELESS) ? BC1_BYTES_PER_BLOCK : BC7_BYTES_PER_BLOCK;
+    const size_t blockRows = (metadata.height + 3) / 4;
+    const size_t rowBytes = ((metadata.width + 3) / 4) * blockBytes;
+    const size_t sizeLimit = (std::numeric_limits<size_t>::max)();
+    if (firstMip->rowPitch < rowBytes || firstMip->rowPitch > sizeLimit / blockRows ||
+        firstMip->slicePitch < firstMip->rowPitch * blockRows)
+        throw std::runtime_error("DDS mip 0 has an invalid block row/slice pitch");
+    if (rowBytes > (std::numeric_limits<uint32_t>::max)() / blockRows)
+        throw ContentInput::Unsupported("DDS mip 0 exceeds the GPU unshuffle buffer size limit");
+
+    m_contentData.resize(rowBytes * blockRows);
+    for (size_t row = 0; row < blockRows; ++row)
+        memcpy(m_contentData.data() + row * rowBytes, firstMip->pixels + row * firstMip->rowPitch, rowBytes);
+
+    // Match the encoder's Split eligibility check: reserved-mode payload bytes
+    // cannot roundtrip through Split. The library still covers its ZSTD_ONLY fallback.
+    if (baseFormat == DXGI_FORMAT_BC7_TYPELESS)
+    {
+        for (size_t i = 0; i < m_contentData.size(); i += BC7_BYTES_PER_BLOCK)
+        {
+            if (m_contentData[i] == 0 && std::any_of(m_contentData.begin() + i + 1,
+                m_contentData.begin() + i + BC7_BYTES_PER_BLOCK, [](uint8_t b) { return b != 0; }))
+                throw ContentInput::Unsupported("BC7 Split cannot preserve reserved mode 8 payloads; use the library fallback check");
+        }
+    }
+
+    GTestParameters params = {};
+    switch (baseFormat)
+    {
+    case DXGI_FORMAT_BC1_TYPELESS: params.baseFormat = GBaseFormat::BC1; break;
+    case DXGI_FORMAT_BC3_TYPELESS: params.baseFormat = GBaseFormat::BC3; break;
+    case DXGI_FORMAT_BC4_TYPELESS: params.baseFormat = GBaseFormat::BC4; break;
+    case DXGI_FORMAT_BC5_TYPELESS: params.baseFormat = GBaseFormat::BC5; break;
+    case DXGI_FORMAT_BC7_TYPELESS: params.baseFormat = GBaseFormat::BC7; break;
+    default: throw std::runtime_error("Unexpected DDS base format");
+    }
+    params.testName = name;
+    params.width = static_cast<uint32_t>(metadata.width);
+    params.height = static_cast<uint32_t>(metadata.height);
+    params.useSpaceCurve = false;
+    if (params.baseFormat == GBaseFormat::BC7)
+    {
+        params.BC7.endpointOrderStrategy = g_endpointOrderStrategies[0];
+        params.BC7.ChunkSize = g_testChunkSizes[0];
+        params.BC7.patternIndex = 0;
+    }
+    else
+    {
+        params.BC1345.microShuffleId = 1;
+    }
+    return params;
+}
+
+bool Game::RunContent(const std::filesystem::path& path, const std::string& name)
+{
+    // Reset even when loading, dispatch, or comparison throws; fixed cases never see file bytes.
+    struct ResetContent
+    {
+        bool& enabled;
+        std::vector<uint8_t>& bytes;
+        ~ResetContent() { enabled = false; bytes.clear(); }
+    } reset{ m_isTextureCase, m_contentData };
+    m_isTextureCase = false;
+    m_contentData.clear();
+    const GTestParameters params = LoadContent(path, name);
+    m_isTextureCase = true;
+    return RunTestWithParams(params);
+}
+
 bool Game::RunTestWithParams(GTestParameters const& params)
 {
 #ifdef NEWBC1345
@@ -1547,26 +1659,31 @@ bool Game::RunTestWithParams(GTestParameters const& params)
         // If the texture has more than 9 blocks, it wraps around and starts again from mode 0. this way the texture is representative of every mode.
         // The color contents of the texture do not matter. All that matter is that each block is constructed conforming to the bc7 specification.
         std::vector<uint8_t> bc7TextureRaw;
-        CreateBC7RawFromMetadata(params.width, params.height, bc7TextureRaw);
-        if (params.BC7.content == SplitContentMode8Only)
+        if (m_isTextureCase)
+            bc7TextureRaw = m_contentData;
+        else
         {
-            std::fill(bc7TextureRaw.begin(), bc7TextureRaw.end(), uint8_t(0));
-        }
-        else if (params.BC7.content == SplitContentNoMode7)
-        {
-            for (size_t i = 0; i < bc7TextureRaw.size(); i += BC7_BYTES_PER_BLOCK)
+            CreateBC7RawFromMetadata(params.width, params.height, bc7TextureRaw);
+            if (params.BC7.content == SplitContentMode8Only)
             {
-                // A mode 7 block's first byte is 0x80 (mode bit 7 alone), a mode 6 block's has bit 6 set and bits 0-5 clear
-                if (bc7TextureRaw[i] == 0x80u)
+                std::fill(bc7TextureRaw.begin(), bc7TextureRaw.end(), uint8_t(0));
+            }
+            else if (params.BC7.content == SplitContentNoMode7)
+            {
+                for (size_t i = 0; i < bc7TextureRaw.size(); i += BC7_BYTES_PER_BLOCK)
                 {
-                    bc7TextureRaw[i] = 0xC0u;
+                    // A mode 7 block's first byte is 0x80 (mode bit 7 alone), a mode 6 block's has bit 6 set and bits 0-5 clear
+                    if (bc7TextureRaw[i] == 0x80u)
+                    {
+                        bc7TextureRaw[i] = 0xC0u;
+                    }
                 }
             }
-        }
-        else if (params.BC7.content == SplitContentFewModes)
-        {
-            std::fill(bc7TextureRaw.begin() + std::min<size_t>(bc7TextureRaw.size(), 36 * BC7_BYTES_PER_BLOCK), bc7TextureRaw.end(),
-                uint8_t(0));
+            else if (params.BC7.content == SplitContentFewModes)
+            {
+                std::fill(bc7TextureRaw.begin() + std::min<size_t>(bc7TextureRaw.size(), 36 * BC7_BYTES_PER_BLOCK), bc7TextureRaw.end(),
+                    uint8_t(0));
+            }
         }
 
         BC7ModeSplitShufflePattern Patterns[8];
@@ -1658,7 +1775,10 @@ bool Game::RunTestWithParams(GTestParameters const& params)
     {
         uint32_t elementSize = gShaderInfo[params.baseFormat].blockSizes;
         std::vector<uint8_t> bcnTextureRaw;
-        CreateBCnRawFromMetadata(params.width, params.height, elementSize, bcnTextureRaw);
+        if (m_isTextureCase)
+            bcnTextureRaw = m_contentData;
+        else
+            CreateBCnRawFromMetadata(params.width, params.height, elementSize, bcnTextureRaw);
 
 #ifdef NEWBC1345
         const bool useHeader = params.BC1345.useHeader;

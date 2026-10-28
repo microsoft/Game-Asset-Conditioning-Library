@@ -77,6 +77,8 @@ integration into content pipelines which import textures, and a front end tool i
 * Shaders/... - Shaders implementing unshuffle runtime functionality.
 * Samples/... - Standalone samples showing DirectStorage or raw compute shader usage at runtime.
 
+For a prepared Windows x64 drop, the native C++ [test runner](Tools/gacl_test_runner/README.md) runs all four finite GoogleTest suites, including `shader_tests`, and prints each result directly to stdout. Optional `--input-directory` validates files recursively; omit it for fixed regressions. There is no mandatory report/results directory. It enforces timeouts, needs no Python/PowerShell/C# runtime, and leaves fuzzing separate.
+
 # Build and Test
 
 ---

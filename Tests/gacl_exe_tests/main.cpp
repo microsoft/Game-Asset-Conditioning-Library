@@ -8,10 +8,24 @@
 //-------------------------------------------------------------------------------------
 
 #include <gtest/gtest.h>
+#include "../ContentInput.h"
+
+void RegisterGaclExeContentTests(const std::filesystem::path& input);
 
 int __cdecl main(int argc, char** argv)
 {
-    testing::InitGoogleTest(&argc, argv);
-    testing::GTEST_FLAG(catch_exceptions) = false;
-    return RUN_ALL_TESTS();
+    try
+    {
+        const auto input = ContentInput::ParseDirectory(argc, argv);
+        if (!input.empty()) testing::GTEST_FLAG(filter) = "ContentInput.*";
+        testing::InitGoogleTest(&argc, argv);
+        testing::GTEST_FLAG(catch_exceptions) = false;
+        RegisterGaclExeContentTests(input);
+        return ContentInput::RunTests(!input.empty());
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "Content input error: " << error.what() << '\n';
+        return 1;
+    }
 }
