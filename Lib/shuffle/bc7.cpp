@@ -23,6 +23,8 @@
 #include <zstd.h>
 
 #include <thread>
+#include <mutex>
+#include <memory>
 #include <fstream>
 #include <vector>
 #include <cassert>
@@ -1119,7 +1121,54 @@ static void strat_BC7_JoinModeRot(const uint8_t* src, size_t srcSize, BC7ModeJoi
     CompressTask(shuffled.data(), shuffled.size(), compressedData, *params, *errorOut);
 }
 
-static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplitShuffleOptions* opt, BC7TextureMetrics* metrics, SHUFFLE_COMPRESS_PARAMETERS* params, vector<uint8_t>* compressedDataA, vector<uint8_t>* compressedDataB, HRESULT* errorOut)
+// Compressed mode-split streams shared by the strategies of one source.  Strategies whose shuffled streams coincide (such as those that
+// differ only in the patterns of modes the source lacks, which the stream header doesn't record) compress once.  Streams are matched by
+// full comparison, so a shared result is always that of the same bytes.  A cache serves one set of compression parameters.
+class SplitOutputCache
+{
+public:
+    // takes the stream, unless an identical one is already held
+    void Compress(vector<uint8_t>&& stream, vector<uint8_t>* compressed, SHUFFLE_COMPRESS_PARAMETERS& params, HRESULT& errorOut)
+    {
+        Entry* e = nullptr;
+        {
+            lock_guard<mutex> guard(m_lock);
+            for (const unique_ptr<Entry>& x : m_entries)
+            {
+                if (x->stream.size() == stream.size() && memcmp(x->stream.data(), stream.data(), stream.size()) == 0)
+                {
+                    e = x.get();
+                    break;
+                }
+            }
+            if (e == nullptr)
+            {
+                m_entries.push_back(make_unique<Entry>());
+                e = m_entries.back().get();
+                e->stream = std::move(stream);
+            }
+        }
+        call_once(e->once, [&] { CompressTask(e->stream.data(), e->stream.size(), &e->compressed, params, e->status); });
+        if (!SUCCEEDED(e->status))
+        {
+            errorOut = e->status;
+        }
+        compressed->assign(e->compressed.begin(), e->compressed.end());
+    }
+
+private:
+    struct Entry
+    {
+        once_flag once;
+        vector<uint8_t> stream;
+        vector<uint8_t> compressed;
+        HRESULT status = S_OK;
+    };
+    mutex m_lock;
+    vector<unique_ptr<Entry>> m_entries;
+};
+
+static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplitShuffleOptions* opt, BC7TextureMetrics* metrics, SHUFFLE_COMPRESS_PARAMETERS* params, SplitOutputCache* outputCache, vector<uint8_t>* compressedDataA, vector<uint8_t>* compressedDataB, HRESULT* errorOut)
 {
 #if _DEBUG || GACL_JOINCHK
     // Reverse yields linear data, so re-apply any space curve before comparing against the (possibly curved) source
@@ -1146,9 +1195,13 @@ static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplit
 
     BC7_ModeSplit_Transform(src, srcSize, outA, outB, *opt, *metrics);
 
+    // the streams are validated before the cache takes them
     if ((opt->ModeTransform == BC7ModeSplitModeTransformA || opt->ModeTransform == BC7ModeSplitModeTransformAny) && outA.size() <= srcSize)
     {
-        thread t([&] { CompressTask(outA.data(), outA.size(), compressedDataA, *params, *errorOut); });
+#if _DEBUG || GACL_JOINCHK
+        validateReverse(outA);
+#endif
+        thread t([&] { outputCache->Compress(std::move(outA), compressedDataA, *params, *errorOut); });
         compressTaskA.swap(t);
     }
     else
@@ -1158,23 +1211,19 @@ static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplit
 
     if (outB.size() <= srcSize)
     {
-        CompressTask(outB.data(), outB.size(), compressedDataB, *params, *errorOut);
 #if _DEBUG || GACL_JOINCHK
         validateReverse(outB);
 #endif
+        outputCache->Compress(std::move(outB), compressedDataB, *params, *errorOut);
     }
     else
     {
         compressedDataB->resize(0);     // enforce that shuffled size <= original
     }
 
-    if (opt->ModeTransform == BC7ModeSplitModeTransformA || opt->ModeTransform == BC7ModeSplitModeTransformAny && outA.size() <= srcSize)
+    if (compressTaskA.joinable())
     {
         compressTaskA.join();
-#if _DEBUG || GACL_JOINCHK
-        validateReverse(outA);
-#endif
-
     }
 }
 
@@ -1429,6 +1478,7 @@ HRESULT ShuffleCompress_BC7(
     const int sectionTrialLevel = requestedZstdLevel > 0 ? (std::min)(requestedZstdLevel, 18) : defaultZstdLevel;
     // the strategies share section trial results: a mode's sections recur across strategies with the same pattern, ordering and rotation
     BC7ModeSplitTrialCache splitTrialCache;
+    SplitOutputCache splitOutputCache;
     for (SplitStrat* ss : { &ss1, &ss1r, &ss1o1r, &ss1o2r, &ss2, &ss2o1r, &ss2o2r, &ss3, &ss3o1r, &ss3o2r, &ss4, &ss4o1r, &ss4o2r, &ss5r, &ss7, &ss7o1r, &ss7o2r })
     {
         ss->Options.SpaceCurveWidthInPixels = encodedStreamIsCurved ? static_cast<uint32_t>(params.CurvedTransforms.WidthInPixels) : 0u;
@@ -1453,75 +1503,75 @@ HRESULT ShuffleCompress_BC7(
         });
 
         splitStrategies.push_back(&ss1);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss1.Options, &metrics, &params, &ss1.DestA, &ss1.DestB, &hr);
+        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss1.Options, &metrics, &params, &splitOutputCache, &ss1.DestA, &ss1.DestB, &hr);
         splitStrategies.push_back(&ss1r);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss1r.Options, &metrics, &params, &ss1r.DestA, &ss1r.DestB, &hr);
+        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss1r.Options, &metrics, &params, &splitOutputCache, &ss1r.DestA, &ss1r.DestB, &hr);
 
         if (maxOrderStrategies > 0)
         {
             splitStrategies.push_back(&ss1o1r);
-            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss1o1r.Options, &metrics, &params, &ss1o1r.DestA, &ss1o1r.DestB, &hr);
+            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss1o1r.Options, &metrics, &params, &splitOutputCache, &ss1o1r.DestA, &ss1o1r.DestB, &hr);
             if (maxOrderStrategies > 1)
             {
                 splitStrategies.push_back(&ss1o2r);
-                ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss1o2r.Options, &metrics, &params, &ss1o2r.DestA, &ss1o2r.DestB, &hr);
+                ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss1o2r.Options, &metrics, &params, &splitOutputCache, &ss1o2r.DestA, &ss1o2r.DestB, &hr);
             }
         }
 
         splitStrategies.push_back(&ss2);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss2.Options, &metrics, &params, &ss2.DestA, &ss2.DestB, &hr);
+        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss2.Options, &metrics, &params, &splitOutputCache, &ss2.DestA, &ss2.DestB, &hr);
         if (maxOrderStrategies > 0)
         {
             splitStrategies.push_back(&ss2o1r);
-            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss2o1r.Options, &metrics, &params, &ss2o1r.DestA, &ss2o1r.DestB, &hr);
+            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss2o1r.Options, &metrics, &params, &splitOutputCache, &ss2o1r.DestA, &ss2o1r.DestB, &hr);
             if (maxOrderStrategies > 1)
             {
                 splitStrategies.push_back(&ss2o2r);
-                ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss2o2r.Options, &metrics, &params, &ss2o2r.DestA, &ss2o2r.DestB, &hr);
+                ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss2o2r.Options, &metrics, &params, &splitOutputCache, &ss2o2r.DestA, &ss2o2r.DestB, &hr);
             }
         }
 
         splitStrategies.push_back(&ss3);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss3.Options, &metrics, &params, &ss3.DestA, &ss3.DestB, &hr);
+        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss3.Options, &metrics, &params, &splitOutputCache, &ss3.DestA, &ss3.DestB, &hr);
         if (maxOrderStrategies > 0)
         {
             splitStrategies.push_back(&ss3o1r);
-            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss3o1r.Options, &metrics, &params, &ss3o1r.DestA, &ss3o1r.DestB, &hr);
+            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss3o1r.Options, &metrics, &params, &splitOutputCache, &ss3o1r.DestA, &ss3o1r.DestB, &hr);
             if (maxOrderStrategies > 1)
             {
                 splitStrategies.push_back(&ss3o2r);
-                ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss3o2r.Options, &metrics, &params, &ss3o2r.DestA, &ss3o2r.DestB, &hr);
+                ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss3o2r.Options, &metrics, &params, &splitOutputCache, &ss3o2r.DestA, &ss3o2r.DestB, &hr);
             }
         }
 
         splitStrategies.push_back(&ss7);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss7.Options, &metrics, &params, &ss7.DestA, &ss7.DestB, &hr);
+        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss7.Options, &metrics, &params, &splitOutputCache, &ss7.DestA, &ss7.DestB, &hr);
         if (maxOrderStrategies > 0)
         {
             splitStrategies.push_back(&ss7o1r);
-            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss7o1r.Options, &metrics, &params, &ss7o1r.DestA, &ss7o1r.DestB, &hr);
+            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss7o1r.Options, &metrics, &params, &splitOutputCache, &ss7o1r.DestA, &ss7o1r.DestB, &hr);
             if (maxOrderStrategies > 1)
             {
                 splitStrategies.push_back(&ss7o2r);
-                ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss7o2r.Options, &metrics, &params, &ss7o2r.DestA, &ss7o2r.DestB, &hr);
+                ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss7o2r.Options, &metrics, &params, &splitOutputCache, &ss7o2r.DestA, &ss7o2r.DestB, &hr);
             }
         }
 
         splitStrategies.push_back(&ss4);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss4.Options, &metrics, &params, &ss4.DestA, &ss4.DestB, &hr);
+        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss4.Options, &metrics, &params, &splitOutputCache, &ss4.DestA, &ss4.DestB, &hr);
         if (maxOrderStrategies > 0)
         {
             splitStrategies.push_back(&ss4o1r);
-            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss4o1r.Options, &metrics, &params, &ss4o1r.DestA, &ss4o1r.DestB, &hr);
+            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss4o1r.Options, &metrics, &params, &splitOutputCache, &ss4o1r.DestA, &ss4o1r.DestB, &hr);
             if (maxOrderStrategies > 1)
             {
                 splitStrategies.push_back(&ss4o2r);
-                ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss4o2r.Options, &metrics, &params, &ss4o2r.DestA, &ss4o2r.DestB, &hr);
+                ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss4o2r.Options, &metrics, &params, &splitOutputCache, &ss4o2r.DestA, &ss4o2r.DestB, &hr);
             }
         }
 
         splitStrategies.push_back(&ss5r);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss5r.Options, &metrics, &params, &ss5r.DestA, &ss5r.DestB, &hr);
+        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss5r.Options, &metrics, &params, &splitOutputCache, &ss5r.DestA, &ss5r.DestB, &hr);
 
     }
 
