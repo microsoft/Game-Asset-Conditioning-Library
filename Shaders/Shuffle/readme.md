@@ -22,7 +22,7 @@ UnshuffleBC5.hlsl
 
 **Preview #2 shaders (future DirectStorage support, supersedes\\replaces prior shaders)**
 
-UnshuffleBCnEx.hlsl - unified BC1\\3\\4\\5 and BC7 Join unshuffle (transform ids 0x01-0x04, 0x06 and 0x08-0x0F).  This includes the extensible EX streams, one transform id per format (GACL\_SHUFFLE\_TRANSFORM\_ZSTD\_BC1\_EX 0x0B, \_BC3\_EX 0x0C, \_BC4\_EX 0x0D, \_BC5\_EX 0x0E and \_BC7\_EX 0x0F), whose in-stream header (Lib\\shuffle\\streamheader.h) carries duplicate-block removal, header-coded blocks, the optional space curve, the BC1\\3\\4\\5 index prediction mask (all prediction by default) and the BC7 Join parameters.  Curve-only EX streams (header parameter 2 BCNEX\_UNSHUFFLED with the curve parameter, any of BC1\\3\\4\\5\\7, BC7 blocks carried as BC5 blocks under the BC7\_EX id: space curve, duplicate removal and coded blocks without a shuffle) replace the former UnshuffleCurveOnly.hlsl and its transform id.  Uses BC7JoinDecode.hlsli, BC7JoinTables.hlsli, BCnExTables.hlsli and IndexPredictionHelpers.hlsli.  Same root signature and constants as the BC1\\3\\4\\5 shaders.  A stream of n blocks of B bytes, decoded G blocks per thread, needs ceil((n / G + n % G) / 256) thread groups, with (B, G) per id: BC1 (8, 2), BC3 (16, 4), BC4 (8, 4), BC5 (16, 4), BC7 Join and BC7\_EX (16, 1).  These match the deprecated UnshuffleBC1x\\3x\\4x\\5x.hlsl shaders; ceil(bufferSizeInBytes / 16 / 256) thread groups also cover every id (spare groups exit).  The per-format builds below are faster; the unified build is kept for reference and benchmarking.
+UnshuffleBCnEx.hlsl - unified BC1\\3\\4\\5 and BC7 Join unshuffle (transform ids 0x01-0x04, 0x06 and 0x08-0x0F).  This includes the extensible EX streams, one transform id per format (GACL\_SHUFFLE\_TRANSFORM\_ZSTD\_BC1\_EX 0x0B, \_BC3\_EX 0x0C, \_BC4\_EX 0x0D, \_BC5\_EX 0x0E and \_BC7\_EX 0x0F), whose in-stream header (Lib\\shuffle\\streamheader.h) carries duplicate-block removal, header-coded blocks, the optional space curve, the BC1\\3\\4\\5 index prediction mask (all prediction by default) and the BC7 Join parameters.  Curve-only EX streams (header parameter 2 BCNEX\_UNSHUFFLED with the curve parameter, any of BC1\\3\\4\\5\\7, BC7 blocks carried as BC5 blocks under the BC7\_EX id: space curve, duplicate removal and coded blocks without a shuffle) replace the former UnshuffleCurveOnly.hlsl and its transform id.  Uses BC7JoinDecode.hlsli, BC7JoinTables.hlsli, BCnExTables.hlsli and IndexPredictionHelpers.hlsli.  Root signature RootSig4c (Shared.hlsli): four root constants at b0 (bufferSizeInBytes, bufferOffsetInBytes, transformId and widthInPixels), the source buffer at t0 and the destination at u0.  A stream of n blocks of B bytes, decoded G blocks per thread, needs ceil((n / G + n % G) / 256) thread groups, with (B, G) per id: BC1 (8, 2), BC3 (16, 4), BC4 (8, 4), BC5 (16, 4), BC7 Join and BC7\_EX (16, 1).  The root signature, constants and these thread group counts match those of the former UnshuffleBC1x\\3x\\4x\\5x.hlsl shaders, which this replaces; ceil(bufferSizeInBytes / 16 / 256) thread groups also cover every id (spare groups exit).  The per-format builds below are faster; the unified build is kept for reference and benchmarking.
 
 
 
@@ -39,16 +39,4 @@ BinningPassCS\_MinWave\*.hlsl
 PrefixSumPassCS\_MinWave\*.hlsl
 
 UnshuffleCSMode\*.hlsl
-
-
-
-**Deprecated (superseded by UnshuffleBCnEx.hlsl)**
-
-UnshuffleBC1x.hlsl
-
-UnshuffleBC3x.hlsl
-
-UnshuffleBC4x.hlsl
-
-UnshuffleBC5x.hlsl
 

@@ -94,25 +94,13 @@
     <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC1.hlsl">
       <Filter>Shaders\BC1345</Filter>
     </FxCompile>
-    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC1x.hlsl">
-      <Filter>Shaders\BC1345</Filter>
-    </FxCompile>
     <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC3.hlsl">
-      <Filter>Shaders\BC1345</Filter>
-    </FxCompile>
-    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC3x.hlsl">
       <Filter>Shaders\BC1345</Filter>
     </FxCompile>
     <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC4.hlsl">
       <Filter>Shaders\BC1345</Filter>
     </FxCompile>
-    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC4x.hlsl">
-      <Filter>Shaders\BC1345</Filter>
-    </FxCompile>
     <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC5.hlsl">
-      <Filter>Shaders\BC1345</Filter>
-    </FxCompile>
-    <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBC5x.hlsl">
       <Filter>Shaders\BC1345</Filter>
     </FxCompile>
     <FxCompile Include="..\..\Shaders\Shuffle\UnshuffleBCnEx.hlsl">

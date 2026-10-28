@@ -20,8 +20,8 @@
 //     BC4, BC5 and BC7, which replace the former ZSTD_SC transform: the kept blocks follow the header as they are, so
 //     only the space curve, duplicate removal and header-coded blocks are reversed (BC7_EX blocks decoded as BC5
 //     blocks: header transform BC5_116116 with parameter 2 exactly BCNEX_UNSHUFFLED).
-// Replaces UnshuffleBC1x/3x/4x/5x.hlsl. Root constants and bindings match those shaders, and so does the work per
-// thread: two blocks for BC1, four for BC3/BC4/BC5, plus one thread per straggler block, and one block for BC7, so
+// Replaces the former UnshuffleBC1x/3x/4x/5x.hlsl, keeping their root constants, bindings and work per thread (two
+// blocks for BC1, four for BC3/BC4/BC5, plus one thread per straggler block); BC7 takes one block per thread, so
 // the host dispatches ceil((n / G + n % G) / 256) groups for n blocks of B bytes (header blocks included) and G blocks
 // per thread, both set by the transform id alone: (B, G) = (8, 2) for BC1 (0x01, 0x08, 0x0B), (16, 4) for BC3 (0x02,
 // 0x09, 0x0C) and BC5 (0x04, 0x0A, 0x0E), (8, 4) for BC4 (0x03, 0x0D) and (16, 1) for BC7 (0x06, 0x0F). Curve-only
@@ -1355,9 +1355,10 @@ uint2 UnpredictColourHalf(uint2 h, bool fourColour)
 
 // ---------------------------------------------------------------------------------------------------------------
 
-// ReverseSpaceCurveFor8ByteBlock / ...16ByteBlock for the power-of-two geometries ParseHeader accepts, splitting the
-// z-order tile id with a branch-free Morton decode rather than parallelExtract's per-bit loop (which runs ~27 times
-// for square BC1 / BC4 textures: their 64x32 block micro tiles leave twice as many tile rows as columns)
+// ReverseSpaceCurveFor16ByteBlock (SharedDefinitions.hlsli), also for 8-byte blocks (64x32 block micro tiles), for
+// the power-of-two geometries ParseHeader accepts, splitting the z-order tile id with a branch-free Morton decode
+// rather than parallelExtract's per-bit loop (which runs ~27 times for square BC1 / BC4 textures: their 64x32 block
+// micro tiles leave twice as many tile rows as columns)
 uint CurveDestBlock(uint blockId, uint bs, uint widthInPixels)
 {
     uint rowShift = bs == 16 ? 5u : 6u;                         // log2 of the micro-tile width in blocks; 32 rows
