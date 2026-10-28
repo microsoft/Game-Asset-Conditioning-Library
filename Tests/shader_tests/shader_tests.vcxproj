@@ -605,6 +605,7 @@
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">-Qembed_debug %(AdditionalOptions)</AdditionalOptions>
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">-Qembed_debug %(AdditionalOptions)</AdditionalOptions>
     </FxCompile>
+    <None Include="..\..\Shaders\Shuffle\BC7ScratchLayout.hlsli" />
     <None Include="..\..\Shaders\Shuffle\BinningPassCommonCS.hlsli" />
     <None Include="..\..\Shaders\Shuffle\DerotationHelpers.hlsli" />
     <None Include="..\..\Shaders\Shuffle\EndpointOrderingHelpers.hlsli" />

@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include "BC7ScratchLayout.hlsli"
+
 // This value will determine the size of the histograms (how many blocks are in each histogram)
 // and also the threadgroup count for every pass except prefix sum.
 // Temporary workaround - This is fixed to 256 to make sure the dispatch limit for d3d12 won't be an issue for 16k textures

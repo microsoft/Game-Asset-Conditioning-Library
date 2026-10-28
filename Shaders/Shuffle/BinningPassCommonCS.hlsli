@@ -79,7 +79,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gid : SV_GroupID, uint gindex 
         gs_bc7SizeInBytes = constants.blockCount * 16;
 
         // Space curve width recorded in the stream header (0 = linear), only inverted when the dimensions are eligible
-        const uint spaceCurveWidthInPixels = scratchBuffer.Load(16u + (32u * BC7_MODES_COUNT)); // CommonHeader.spaceCurveWidthInPixels
+        const uint spaceCurveWidthInPixels = scratchBuffer.Load(GACL_BC7_SC_WIDTH_OFFSET);
         const uint widthInBlocks = (spaceCurveWidthInPixels + 3) / 4;
         const uint pitchBytes = max(16u * widthInBlocks, 1u);
         const uint heightInBlocks = (gs_bc7SizeInBytes + pitchBytes - 1) / pitchBytes;
@@ -91,7 +91,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gid : SV_GroupID, uint gindex 
         [unroll(BC7_MODES_COUNT)]
         for (uint m = 0; m < BC7_MODES_COUNT; ++m)
         {
-            uint endpointOrderBytes = (scratchBuffer.Load(16u + (32 * m) + 12u) >> 16u);
+            uint endpointOrderBytes = (scratchBuffer.Load(GACL_BC7_PER_MODE_OFFSET + (GACL_BC7_PER_MODE_STRIDE * m) + GACL_BC7_PACKED_DATA_OFFSET) >> 16u);
             uint totalModeCount = scratchBuffer.Load(16u + (32 * m) + 8u);
             
             // Here we add the number of extra bits due to endpoint reorder   

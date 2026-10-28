@@ -72,7 +72,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gId : SV_GroupID, uint gindex 
         if (DTid.x == 0u)
         {
             scratchBuffer.Store(4u, modesUsedCount);
-            scratchBuffer.Store(16u + (32u * BC7_MODES_COUNT), spaceCurveWidthInPixels); // CommonHeader.spaceCurveWidthInPixels
+            scratchBuffer.Store(GACL_BC7_SC_WIDTH_OFFSET, spaceCurveWidthInPixels);
             //scratchBuffer.Store(x, header.modeEncoding);
         }
         
@@ -103,7 +103,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gId : SV_GroupID, uint gindex 
             if (DTid.x == 0u)
             {
                 // Set these to defaults, may later be overwritten
-                scratchBuffer.Store(16u + (32 * mode) + 12u, packedInfo); // modeStatics and lowEntropy
+                scratchBuffer.Store(GACL_BC7_PER_MODE_OFFSET + (GACL_BC7_PER_MODE_STRIDE * mode) + GACL_BC7_PACKED_DATA_OFFSET, packedInfo); // modeStatics and lowEntropy
                 scratchBuffer.Store(16u + (32 * mode) + 4u, 0u); // modeRotationByteAddress
                 
                 scratchBuffer.Store(16u + (32 * mode) + 16u, modePattern);
@@ -150,7 +150,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gId : SV_GroupID, uint gindex 
                 // If either modeLowEntropy, modeStatics or endpointOrderBytes are set, overwrite packedInfo
                 if (DTid.x == 0u && (modeStatics || modeLowEntropy || endpointOrderBytes))
                 {
-                    scratchBuffer.Store(16u + (32 * mode) + 12u, packedInfo);
+                    scratchBuffer.Store(GACL_BC7_PER_MODE_OFFSET + (GACL_BC7_PER_MODE_STRIDE * mode) + GACL_BC7_PACKED_DATA_OFFSET, packedInfo);
                 }
                 
                 uint rotation = (nextByte >> 4) & 0x1u;
