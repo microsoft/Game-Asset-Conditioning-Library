@@ -1509,8 +1509,10 @@ HRESULT ShuffleCompress_BC7(
 
     // mode-split streams record any space curve, index prediction and section layout in the stream header.  The section layout trials
     // run at the requested zstd level capped at 6 (6 if none is requested): on samples of BC7 VT tile groups, higher trial levels cost
-    // much more and chose no better layouts
-    const int sectionTrialLevel = requestedZstdLevel > 0 ? (std::min)(requestedZstdLevel, 6) : 6;
+    // much more and chose no better layouts.  Streams above 512 KB, requested above the size default level, run them at the requested
+    // level capped at 18: on whole textures that saves about 0.16% of their size, for about 1.65x their BC7 CPU
+    const int sectionTrialLevel = (srcSize > 512 * 1024 && requestedZstdLevel > defaultZstdLevel) ? (std::min)(requestedZstdLevel, 18) :
+        (requestedZstdLevel > 0 ? (std::min)(requestedZstdLevel, 6) : 6);
     // the strategies share section trial results: a mode's sections recur across strategies with the same pattern, ordering and rotation
     BC7ModeSplitTrialCache splitTrialCache;
     StreamOutputCache splitOutputCache;
