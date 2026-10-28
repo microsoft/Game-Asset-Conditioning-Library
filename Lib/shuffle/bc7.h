@@ -159,6 +159,19 @@ enum BC7ModeSplitFieldOrderStrategy
     DropLeastEntropic = 2,
 };
 
+// SectionLayout 1 trial results keyed by section content, shared by the concurrent mode-split transforms of one source
+class BC7ModeSplitTrialCache
+{
+public:
+    BC7ModeSplitTrialCache();
+    ~BC7ModeSplitTrialCache();
+    BC7ModeSplitTrialCache(const BC7ModeSplitTrialCache&) = delete;
+    BC7ModeSplitTrialCache& operator=(const BC7ModeSplitTrialCache&) = delete;
+
+    struct Impl;
+    Impl* const m;
+};
+
 struct BC7ModeSplitShuffleOptions
 {
     BC7ModeSplitModeTransform ModeTransform;
@@ -170,6 +183,7 @@ struct BC7ModeSplitShuffleOptions
     uint8_t SectionLayout;              // per-mode section layout (recorded in the stream header): 0 off, 1 chosen by zstd trials, 2 forced SectionSelectors (testing)
     uint8_t SectionTrialLevel;          // zstd level of the SectionLayout 1 trials (0 = 18)
     uint8_t SectionSelectors[8];        // SectionLayout 2 selector per mode, see SplitSectionLayout (invalid units fall back to none)
+    BC7ModeSplitTrialCache* TrialCache; // optional SectionLayout 1 trial results shared with other transforms of the same source (nullptr = none)
 };
 
 

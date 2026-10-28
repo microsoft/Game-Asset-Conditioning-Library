@@ -1404,10 +1404,8 @@ HRESULT ShuffleCompress_BC7(
         { mt, { ColorPlane4bit, EndpointPairSignificantBitInderleaved, ColorPlane4bit, EndpointPairSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointPairSignificantBitInderleaved}, 2, _64MB}
     };
 
-    // Strategy #5 - similar to #3, but placing the smaller stable region of mode 7 quads at a different byte edge
-    SplitStrat ss5 = { L"Stable(4,5,6), EQSBI(1,3), EQSBIA(7), CP4b(0,2)  ",
-        { mt, { ColorPlane4bit, EndpointQuadSignificantBitInderleaved, ColorPlane4bit, EndpointQuadSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointQuadSignificantBitInderleavedAlt}, 0, 0 }
-    };
+    // Strategy #5 - placing the smaller stable region of mode 7 quads at a different byte edge.  #2 does the same
+    // (EQSBIA in mode 7), so only the rotated variant is tried
     SplitStrat ss5r = { L"Stable(4,5,6), EQSBI(1,3), EQSBIA(7), CP4b(0,2) r",
         { mt, { ColorPlane4bit, EndpointQuadSignificantBitInderleaved, ColorPlane4bit, EndpointQuadSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointQuadSignificantBitInderleavedAlt}, 0, _64MB }
     };
@@ -1429,12 +1427,15 @@ HRESULT ShuffleCompress_BC7(
     const int requestedZstdLevel = int(params.CompressSettings.Default.ZstdCompressionLevel);
     const int defaultZstdLevel = srcSize <= 16 * 1024 ? 12 : (srcSize <= 256 * 1024 ? 14 : 18);     // as GACL_Compression_DefaultInitRoutine
     const int sectionTrialLevel = requestedZstdLevel > 0 ? (std::min)(requestedZstdLevel, 18) : defaultZstdLevel;
-    for (SplitStrat* ss : { &ss1, &ss1r, &ss1o1r, &ss1o2r, &ss2, &ss2o1r, &ss2o2r, &ss3, &ss3o1r, &ss3o2r, &ss4, &ss4o1r, &ss4o2r, &ss5, &ss5r, &ss7, &ss7o1r, &ss7o2r })
+    // the strategies share section trial results: a mode's sections recur across strategies with the same pattern, ordering and rotation
+    BC7ModeSplitTrialCache splitTrialCache;
+    for (SplitStrat* ss : { &ss1, &ss1r, &ss1o1r, &ss1o2r, &ss2, &ss2o1r, &ss2o2r, &ss3, &ss3o1r, &ss3o2r, &ss4, &ss4o1r, &ss4o2r, &ss5r, &ss7, &ss7o1r, &ss7o2r })
     {
         ss->Options.SpaceCurveWidthInPixels = encodedStreamIsCurved ? static_cast<uint32_t>(params.CurvedTransforms.WidthInPixels) : 0u;
         ss->Options.IndexPrediction = 1;
         ss->Options.SectionLayout = 1;
         ss->Options.SectionTrialLevel = static_cast<uint8_t>(sectionTrialLevel);
+        ss->Options.TrialCache = &splitTrialCache;
     }
 
     if (bIncludeSplitMode)  // skip mode-split shuffles if the caller has explicitly requested only mode-join
@@ -1519,8 +1520,6 @@ HRESULT ShuffleCompress_BC7(
             }
         }
 
-        splitStrategies.push_back(&ss5);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss5.Options, &metrics, &params, &ss5.DestA, &ss5.DestB, &hr);
         splitStrategies.push_back(&ss5r);
         ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss5r.Options, &metrics, &params, &ss5r.DestA, &ss5r.DestB, &hr);
 

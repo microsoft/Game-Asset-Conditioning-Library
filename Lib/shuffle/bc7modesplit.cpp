@@ -19,6 +19,10 @@
 
 #include <algorithm>
 #include <cassert>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <tuple>
 
 namespace
 {
@@ -4228,6 +4232,22 @@ namespace SplitIndexPrediction
 #define ZSTD_STATIC_LINKING_ONLY        // ZSTD_getCParams, ZSTD_CCtx_setCParams
 #include <zstd.h>
 void GACL_ApplyWindowPolicy(ZSTD_compressionParameters& zParams);    // shuffle.cpp
+
+struct BC7ModeSplitTrialCache::Impl
+{
+    struct Result
+    {
+        std::once_flag once;
+        unsigned unit[2] = {};
+        size_t size[2] = {};
+    };
+    std::mutex lock;
+    std::map<std::tuple<uint64_t, size_t, size_t, int>, std::unique_ptr<Result>> results;    // (content hash, n, stride, level)
+};
+
+BC7ModeSplitTrialCache::BC7ModeSplitTrialCache() : m(new Impl) {}
+BC7ModeSplitTrialCache::~BC7ModeSplitTrialCache() { delete m; }
+
 namespace SplitSectionLayout
 {
     constexpr size_t SelectorOffset = 2;
@@ -4390,6 +4410,58 @@ namespace SplitSectionLayout
         std::vector<uint8_t> m_out, m_work;
     };
 
+    inline uint64_t Mix64(uint64_t x)
+    {
+        x ^= x >> 30; x *= 0xBF58476D1CE4E5B9ull;
+        x ^= x >> 27; x *= 0x94D049BB133111EBull;
+        return x ^ (x >> 31);
+    }
+
+    inline uint64_t ContentHash(const uint8_t* p, size_t bytes)
+    {
+        uint64_t h = Mix64(bytes);
+        size_t i = 0;
+        for (; i + 8 <= bytes; i += 8)
+        {
+            uint64_t v;
+            memcpy(&v, p + i, 8);
+            h = Mix64(h ^ v);
+        }
+        uint64_t tail = 0;
+        memcpy(&tail, p + i, bytes - i);
+        return Mix64(h ^ tail ^ (uint64_t(bytes - i) << 56));
+    }
+
+    // Trials::Evaluate through the cache: the first transform to reach a section's content runs the trials (others wait for
+    // them) and the rest reuse the unit choices and sizes.  Rank tables are always built from the section's own bytes, so a
+    // hash collision could only cost compression, never stream validity.
+    inline void EvaluateShared(Trials& trials, Section& s, BC7ModeSplitTrialCache& cache, int level)
+    {
+        if (!s.Active()) return;
+        const auto key = std::make_tuple(ContentHash(s.p, s.n * s.stride), s.n, s.stride, level);
+        BC7ModeSplitTrialCache::Impl::Result* r;
+        {
+            std::lock_guard<std::mutex> guard(cache.m->lock);
+            std::unique_ptr<BC7ModeSplitTrialCache::Impl::Result>& slot = cache.m->results[key];
+            if (!slot) slot = std::make_unique<BC7ModeSplitTrialCache::Impl::Result>();
+            r = slot.get();
+        }
+        bool evaluated = false;
+        std::call_once(r->once, [&]
+        {
+            trials.Evaluate(s);
+            r->unit[0] = s.unit[0]; r->unit[1] = s.unit[1];
+            r->size[0] = s.size[0]; r->size[1] = s.size[1];
+            evaluated = true;
+        });
+        if (!evaluated)
+        {
+            s.unit[0] = r->unit[0]; s.unit[1] = r->unit[1];
+            s.size[0] = r->size[0]; s.size[1] = r->size[1];
+            s.ranks = BuildRanks(s.p, s.n, s.stride);
+        }
+    }
+
     // sections 0-7 color, 8-15 misc.  Remaps are granted by the largest trial gain while the table bytes fit in `budget`
     // (the shuffled stream must not exceed the source size).  SectionLayout 2 forces opt.SectionSelectors (testing).
     inline void Choose(Section (&sections)[16], const BC7ModeSplitShuffleOptions& opt, size_t budget)
@@ -4412,10 +4484,12 @@ namespace SplitSectionLayout
         }
         else
         {
-            Trials trials(opt.SectionTrialLevel ? int(opt.SectionTrialLevel) : DefaultTrialLevel);
+            const int level = opt.SectionTrialLevel ? int(opt.SectionTrialLevel) : DefaultTrialLevel;
+            Trials trials(level);
             for (size_t i = 0; i < 16; i++)
             {
-                trials.Evaluate(sections[i]);
+                if (opt.TrialCache) EvaluateShared(trials, sections[i], *opt.TrialCache, level);
+                else trials.Evaluate(sections[i]);
                 if (sections[i].size[1] < sections[i].size[0]) order.push_back(i);
             }
             std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b)
