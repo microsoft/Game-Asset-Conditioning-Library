@@ -1412,12 +1412,6 @@ HRESULT ShuffleCompress_BC7(
     SplitStrat ss1r = { L"Stable(4,5,6), EQSBI(1,3,7), EP4b(0,2) r  ",
         { mt, { EndpointPair4bit, EndpointQuadSignificantBitInderleaved, EndpointPair4bit, EndpointQuadSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointQuadSignificantBitInderleavedAlt }, 0, _64MB }
     };
-    SplitStrat ss1o1r = { L"Stable(4,5,6), EQSBI(1,3,7), EP4b(0,2) o1r",
-        { mt, { EndpointPair4bit, EndpointQuadSignificantBitInderleaved, EndpointPair4bit, EndpointQuadSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointQuadSignificantBitInderleavedAlt }, 1, _64MB }
-    };
-    SplitStrat ss1o2r = { L"Stable(4,5,6), EQSBI(1,3,7), EP4b(0,2) o2r",
-        { mt, { EndpointPair4bit, EndpointQuadSignificantBitInderleaved, EndpointPair4bit, EndpointQuadSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointQuadSignificantBitInderleavedAlt }, 2, _64MB }
-    };
 
 
     // Strategy #2 - prefer stable island, endpoint quad, then 4 bit color plane
@@ -1427,16 +1421,10 @@ HRESULT ShuffleCompress_BC7(
     SplitStrat ss2o1r = { L"Stable(4,5,6), EQSBI(1,3,7), CP4b(0,2) o1r",
         { mt, { ColorPlane4bit, EndpointQuadSignificantBitInderleaved, ColorPlane4bit, EndpointQuadSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointQuadSignificantBitInderleavedAlt}, 1, _64MB }
     };
-    SplitStrat ss2o2r = { L"Stable(4,5,6), EQSBI(1,3,7), CP4b(0,2) o2r",
-        { mt, { ColorPlane4bit, EndpointQuadSignificantBitInderleaved, ColorPlane4bit, EndpointQuadSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointQuadSignificantBitInderleavedAlt}, 2, _64MB }
-    };
 
     // Strategy #3 - prefer endpoint pair interleave 
     SplitStrat ss3 = { L"EPSBI(0,1,2,3,4,5,6,7)    ",
         { mt, { EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved}, 0, 0}
-    };
-    SplitStrat ss3o1r = { L"EPSBI(0,1,2,3,4,5,6,7) o1r",
-        { mt, { EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved}, 1, _64MB}
     };
     SplitStrat ss3o2r = { L"EPSBI(0,1,2,3,4,5,6,7) o2r",
         { mt, { EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved}, 2, _64MB}
@@ -1449,9 +1437,6 @@ HRESULT ShuffleCompress_BC7(
     SplitStrat ss4o1r = { L"Stable(4,5,6), EPSBI(1,3,7), CP4b(0,2) o1r",
         { mt, { ColorPlane4bit, EndpointPairSignificantBitInderleaved, ColorPlane4bit, EndpointPairSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointPairSignificantBitInderleaved}, 1, _64MB}
     };
-    SplitStrat ss4o2r = { L"Stable(4,5,6), EPSBI(1,3,7), CP4b(0,2) o2r",
-        { mt, { ColorPlane4bit, EndpointPairSignificantBitInderleaved, ColorPlane4bit, EndpointPairSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointPairSignificantBitInderleaved}, 2, _64MB}
-    };
 
     // Strategy #5 - placing the smaller stable region of mode 7 quads at a different byte edge.  #2 does the same
     // (EQSBIA in mode 7), so only the rotated variant is tried
@@ -1462,12 +1447,6 @@ HRESULT ShuffleCompress_BC7(
     // Strategy #7 - prefer endpoint pair interleave or 4 bit
     SplitStrat ss7 = { L"EPSBI(1,3,4,5,6,7), CP4b(0,2)    ",
         { mt, { ColorPlane4bit, EndpointPairSignificantBitInderleaved, ColorPlane4bit, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved}, 0, 0}
-    };
-    SplitStrat ss7o1r = { L"EPSBI(1,3,4,5,6,7), CP4b(0,2) o1r",
-        { mt, { ColorPlane4bit, EndpointPairSignificantBitInderleaved, ColorPlane4bit, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved}, 1, _64MB}
-    };
-    SplitStrat ss7o2r = { L"EPSBI(1,3,4,5,6,7), CP4b(0,2) o2r",
-        { mt, { ColorPlane4bit, EndpointPairSignificantBitInderleaved, ColorPlane4bit, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved}, 2, _64MB}
     };
 
 
@@ -1480,7 +1459,7 @@ HRESULT ShuffleCompress_BC7(
     // the strategies share section trial results: a mode's sections recur across strategies with the same pattern, ordering and rotation
     BC7ModeSplitTrialCache splitTrialCache;
     SplitOutputCache splitOutputCache;
-    for (SplitStrat* ss : { &ss1, &ss1r, &ss1o1r, &ss1o2r, &ss2, &ss2o1r, &ss2o2r, &ss3, &ss3o1r, &ss3o2r, &ss4, &ss4o1r, &ss4o2r, &ss5r, &ss7, &ss7o1r, &ss7o2r })
+    for (SplitStrat* ss : { &ss1, &ss1r, &ss2, &ss2o1r, &ss3, &ss3o2r, &ss4, &ss4o1r, &ss5r, &ss7 })
     {
         ss->Options.SpaceCurveWidthInPixels = encodedStreamIsCurved ? static_cast<uint32_t>(params.CurvedTransforms.WidthInPixels) : 0u;
         ss->Options.IndexPrediction = 1;
@@ -1503,21 +1482,11 @@ HRESULT ShuffleCompress_BC7(
             0, //metrics.M[7].OrderingStrategies->Count(),
         });
 
+        // the endpoint ordering variants (o1r, o2r) that never gained over the other strategies on samples of BC7 VT tile groups are not tried
         splitStrategies.push_back(&ss1);
         ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss1.Options, &metrics, &params, &splitOutputCache, &ss1.DestA, &ss1.DestB, &hr);
         splitStrategies.push_back(&ss1r);
         ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss1r.Options, &metrics, &params, &splitOutputCache, &ss1r.DestA, &ss1r.DestB, &hr);
-
-        if (maxOrderStrategies > 0)
-        {
-            splitStrategies.push_back(&ss1o1r);
-            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss1o1r.Options, &metrics, &params, &splitOutputCache, &ss1o1r.DestA, &ss1o1r.DestB, &hr);
-            if (maxOrderStrategies > 1)
-            {
-                splitStrategies.push_back(&ss1o2r);
-                ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss1o2r.Options, &metrics, &params, &splitOutputCache, &ss1o2r.DestA, &ss1o2r.DestB, &hr);
-            }
-        }
 
         splitStrategies.push_back(&ss2);
         ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss2.Options, &metrics, &params, &splitOutputCache, &ss2.DestA, &ss2.DestB, &hr);
@@ -1525,38 +1494,18 @@ HRESULT ShuffleCompress_BC7(
         {
             splitStrategies.push_back(&ss2o1r);
             ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss2o1r.Options, &metrics, &params, &splitOutputCache, &ss2o1r.DestA, &ss2o1r.DestB, &hr);
-            if (maxOrderStrategies > 1)
-            {
-                splitStrategies.push_back(&ss2o2r);
-                ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss2o2r.Options, &metrics, &params, &splitOutputCache, &ss2o2r.DestA, &ss2o2r.DestB, &hr);
-            }
         }
 
         splitStrategies.push_back(&ss3);
         ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss3.Options, &metrics, &params, &splitOutputCache, &ss3.DestA, &ss3.DestB, &hr);
-        if (maxOrderStrategies > 0)
+        if (maxOrderStrategies > 1)
         {
-            splitStrategies.push_back(&ss3o1r);
-            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss3o1r.Options, &metrics, &params, &splitOutputCache, &ss3o1r.DestA, &ss3o1r.DestB, &hr);
-            if (maxOrderStrategies > 1)
-            {
-                splitStrategies.push_back(&ss3o2r);
-                ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss3o2r.Options, &metrics, &params, &splitOutputCache, &ss3o2r.DestA, &ss3o2r.DestB, &hr);
-            }
+            splitStrategies.push_back(&ss3o2r);
+            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss3o2r.Options, &metrics, &params, &splitOutputCache, &ss3o2r.DestA, &ss3o2r.DestB, &hr);
         }
 
         splitStrategies.push_back(&ss7);
         ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss7.Options, &metrics, &params, &splitOutputCache, &ss7.DestA, &ss7.DestB, &hr);
-        if (maxOrderStrategies > 0)
-        {
-            splitStrategies.push_back(&ss7o1r);
-            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss7o1r.Options, &metrics, &params, &splitOutputCache, &ss7o1r.DestA, &ss7o1r.DestB, &hr);
-            if (maxOrderStrategies > 1)
-            {
-                splitStrategies.push_back(&ss7o2r);
-                ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss7o2r.Options, &metrics, &params, &splitOutputCache, &ss7o2r.DestA, &ss7o2r.DestB, &hr);
-            }
-        }
 
         splitStrategies.push_back(&ss4);
         ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss4.Options, &metrics, &params, &splitOutputCache, &ss4.DestA, &ss4.DestB, &hr);
@@ -1564,11 +1513,6 @@ HRESULT ShuffleCompress_BC7(
         {
             splitStrategies.push_back(&ss4o1r);
             ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss4o1r.Options, &metrics, &params, &splitOutputCache, &ss4o1r.DestA, &ss4o1r.DestB, &hr);
-            if (maxOrderStrategies > 1)
-            {
-                splitStrategies.push_back(&ss4o2r);
-                ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss4o2r.Options, &metrics, &params, &splitOutputCache, &ss4o2r.DestA, &ss4o2r.DestB, &hr);
-            }
         }
 
         splitStrategies.push_back(&ss5r);
