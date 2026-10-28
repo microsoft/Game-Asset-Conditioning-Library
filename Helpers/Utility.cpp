@@ -21,8 +21,11 @@
 
 void Utility::DefaultLoggingRoutine(GACL_Logging_Priority msgPri, const wchar_t* msg)
 {
-    UNREFERENCED_PARAMETER(msgPri);
-    OutputDebugString(msg);
+    // Low priority messages are diagnostics, the OutputDebugString can cause slowdowns in highly parallel content systems
+    if (msgPri != GACL_Logging_Priority_Low || IsDebuggerPresent())
+    {
+        OutputDebugString(msg);
+    }
 }
 
 namespace 

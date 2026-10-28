@@ -24,6 +24,10 @@
 #include <mutex>
 #include <tuple>
 
+#ifndef GACL_SPLITLOG
+#define GACL_SPLITLOG 0  // log Split stream section sizes; off by default because, without an attached debugger, every OutputDebugString call takes a system-wide lock that serializes encoding threads and processes
+#endif
+
 namespace
 {
 
@@ -2974,33 +2978,24 @@ void ComputeRotationToStableRange7bit(size_t counts[8][128], size_t elements, Co
 void ComputeRotationToLeastSignificantEntropy(size_t counts[8][128], size_t elements, ColorRotation& rotations, uint8_t bitDepth)
 {
     assert(bitDepth < 8);
-    uint8_t fieldValues = uint8_t(1u << bitDepth);
-    //     channel, rotation, bit
-    std::vector<size_t> cbitsvec(8 * 128 * 7);
-    size_t(*cbits)[128][7] = reinterpret_cast<size_t(*)[128][7]>(cbitsvec.data());   //size_t cbits[8][128][7]
+    const unsigned fieldValues = 1u << bitDepth;
 
     for (int e = 0; e < 8; e++)
     {
         // compute ideal entropy shift for each color channel
-        for (uint8_t rot = 0; rot < fieldValues; rot++)
+        //
+        // Say there's 217 instances of value 63....  i.e. counts[e][63] == 217
+        // for rotation 0, that would mean bit counts of (MSB)  0, 217, 217, 217, 217, 217, 217 (LSB)
+        // for rotation 1, that would mean bit counts of (MSB) 217,  0,   0,   0,   0,   0,   0 (LSB)
+        //
+        // Bit b of the rotated value (i + rot) % fieldValues is set for the values i in the circular runs of length 2^b
+        // starting at (v - rot) % fieldValues, v = 2^b, 3 * 2^b, 5 * 2^b, ...  Circular prefix sums of the counts give
+        // each run's total directly, rather than visiting every value for every rotation and bit.
+        size_t prefix[2 * 128 + 1];
+        prefix[0] = 0;
+        for (unsigned k = 0; k < 2 * fieldValues; k++)
         {
-            // loop through the counts of each 128-bit color value
-            for (uint8_t i = 0; i < fieldValues; i++)
-            {
-                for (uint8_t b = 0; b < 7; b++)
-                {
-                    // Say there's 217 instances of value 63....  i.e. counts[e][63] == 217
-                    // for rotation 0, that would mean bit counts of (MSB)  0, 217, 217, 217, 217, 217, 217 (LSB)
-                    // for rotation 1, that would mean bit counts of (MSB) 217,  0,   0,   0,   0,   0,   0 (LSB)
-                    const uint8_t rotatedValue = (i + rot) % fieldValues;
-                    const uint8_t rotatedValueBitB = (rotatedValue >> b) & 1u;
-                    cbits[e][rot][b] += counts[e][i] * rotatedValueBitB;
-
-                    // when rot == 1, and all those 63s become 64s, 
-                    // when i = 63, those bits are found: counts[e][63] * ((64 >> b) & 1)
-                    //                                  =    217 values of 64
-                }
-            }
+            prefix[k + 1] = prefix[k] + counts[e][k & (fieldValues - 1)];
         }
 
         size_t bestEntropy = 0;
@@ -3018,7 +3013,14 @@ void ComputeRotationToLeastSignificantEntropy(size_t counts[8][128], size_t elem
             size_t bitFlips[7] = {};
             for (int b = 0; b < bitDepth; b++)
             {
-                bitFlips[b] = std::min<size_t>(cbits[e][rot][b], elements - cbits[e][rot][b]);
+                const unsigned run = 1u << b;
+                size_t setBits = 0;
+                for (unsigned v = run; v < fieldValues; v += 2 * run)
+                {
+                    const unsigned start = (v + fieldValues - rot) & (fieldValues - 1);
+                    setBits += prefix[start + run] - prefix[start];
+                }
+                bitFlips[b] = std::min<size_t>(setBits, elements - setBits);
             }
             size_t entropy = bitFlipWeights[6] * bitFlips[6] + bitFlipWeights[5] * bitFlips[5] + bitFlipWeights[4] * bitFlips[4] + bitFlipWeights[3] * bitFlips[3] + bitFlipWeights[2] * bitFlips[2] + bitFlipWeights[1] * bitFlips[1] + bitFlipWeights[0] * bitFlips[0];
             if (rot == 0)
@@ -4999,9 +5001,11 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
         destB.insert(destB.end(), b.ModeB.begin(), b.ModeB.end());
     }
 
+#if GACL_SPLITLOG
     wchar_t message[256];
     swprintf_s(message, _countof(message), L"mode header size   A:%I64u  B:%I64u\n", destA.size(), destB.size());
     OutputDebugString(message);
+#endif
 
     if (opt.SectionLayout)
     {
@@ -5057,8 +5061,10 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
         for (int m = 0; m < 8; m++)
             //for (int m : {0, 2, 1, 3, 4, 5, 6, 7, 8 })
         {
+#if GACL_SPLITLOG
             swprintf_s(message, _countof(message), L"color[%d]  %I64u\n", m, out->size());
             OutputDebugString(message);
+#endif
             size_t currentSize = out->size();
             size_t colorDataSize = (b.ColorDataBitCounts[m] + 7) / 8;
 
@@ -5067,8 +5073,10 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
         }
         for (int m = 0; m < (mode8Clean ? 8 : 9); m++)
         {
+#if GACL_SPLITLOG
             swprintf_s(message, _countof(message), L"misc[%d]  %I64u\n", m, out->size());
             OutputDebugString(message);
+#endif
             size_t currentSize = out->size();
             size_t miscDataSize = (b.MiscDataBitCounts[m] + 7) / 8;
 
@@ -5077,8 +5085,10 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
         }
 
         {
+#if GACL_SPLITLOG
             swprintf_s(message, _countof(message), L"scraps  %I64u\n", out->size());
             OutputDebugString(message);
+#endif
             size_t currentSize = out->size();
             size_t scrapDataSize = (b.ScrapsBitCount + 7) / 8;
 

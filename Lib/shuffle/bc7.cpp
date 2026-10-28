@@ -1066,65 +1066,11 @@ static bool BC7_JoinVerify(const vector<uint8_t>& stream, bool header, uint8_t c
 }
 #endif
 
-// codedOut (optional) receives the number of blocks the stream header had to code itself (0 when the candidate is dropped)
-static void strat_BC7_JoinMode(const uint8_t* src, size_t srcSize, BC7ModeJoinShuffleOptions* opt, BC7TextureMetrics* metrics, uint8_t curveWidthTiles, SHUFFLE_COMPRESS_PARAMETERS* params, vector<uint8_t>* compressedData, HRESULT* errorOut, size_t* codedOut = nullptr)
-{
-    std::vector<uint8_t> shuffled, reordered45;
-    std::vector<uint8_t> ctrl;
-
-    BC7_Mode45_ReorderRGBA(src, srcSize, reordered45);
-#ifdef VALIDATE
-    std::vector<uint8_t> ddi;
-    BC7_Mode45_ReorderRGBA(reordered45.data(), reordered45.size(), ddi);     // verify reversible
-    assert(memcmp(reordered45.data(), ddi.data(), reordered45.size()) == 0);
-#endif
-
-
-    BC7_ModeJoin_Transform(reordered45.data(), reordered45.size(), shuffled, *opt, *metrics, ctrl);
-
-    const bool header = BC7_JoinNeedsHeader(*metrics, curveWidthTiles);
-    size_t coded = 0;
-    if (header && !BC7_JoinAddHeader(shuffled, *metrics, curveWidthTiles, &coded))
-    {
-        compressedData->resize(0);      // no room for the header: candidate dropped
-        return;
-    }
-    if (codedOut)
-    {
-        *codedOut = coded;
-    }
-
-#if _DEBUG || GACL_JOINCHK
-    if (!BC7_JoinVerify(shuffled, header, curveWidthTiles, src, srcSize))
-    {
-        Utility::Printf(GACL_Logging_Priority_High, L"BC7 Join round trip failed.\n");
-        assert(false);
-        *errorOut = E_FAIL;
-        compressedData->resize(0);
-        return;
-    }
-#endif
-
-    CompressTask(shuffled.data(), shuffled.size(), compressedData, *params, *errorOut);
-}
-
-
-static void strat_BC7_JoinModeRot(const uint8_t* src, size_t srcSize, BC7ModeJoinShuffleOptions* opt, BC7TextureMetrics* metrics, SHUFFLE_COMPRESS_PARAMETERS* params, size_t rotationRegionSize, vector<uint8_t>* compressedData, HRESULT* errorOut)
-{
-    std::vector<uint8_t> shuffled, reordered45, rotated;
-    std::vector<uint8_t> ctrl;
-
-    BC7_Mode45_ReorderRGBA(src, srcSize, reordered45);
-    BC7_ModeJoin_RotateColors(reordered45.data(), reordered45.size(), rotated, opt->AltEncode, rotationRegionSize);
-    BC7_ModeJoin_Transform(rotated.data(), rotated.size(), shuffled, *opt, *metrics, ctrl);
-
-    CompressTask(shuffled.data(), shuffled.size(), compressedData, *params, *errorOut);
-}
-
-// Compressed mode-split streams shared by the strategies of one source.  Strategies whose shuffled streams coincide (such as those that
-// differ only in the patterns of modes the source lacks, which the stream header doesn't record) compress once.  Streams are matched by
-// full comparison, so a shared result is always that of the same bytes.  A cache serves one set of compression parameters.
-class SplitOutputCache
+// Compressed candidate streams shared by the trials of one source.  Trials whose streams coincide (such as Split strategies that differ
+// only in the patterns of modes the source lacks, which the stream header doesn't record, or Join trials whose metrics lead to the same
+// layout) compress once.  Streams are matched by full comparison, so a shared result is always that of the same bytes.  A cache serves
+// one set of compression parameters.
+class StreamOutputCache
 {
 public:
     // takes the stream, unless an identical one is already held
@@ -1168,7 +1114,70 @@ private:
     vector<unique_ptr<Entry>> m_entries;
 };
 
-static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplitShuffleOptions* opt, BC7TextureMetrics* metrics, SHUFFLE_COMPRESS_PARAMETERS* params, SplitOutputCache* outputCache, vector<uint8_t>* compressedDataA, vector<uint8_t>* compressedDataB, HRESULT* errorOut)
+// codedOut (optional) receives the number of blocks the stream header had to code itself (0 when the candidate is dropped).
+// outputCache (optional) compresses the stream once with any identical stream of the other trials sharing it.
+static void strat_BC7_JoinMode(const uint8_t* src, size_t srcSize, BC7ModeJoinShuffleOptions* opt, BC7TextureMetrics* metrics, uint8_t curveWidthTiles, SHUFFLE_COMPRESS_PARAMETERS* params, vector<uint8_t>* compressedData, HRESULT* errorOut, size_t* codedOut = nullptr, StreamOutputCache* outputCache = nullptr)
+{
+    std::vector<uint8_t> shuffled, reordered45;
+    std::vector<uint8_t> ctrl;
+
+    BC7_Mode45_ReorderRGBA(src, srcSize, reordered45);
+#ifdef VALIDATE
+    std::vector<uint8_t> ddi;
+    BC7_Mode45_ReorderRGBA(reordered45.data(), reordered45.size(), ddi);     // verify reversible
+    assert(memcmp(reordered45.data(), ddi.data(), reordered45.size()) == 0);
+#endif
+
+
+    BC7_ModeJoin_Transform(reordered45.data(), reordered45.size(), shuffled, *opt, *metrics, ctrl);
+
+    const bool header = BC7_JoinNeedsHeader(*metrics, curveWidthTiles);
+    size_t coded = 0;
+    if (header && !BC7_JoinAddHeader(shuffled, *metrics, curveWidthTiles, &coded))
+    {
+        compressedData->resize(0);      // no room for the header: candidate dropped
+        return;
+    }
+    if (codedOut)
+    {
+        *codedOut = coded;
+    }
+
+#if _DEBUG || GACL_JOINCHK
+    if (!BC7_JoinVerify(shuffled, header, curveWidthTiles, src, srcSize))
+    {
+        Utility::Printf(GACL_Logging_Priority_High, L"BC7 Join round trip failed.\n");
+        assert(false);
+        *errorOut = E_FAIL;
+        compressedData->resize(0);
+        return;
+    }
+#endif
+
+    if (outputCache != nullptr)
+    {
+        outputCache->Compress(std::move(shuffled), compressedData, *params, *errorOut);
+    }
+    else
+    {
+        CompressTask(shuffled.data(), shuffled.size(), compressedData, *params, *errorOut);
+    }
+}
+
+
+static void strat_BC7_JoinModeRot(const uint8_t* src, size_t srcSize, BC7ModeJoinShuffleOptions* opt, BC7TextureMetrics* metrics, SHUFFLE_COMPRESS_PARAMETERS* params, size_t rotationRegionSize, vector<uint8_t>* compressedData, HRESULT* errorOut)
+{
+    std::vector<uint8_t> shuffled, reordered45, rotated;
+    std::vector<uint8_t> ctrl;
+
+    BC7_Mode45_ReorderRGBA(src, srcSize, reordered45);
+    BC7_ModeJoin_RotateColors(reordered45.data(), reordered45.size(), rotated, opt->AltEncode, rotationRegionSize);
+    BC7_ModeJoin_Transform(rotated.data(), rotated.size(), shuffled, *opt, *metrics, ctrl);
+
+    CompressTask(shuffled.data(), shuffled.size(), compressedData, *params, *errorOut);
+}
+
+static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplitShuffleOptions* opt, BC7TextureMetrics* metrics, SHUFFLE_COMPRESS_PARAMETERS* params, StreamOutputCache* outputCache, vector<uint8_t>* compressedDataA, vector<uint8_t>* compressedDataB, HRESULT* errorOut)
 {
 #if _DEBUG || GACL_JOINCHK
     // Reverse yields linear data, so re-apply any space curve before comparing against the (possibly curved) source
@@ -1365,21 +1374,23 @@ HRESULT ShuffleCompress_BC7(
     BC7ModeJoinShuffleOptions optJoin = { false };
     // blocks each Join trial's stream header had to code itself (streamheader.h coded entries)
     size_t codedJoin = 0, codedNM = 0, codedAlt = 0, codedRot256 = 0;
+    // the Join trials often produce identical streams (when their masks select the same layout for the source), which compress once
+    StreamOutputCache joinOutputCache;
     if (bIncludeJoinMode && curveTiles <= 255)    // skip mode-join shuffles if the caller has explicitly requested only mode-split
     {
         BC7ModeJoinShuffleOptions optJoinAlt = { true };
         (void)&optJoinAlt;
         (void)&strat_BC7_JoinModeRot;
 
-        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &metrics, curveWidthTiles, &params, &joinMode, &hr, &codedJoin);
+        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &metrics, curveWidthTiles, &params, &joinMode, &hr, &codedJoin, &joinOutputCache);
         // a zero hc mask would duplicate the no-statics trial, so the trial is dropped
 #if GACL_HCA || GACL_PMMT == 2
-        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &hcAlphaMetrics, curveWidthTiles, &params, &joinModeNM, &hr, &codedNM);
+        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &hcAlphaMetrics, curveWidthTiles, &params, &joinModeNM, &hr, &codedNM, &joinOutputCache);
 #endif
 #if GACL_HCAB || GACL_PMMT == 3
-        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &hcAlphaBlueMetrics, curveWidthTiles, &params, &joinModeRot256, &hr, &codedRot256);
+        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &hcAlphaBlueMetrics, curveWidthTiles, &params, &joinModeRot256, &hr, &codedRot256, &joinOutputCache);
 #endif
-        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &blankMetrics, curveWidthTiles, &params, &joinModeAlt, &hr, &codedAlt);   // HCN: no-statics trial
+        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &blankMetrics, curveWidthTiles, &params, &joinModeAlt, &hr, &codedAlt, &joinOutputCache);   // HCN: no-statics trial
     }
     
     struct SplitStrat{
@@ -1458,7 +1469,7 @@ HRESULT ShuffleCompress_BC7(
     const int sectionTrialLevel = requestedZstdLevel > 0 ? (std::min)(requestedZstdLevel, 6) : 6;
     // the strategies share section trial results: a mode's sections recur across strategies with the same pattern, ordering and rotation
     BC7ModeSplitTrialCache splitTrialCache;
-    SplitOutputCache splitOutputCache;
+    StreamOutputCache splitOutputCache;
     for (SplitStrat* ss : { &ss1, &ss1r, &ss2, &ss2o1r, &ss3, &ss3o2r, &ss4, &ss4o1r, &ss5r, &ss7 })
     {
         ss->Options.SpaceCurveWidthInPixels = encodedStreamIsCurved ? static_cast<uint32_t>(params.CurvedTransforms.WidthInPixels) : 0u;
@@ -1579,7 +1590,7 @@ HRESULT ShuffleCompress_BC7(
             for (unsigned s = 1; s <= sets; s++)
             {
                 altMetrics[s].JoinRemap = uint8_t(s);
-                ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &altMetrics[s], curveWidthTiles, &params, &alts[s], &hr, &altCoded[s]);
+                ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &altMetrics[s], curveWidthTiles, &params, &alts[s], &hr, &altCoded[s], nullptr);
             }
             for (auto& task : tasks) task.join();
             if (!SUCCEEDED(hr))
