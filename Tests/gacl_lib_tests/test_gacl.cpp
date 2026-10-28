@@ -15,6 +15,10 @@
 #include <iostream>
 #include <fstream>
 #include <random>
+#include <mutex>
+#include <algorithm>
+#include <string>
+#include <cwctype>
 
 #include <DirectXTex.h>
 
@@ -173,7 +177,20 @@ HRESULT ShuffleCompressMip0(filesystem::path file, GACL_SHUFFLE_TRANSFORM& tid, 
 }
 
 
-HRESULT ValidateRoundTripShuffleCompress(filesystem::path file, GACL_SHUFFLE_TRANSFORM& tid, bool includeCurve, vector<uint8_t>& sc)
+// whole 128-pixel tile rows (32 rows of blocks) from the top of the image, up to maxBytes but at least one; the whole image
+// when maxBytes is 0
+static size_t TileRowPrefixBytes(const Image& img, size_t imageBytes, size_t maxBytes)
+{
+    if (maxBytes == 0)
+    {
+        return imageBytes;
+    }
+    const size_t tileRowBytes = img.rowPitch * 32;
+    return (std::min)(imageBytes, (std::max)(size_t(1), maxBytes / tileRowBytes) * tileRowBytes);
+}
+
+// zstdLevel 0 requests GACL's default level; maxBytes (if not 0) limits the source to TileRowPrefixBytes of the image
+HRESULT ValidateRoundTripShuffleCompress(filesystem::path file, GACL_SHUFFLE_TRANSFORM& tid, bool includeCurve, vector<uint8_t>& sc, int zstdLevel = 19, size_t maxBytes = 0)
 {
     ScratchImage si;
     TexMetadata siMeta;
@@ -182,7 +199,7 @@ HRESULT ValidateRoundTripShuffleCompress(filesystem::path file, GACL_SHUFFLE_TRA
     if (SUCCEEDED(hr))
     {
         const Image* img = si.GetImage(0, 0, 0);
-        size_t srcImgSize = si.GetPixelsSize();
+        size_t srcImgSize = TileRowPrefixBytes(*img, si.GetPixelsSize(), maxBytes);
 
         vector<uint8_t> uncompressed;
         vector<uint8_t> unshuffled;
@@ -192,7 +209,7 @@ HRESULT ValidateRoundTripShuffleCompress(filesystem::path file, GACL_SHUFFLE_TRA
 
         uint8_t* dataForCurved = includeCurve ? img->pixels : nullptr;
 
-        SHUFFLE_COMPRESS_PARAMETERS params = { srcImgSize, siMeta.format, img->pixels, {19}, {img->width, dataForCurved} };
+        SHUFFLE_COMPRESS_PARAMETERS params = { srcImgSize, siMeta.format, img->pixels, {zstdLevel}, {img->width, dataForCurved} };
 
         hr = GACL_ShuffleCompress_BCn(sc.data(), &tid, &scBytes, params);
         EXPECT_EQ(hr, S_OK);
@@ -1129,6 +1146,346 @@ TEST(ShuffleCompress, LargeBC7_ShuffleCompress_CurveOnly) {
         EXPECT_EQ(stream[0], 0x1E);
         EXPECT_NE(stream[1], 0);
         EXPECT_EQ(stream[2], BCNEX_UNSHUFFLED);
+    }
+}
+
+// The library's default logging routine, restored after capturing log messages
+namespace Utility
+{
+    void DefaultLoggingRoutine(GACL_Logging_Priority msgPri, const wchar_t* msg);
+}
+
+static mutex s_capturedLogMutex;
+static vector<wstring> s_capturedLog;
+
+static void CaptureLog(GACL_Logging_Priority, const wchar_t* msg)
+{
+    lock_guard<mutex> lock(s_capturedLogMutex);
+    s_capturedLog.push_back(msg);
+}
+
+// the number of candidate transforms that the BC7 encoder's candidate table logs with a size (dropped candidates are logged with
+// size 0, or not at all)
+static size_t CapturedBC7Candidates()
+{
+    lock_guard<mutex> lock(s_capturedLogMutex);
+    size_t candidates = 0;
+    for (wstring line : s_capturedLog)
+    {
+        if (line.rfind(L"No Shuffle", 0) != 0 && line.rfind(L"Join", 0) != 0 && line.rfind(L"Split", 0) != 0)
+        {
+            continue;
+        }
+        while (!line.empty() && (iswspace(line.back()) || line.back() == L'*'))
+        {
+            line.pop_back();
+        }
+        size_t digits = line.size();
+        while (digits > 0 && iswdigit(line[digits - 1]))
+        {
+            digits--;
+        }
+        if (digits < line.size() && stoull(line.substr(digits)) != 0)
+        {
+            candidates++;
+        }
+    }
+    return candidates;
+}
+
+// BC7 content gate: at or below the default zstd level, a stream of at most 512 KB that zstd level 6 compresses below a quarter of its
+// size ranks the candidate transforms at level 6, and compresses only the 6 smallest distinct ones again at the final level.  Other
+// streams compress every candidate at the final level.
+TEST(ShuffleCompress, BC7_ContentGate) {
+    struct GateCase
+    {
+        const wchar_t* file;
+        size_t prefixBytes;     // whole tile rows from the top of the image
+        int zstdLevel;          // 0: the default level
+        bool compressible;      // zstd level 6 compresses the prefix below a quarter of its size
+        bool gated;
+        GACL_SHUFFLE_TRANSFORM tid;
+        size_t size;            // known size for this prefix shuffle compressed in this way
+    };
+    const GateCase cases[] = {
+        { L"BlackboardEraser_albedo.DDS", 256 * 1024, 0, true, true, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX, 35921 },
+        { L"Ladybug_DetailSkin_normal.DDS", 256 * 1024, 0, false, false, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX, 156587 },
+        { L"BlackboardEraser_albedo.DDS", 256 * 1024, 19, true, false, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX, 35583 },    // above the default level
+        { L"Ladybug_Body_Spec_mask.DDS", 1024 * 1024, 0, true, false, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT, 83 },     // above 512 KB
+    };
+
+    struct RestoreLogging
+    {
+        ~RestoreLogging() { GACL_Logging_SetCallback(&Utility::DefaultLoggingRoutine); }
+    } restoreLogging;
+    GACL_Logging_SetCallback(&CaptureLog);
+
+    for (const GateCase& c : cases)
+    {
+        const filesystem::path file = GetAssetsDirectory() / "BC7mip0" / c.file;
+        const string at = file.filename().string() + ", " + to_string(c.prefixBytes / 1024) + " KB, level " + to_string(c.zstdLevel);
+
+        ScratchImage si;
+        TexMetadata siMeta;
+        ASSERT_EQ(LoadFromDDSFile(file.c_str(), DDS_FLAGS::DDS_FLAGS_NONE, &siMeta, si), S_OK) << at;
+        const Image* img = si.GetImage(0, 0, 0);
+        const size_t srcBytes = TileRowPrefixBytes(*img, si.GetPixelsSize(), c.prefixBytes);
+        ASSERT_EQ(srcBytes, c.prefixBytes) << at;
+        vector<uint8_t> probe(ZSTD_compressBound(srcBytes));
+        const size_t probeBytes = ZSTD_compress(probe.data(), probe.size(), img->pixels, srcBytes, 6);
+        ASSERT_FALSE(ZSTD_isError(probeBytes)) << at;
+        EXPECT_EQ(probeBytes * 4 < srcBytes, c.compressible) << at << ", level 6 " << probeBytes;
+
+        {
+            lock_guard<mutex> lock(s_capturedLogMutex);
+            s_capturedLog.clear();
+        }
+        vector<uint8_t> sc;
+        GACL_SHUFFLE_TRANSFORM tid = GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL;
+        EXPECT_EQ(ValidateRoundTripShuffleCompress(file, tid, true, sc, c.zstdLevel, c.prefixBytes), S_OK) << at;
+
+        const size_t candidates = CapturedBC7Candidates();
+        if (c.gated)
+        {
+            EXPECT_GE(candidates, 1u) << at;
+            EXPECT_LE(candidates, 6u) << at;
+        }
+        else
+        {
+            EXPECT_GT(candidates, 6u) << at;
+        }
+        EXPECT_EQ(tid, c.tid) << at;
+        EXPECT_EQ(sc.size(), c.size) << at;
+        if (c.gated)    // the finalists are ranked and compressed on worker threads: the result must not depend on their timing
+        {
+            vector<uint8_t> again;
+            GACL_SHUFFLE_TRANSFORM againTid = GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL;
+            EXPECT_EQ(ValidateRoundTripShuffleCompress(file, againTid, true, again, c.zstdLevel, c.prefixBytes), S_OK) << at;
+            EXPECT_EQ(againTid, tid) << at;
+            EXPECT_TRUE(again == sc) << at;
+        }
+    }
+}
+
+// Curved-space input (CurvedTransforms.TextureData) may differ from TextureData, as RDO applied in curved space does, or be the
+// only input: a null TextureData disallows the uncurved transforms. Each stream must decode to the input it was built from, and
+// the round trip checks of Debug and GACL_EXCHK builds must pass.
+#include "../../Lib/shuffle/bc7.h"
+
+struct CurvedInputFormat
+{
+    const char* name;
+    DXGI_FORMAT format;
+    size_t blockBytes;
+    GACL_SHUFFLE_TRANSFORM ex;      // the format's EX transform
+};
+
+static const CurvedInputFormat kCurvedInputFormats[] = {
+    { "BC1", DXGI_FORMAT_BC1_UNORM, 8, GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_EX },
+    { "BC3", DXGI_FORMAT_BC3_UNORM, 16, GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_EX },
+    { "BC4", DXGI_FORMAT_BC4_UNORM, 8, GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_EX },
+    { "BC5", DXGI_FORMAT_BC5_UNORM, 16, GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_EX },
+    { "BC7", DXGI_FORMAT_BC7_UNORM, 16, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX },
+};
+
+constexpr size_t kCurvedInputWidth = 256;   // texels, and as many rows: 64x64 blocks, which the space curve takes
+
+// tex: 64x64 blocks drawn from a 256-block palette, so EX streams have header room; rdo: tex with about an eighth of its blocks
+// drawn again
+static void CurvedInputTextures(const CurvedInputFormat& f, vector<uint8_t>& tex, vector<uint8_t>& rdo)
+{
+    uint32_t x = uint32_t(f.format);
+    auto next = [&x] { x = x * 1664525u + 1013904223u; return uint8_t(x >> 24); };
+    vector<uint8_t> palette(256 * f.blockBytes);
+    for (uint8_t& b : palette)
+    {
+        b = next();
+    }
+    const size_t blocks = (kCurvedInputWidth / 4) * (kCurvedInputWidth / 4);
+    tex.resize(blocks * f.blockBytes);
+    for (size_t i = 0; i < blocks; i++)
+    {
+        memcpy(&tex[i * f.blockBytes], &palette[next() * f.blockBytes], f.blockBytes);
+    }
+    rdo = tex;
+    for (size_t i = 0; i < blocks; i++)
+    {
+        if (next() < 32)
+        {
+            memcpy(&rdo[i * f.blockBytes], &palette[next() * f.blockBytes], f.blockBytes);
+        }
+    }
+}
+
+static string CurvedInputCase(const CurvedInputFormat& f, GACL_SHUFFLE_TRANSFORM request, bool dataIsCurved)
+{
+    return string(f.name) + ", request " + to_string(unsigned(request)) + (dataIsCurved ? ", curved layout" : ", linear layout");
+}
+
+// compresses curvedLinear as the curved-space input (curved first when dataIsCurved), with linear (if any) as TextureData;
+// checkFailures counts the failed round trip checks that Debug and GACL_EXCHK builds log
+static HRESULT CompressCurvedInput(const CurvedInputFormat& f, GACL_SHUFFLE_TRANSFORM& tid, const vector<uint8_t>* linear,
+    const vector<uint8_t>& curvedLinear, bool dataIsCurved, vector<uint8_t>& sc, size_t& checkFailures)
+{
+    const size_t size = curvedLinear.size();
+    vector<uint8_t> curvedInput = curvedLinear;
+    if (dataIsCurved)
+    {
+        EXPECT_TRUE(GACL_Shuffle_ApplySpaceCurve(curvedInput.data(), curvedLinear.data(), size, f.blockBytes, kCurvedInputWidth, true));
+    }
+    SHUFFLE_COMPRESS_PARAMETERS params = {};
+    params.SizeInBytes = size;
+    params.Format = f.format;
+    params.TextureData = linear != nullptr ? linear->data() : nullptr;
+    params.CurvedTransforms.WidthInPixels = kCurvedInputWidth;
+    params.CurvedTransforms.TextureData = curvedInput.data();
+    params.CurvedTransforms.DataIsCurved = dataIsCurved;
+
+    {
+        lock_guard<mutex> lock(s_capturedLogMutex);
+        s_capturedLog.clear();
+    }
+    sc.resize(size);
+    size_t scBytes = 0;
+    const HRESULT hr = GACL_ShuffleCompress_BCn(sc.data(), &tid, &scBytes, params);
+    sc.resize(scBytes);
+
+    lock_guard<mutex> lock(s_capturedLogMutex);
+    checkFailures = count_if(s_capturedLog.begin(), s_capturedLog.end(),
+        [](const wstring& line) { return line.find(L"round trip failed") != wstring::npos; });
+    return hr;
+}
+
+// a stream decoded to the linear layout; curveTiles is the curve width an EX or Join stream header records
+static bool DecodeShuffleCompressed(const vector<uint8_t>& sc, GACL_SHUFFLE_TRANSFORM tid, size_t size, vector<uint8_t>& out, uint8_t& curveTiles)
+{
+    curveTiles = 0;
+    const unsigned long long streamBytes = ZSTD_getFrameContentSize(sc.data(), sc.size());
+    if (streamBytes == ZSTD_CONTENTSIZE_UNKNOWN || streamBytes == ZSTD_CONTENTSIZE_ERROR || streamBytes > 2 * size)
+    {
+        return false;
+    }
+    vector<uint8_t> stream(static_cast<size_t>(streamBytes));
+    if (ZSTD_decompress(stream.data(), stream.size(), sc.data(), sc.size()) != stream.size())
+    {
+        return false;
+    }
+
+    bool decoded = true;
+    switch (tid)
+    {
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY:
+        out = stream;
+        break;
+
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224:
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44:
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_116224:
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_664:
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116:
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116:
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_2266:
+        decoded = BCn_Unshuffle(stream.data(), stream.size(), uint8_t(tid), out);
+        break;
+
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_EX:
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_EX:
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_EX:
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_EX:
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX:
+        decoded = BCnEx_Decode(stream.data(), stream.size(), uint8_t(tid), out, true, nullptr, &curveTiles);
+        break;
+
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN:
+        decoded = BC7_JoinStream_Decode(stream.data(), stream.size(), uint8_t(tid), out, true, &curveTiles);
+        break;
+
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT:     // reverse undoes any space curve recorded in the stream header
+        BC7_ModeSplit_Reverse(stream.data(), stream.size(), out, size, nullptr);
+        break;
+
+    default:
+        decoded = false;
+    }
+    return decoded && out.size() == size;
+}
+
+// one case, which must succeed without failed round trip checks, with a stream that decodes to the input it was built from: the
+// curved-space input when the stream records a curve or is BC7 Split (built from the curved source whenever there is one), else
+// TextureData
+static void ExpectCurvedInputRoundTrip(const CurvedInputFormat& f, GACL_SHUFFLE_TRANSFORM request, const vector<uint8_t>* linear,
+    const vector<uint8_t>& curvedLinear, bool dataIsCurved)
+{
+    const string at = CurvedInputCase(f, request, dataIsCurved);
+    GACL_SHUFFLE_TRANSFORM tid = request;
+    vector<uint8_t> sc;
+    size_t checkFailures = 0;
+    const HRESULT hr = CompressCurvedInput(f, tid, linear, curvedLinear, dataIsCurved, sc, checkFailures);
+    EXPECT_EQ(checkFailures, 0u) << at;
+    ASSERT_EQ(hr, S_OK) << at;
+    ASSERT_NE(tid, GACL_SHUFFLE_TRANSFORM_NONE) << at;
+
+    vector<uint8_t> back;
+    uint8_t curveTiles = 0;
+    ASSERT_TRUE(DecodeShuffleCompressed(sc, tid, curvedLinear.size(), back, curveTiles)) << at << ", transform " << unsigned(tid);
+    const bool fromCurved = curveTiles != 0 || tid == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT;
+    ASSERT_TRUE(fromCurved || linear != nullptr) << at << ", transform " << unsigned(tid);
+    EXPECT_TRUE(back == (fromCurved ? curvedLinear : *linear)) << at << ", transform " << unsigned(tid) << ", curve " << unsigned(curveTiles);
+}
+
+TEST(ShuffleCompress, CurvedRdoInput) {
+    struct RestoreLogging
+    {
+        ~RestoreLogging() { GACL_Logging_SetCallback(&Utility::DefaultLoggingRoutine); }
+    } restoreLogging;
+    GACL_Logging_SetCallback(&CaptureLog);
+
+    for (const CurvedInputFormat& f : kCurvedInputFormats)
+    {
+        vector<uint8_t> tex, rdo;
+        CurvedInputTextures(f, tex, rdo);
+        ASSERT_TRUE(rdo != tex) << f.name;
+        for (GACL_SHUFFLE_TRANSFORM request : { GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL, f.ex })
+        {
+            for (bool dataIsCurved : { false, true })
+            {
+                ExpectCurvedInputRoundTrip(f, request, &tex, rdo, dataIsCurved);
+            }
+        }
+    }
+}
+
+// BC7 does not take a null TextureData (its NoShuffle candidate compresses it) and fails, as before the content gate, whose probe
+// then compresses the curved source. Debug builds' zstd asserts on the null source, so only other builds try BC7.
+TEST(ShuffleCompress, CurvedOnlyInput) {
+    struct RestoreLogging
+    {
+        ~RestoreLogging() { GACL_Logging_SetCallback(&Utility::DefaultLoggingRoutine); }
+    } restoreLogging;
+    GACL_Logging_SetCallback(&CaptureLog);
+
+    for (const CurvedInputFormat& f : kCurvedInputFormats)
+    {
+        vector<uint8_t> tex, rdo;
+        CurvedInputTextures(f, tex, rdo);
+        for (GACL_SHUFFLE_TRANSFORM request : { GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL, f.ex })
+        {
+            for (bool dataIsCurved : { false, true })
+            {
+                if (f.format == DXGI_FORMAT_BC7_UNORM)
+                {
+#ifndef _DEBUG
+                    GACL_SHUFFLE_TRANSFORM tid = request;
+                    vector<uint8_t> sc;
+                    size_t checkFailures = 0;
+                    EXPECT_TRUE(FAILED(CompressCurvedInput(f, tid, nullptr, tex, dataIsCurved, sc, checkFailures))) << CurvedInputCase(f, request, dataIsCurved);
+                    EXPECT_EQ(tid, GACL_SHUFFLE_TRANSFORM_NONE) << CurvedInputCase(f, request, dataIsCurved);
+#endif
+                    continue;
+                }
+                ExpectCurvedInputRoundTrip(f, request, nullptr, tex, dataIsCurved);
+            }
+        }
     }
 }
 

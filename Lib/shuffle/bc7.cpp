@@ -29,6 +29,7 @@
 #include <vector>
 #include <cassert>
 #include <algorithm>
+#include <functional>
 
 using namespace std;
 
@@ -925,30 +926,6 @@ static void strat_BC7_NoShuffle(const uint8_t* src, size_t srcSize, SHUFFLE_COMP
 #define GACL_JOINCHK 0  // verify every Join candidate decodes (header, layout and field transforms) in release builds
 #endif
 
-// Curve-only BC7_EX stream (BCnEx_EncodeCurveOnly): the curved blocks unshuffled behind a stream header. Leaves
-// compressedData empty when there is no room for the header.
-static void strat_BC7_CurveOnly(const uint8_t* src, size_t srcSize, uint8_t curveWidthTiles, SHUFFLE_COMPRESS_PARAMETERS* params, vector<uint8_t>* compressedData, HRESULT* errorOut, size_t* codedOut)
-{
-    vector<uint8_t> stream;
-    if (!BCnEx_EncodeCurveOnly(src, srcSize, uint8_t(GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN), curveWidthTiles, stream, nullptr, codedOut))
-    {
-        compressedData->resize(0);
-        return;
-    }
-#if _DEBUG || GACL_JOINCHK
-    vector<uint8_t> back;
-    if (!BCnEx_Decode(stream.data(), stream.size(), uint8_t(GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX), back, false) || back.size() != srcSize || memcmp(back.data(), src, srcSize) != 0)
-    {
-        Utility::Printf(GACL_Logging_Priority_High, L"BC7 curve-only round trip failed.\n");
-        assert(false);
-        *errorOut = E_FAIL;
-        compressedData->resize(0);
-        return;
-    }
-#endif
-    CompressTask(stream.data(), stream.size(), compressedData, *params, *errorOut);
-}
-
 // Join streams with no statics mask, space curve or byte remap need no parameters and are stored without a
 // header (GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN). All others carry an in-stream parameter header (..._BC7_EX).
 static bool BC7_JoinNeedsHeader(const BC7TextureMetrics& metrics, uint8_t curveWidthTiles)
@@ -1069,10 +1046,24 @@ static bool BC7_JoinVerify(const vector<uint8_t>& stream, bool header, uint8_t c
 // Compressed candidate streams shared by the trials of one source.  Trials whose streams coincide (such as Split strategies that differ
 // only in the patterns of modes the source lacks, which the stream header doesn't record, or Join trials whose metrics lead to the same
 // layout) compress once.  Streams are matched by full comparison, so a shared result is always that of the same bytes.  A cache serves
-// one set of compression parameters.
+// one set of compression parameters, and keeps the streams until it is destroyed.
 class StreamOutputCache
 {
 public:
+    // the stream that compressed to the given output (nullptr if none did); call once no compression is in progress
+    const vector<uint8_t>* FindStream(const vector<uint8_t>& compressed)
+    {
+        lock_guard<mutex> guard(m_lock);
+        for (const unique_ptr<Entry>& x : m_entries)
+        {
+            if (!compressed.empty() && x->compressed == compressed)
+            {
+                return &x->stream;
+            }
+        }
+        return nullptr;
+    }
+
     // takes the stream, unless an identical one is already held
     void Compress(vector<uint8_t>&& stream, vector<uint8_t>* compressed, SHUFFLE_COMPRESS_PARAMETERS& params, HRESULT& errorOut)
     {
@@ -1113,6 +1104,30 @@ private:
     mutex m_lock;
     vector<unique_ptr<Entry>> m_entries;
 };
+
+// Curve-only BC7_EX stream (BCnEx_EncodeCurveOnly): the curved blocks unshuffled behind a stream header. Leaves
+// compressedData empty when there is no room for the header.
+static void strat_BC7_CurveOnly(const uint8_t* src, size_t srcSize, uint8_t curveWidthTiles, SHUFFLE_COMPRESS_PARAMETERS* params, StreamOutputCache* outputCache, vector<uint8_t>* compressedData, HRESULT* errorOut, size_t* codedOut)
+{
+    vector<uint8_t> stream;
+    if (!BCnEx_EncodeCurveOnly(src, srcSize, uint8_t(GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN), curveWidthTiles, stream, nullptr, codedOut))
+    {
+        compressedData->resize(0);
+        return;
+    }
+#if _DEBUG || GACL_JOINCHK
+    vector<uint8_t> back;
+    if (!BCnEx_Decode(stream.data(), stream.size(), uint8_t(GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX), back, false) || back.size() != srcSize || memcmp(back.data(), src, srcSize) != 0)
+    {
+        Utility::Printf(GACL_Logging_Priority_High, L"BC7 curve-only round trip failed.\n");
+        assert(false);
+        *errorOut = E_FAIL;
+        compressedData->resize(0);
+        return;
+    }
+#endif
+    outputCache->Compress(std::move(stream), compressedData, *params, *errorOut);
+}
 
 // codedOut (optional) receives the number of blocks the stream header had to code itself (0 when the candidate is dropped).
 // outputCache (optional) compresses the stream once with any identical stream of the other trials sharing it.
@@ -1329,9 +1344,39 @@ HRESULT ShuffleCompress_BC7(
 #endif
     }
 
+    // BC7 content gate.  Where Split runs on a stream of up to 512 KB, with GACL's default zstd routines and a final level above 6 up
+    // to the size default, zstd level 6 first compresses the unshuffled stream.  If that leaves under a quarter of it (typical of RDO
+    // content), the fast path compresses the candidates at level 6 to rank them, and only the 6 smallest distinct ones again at the
+    // final level; it tries 5 of the Split strategies.  Otherwise level 6 ranks them too poorly: the safe path compresses every
+    // candidate at the final level, and tries 7 Split strategies.  On BC7 VT tile groups the gate costs about 0.002% of their size
+    // for about 0.7x their CPU.  Larger streams keep the full search: the gate was measured on streams of 64 to 320 KB, and level 6
+    // trials misjudge large textures.
+    const bool defaultRoutines =
+        GACL_Compression_InitRoutine == &GACL_Compression_DefaultInitRoutine &&
+        GACL_Compression_CompressRoutine == &GACL_Compression_DefaultCompressRoutine &&
+        GACL_Compression_CleanupRoutine == &GACL_Compression_DefaultCleanupRoutine;
+    const int requestedZstdLevel = int(params.CompressSettings.Default.ZstdCompressionLevel);
+    const int defaultZstdLevel = srcSize <= 16 * 1024 ? 12 : (srcSize <= 256 * 1024 ? 14 : 18);     // as GACL_Compression_DefaultInitRoutine
+    const int finalZstdLevel = requestedZstdLevel != 0 ? requestedZstdLevel : defaultZstdLevel;
+    constexpr int gateRankLevel = 6;
+    constexpr size_t gateFinalists = 6;
+    enum class ContentGate { Off, Fast, Safe } gate = ContentGate::Off;
+    if (bIncludeSplitMode && defaultRoutines && srcSize <= 512 * 1024 && finalZstdLevel > gateRankLevel && finalZstdLevel <= defaultZstdLevel)
+    {
+        vector<uint8_t> probe(ZSTD_compressBound(srcSize));
+        // TextureData can be null (no uncurved transforms): the curved source stands in
+        const uint8_t* const probeSrc = srcforUncurvedTransforms != nullptr ? srcforUncurvedTransforms : srcForCurvedTransforms;
+        const size_t probeSize = ZSTD_compress(probe.data(), probe.size(), probeSrc, srcSize, gateRankLevel);
+        gate = !ZSTD_isError(probeSize) && probeSize * 4 < srcSize ? ContentGate::Fast : ContentGate::Safe;
+    }
+    SHUFFLE_COMPRESS_PARAMETERS rankParams = params;
+    rankParams.CompressSettings.Default.ZstdCompressionLevel = gateRankLevel;
+    // the parameters every candidate is first compressed with
+    SHUFFLE_COMPRESS_PARAMETERS* const candParams = gate == ContentGate::Fast ? &rankParams : &params;
+
     BC7TextureMetrics metrics = {}; // , metrics16K, metrics256K;
     BC7_CollectTextureMetrics((srcForCurvedTransforms ? srcForCurvedTransforms : srcforUncurvedTransforms), srcSize, metrics);
-    ADDTASK(strat_BC7_NoShuffle, srcforUncurvedTransforms, srcSize, &params, &noShuffle, &hr);
+    ADDTASK(strat_BC7_NoShuffle, srcforUncurvedTransforms, srcSize, candParams, &noShuffle, &hr);
 
     // curved streams record the texture width in 16KB micro-tiles (32 BC7 blocks each) in the stream header
     const size_t curveTiles = encodedStreamIsCurved ? ((params.CurvedTransforms.WidthInPixels + 3) / 4) / 32 : 0;
@@ -1343,9 +1388,12 @@ HRESULT ShuffleCompress_BC7(
 
     vector<uint8_t> curvedNoShuffle;
     size_t codedCurved = 0;
+    // the curve-only and Join candidates' streams: the Join trials often produce identical streams (when their masks select the same
+    // layout for the source), which compress once
+    StreamOutputCache joinOutputCache;
     if (bIncludeCurvedZstdOnly)
     {
-        ADDTASK(strat_BC7_CurveOnly, srcForCurvedTransforms, srcSize, curveWidthTiles, &params, &curvedNoShuffle, &hr, &codedCurved);
+        ADDTASK(strat_BC7_CurveOnly, srcForCurvedTransforms, srcSize, curveWidthTiles, candParams, &joinOutputCache, &curvedNoShuffle, &hr, &codedCurved);
     }
 
 
@@ -1374,23 +1422,21 @@ HRESULT ShuffleCompress_BC7(
     BC7ModeJoinShuffleOptions optJoin = { false };
     // blocks each Join trial's stream header had to code itself (streamheader.h coded entries)
     size_t codedJoin = 0, codedNM = 0, codedAlt = 0, codedRot256 = 0;
-    // the Join trials often produce identical streams (when their masks select the same layout for the source), which compress once
-    StreamOutputCache joinOutputCache;
     if (bIncludeJoinMode && curveTiles <= 255)    // skip mode-join shuffles if the caller has explicitly requested only mode-split
     {
         BC7ModeJoinShuffleOptions optJoinAlt = { true };
         (void)&optJoinAlt;
         (void)&strat_BC7_JoinModeRot;
 
-        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &metrics, curveWidthTiles, &params, &joinMode, &hr, &codedJoin, &joinOutputCache);
+        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &metrics, curveWidthTiles, candParams, &joinMode, &hr, &codedJoin, &joinOutputCache);
         // a zero hc mask would duplicate the no-statics trial, so the trial is dropped
 #if GACL_HCA || GACL_PMMT == 2
-        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &hcAlphaMetrics, curveWidthTiles, &params, &joinModeNM, &hr, &codedNM, &joinOutputCache);
+        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &hcAlphaMetrics, curveWidthTiles, candParams, &joinModeNM, &hr, &codedNM, &joinOutputCache);
 #endif
 #if GACL_HCAB || GACL_PMMT == 3
-        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &hcAlphaBlueMetrics, curveWidthTiles, &params, &joinModeRot256, &hr, &codedRot256, &joinOutputCache);
+        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &hcAlphaBlueMetrics, curveWidthTiles, candParams, &joinModeRot256, &hr, &codedRot256, &joinOutputCache);
 #endif
-        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &blankMetrics, curveWidthTiles, &params, &joinModeAlt, &hr, &codedAlt, &joinOutputCache);   // HCN: no-statics trial
+        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &blankMetrics, curveWidthTiles, candParams, &joinModeAlt, &hr, &codedAlt, &joinOutputCache);   // HCN: no-statics trial
     }
     
     struct SplitStrat{
@@ -1399,7 +1445,7 @@ HRESULT ShuffleCompress_BC7(
         vector<uint8_t> DestA;
         vector<uint8_t> DestB;
     };
-    vector<const SplitStrat*> splitStrategies;
+    vector<SplitStrat*> splitStrategies;
 
 
     // supported patterns:                          0   1   2   3   4   5   6   7
@@ -1464,8 +1510,6 @@ HRESULT ShuffleCompress_BC7(
     // mode-split streams record any space curve, index prediction and section layout in the stream header.  The section layout trials
     // run at the requested zstd level capped at 6 (6 if none is requested): on samples of BC7 VT tile groups, higher trial levels cost
     // much more and chose no better layouts
-    const int requestedZstdLevel = int(params.CompressSettings.Default.ZstdCompressionLevel);
-    const int defaultZstdLevel = srcSize <= 16 * 1024 ? 12 : (srcSize <= 256 * 1024 ? 14 : 18);     // as GACL_Compression_DefaultInitRoutine
     const int sectionTrialLevel = requestedZstdLevel > 0 ? (std::min)(requestedZstdLevel, 6) : 6;
     // the strategies share section trial results: a mode's sections recur across strategies with the same pattern, ordering and rotation
     BC7ModeSplitTrialCache splitTrialCache;
@@ -1493,42 +1537,37 @@ HRESULT ShuffleCompress_BC7(
             0, //metrics.M[7].OrderingStrategies->Count(),
         });
 
-        // the endpoint ordering variants (o1r, o2r) that never gained over the other strategies on samples of BC7 VT tile groups are not tried
-        splitStrategies.push_back(&ss1);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss1.Options, &metrics, &params, &splitOutputCache, &ss1.DestA, &ss1.DestB, &hr);
-        splitStrategies.push_back(&ss1r);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss1r.Options, &metrics, &params, &splitOutputCache, &ss1r.DestA, &ss1r.DestB, &hr);
-
-        splitStrategies.push_back(&ss2);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss2.Options, &metrics, &params, &splitOutputCache, &ss2.DestA, &ss2.DestB, &hr);
+        // the endpoint ordering variants (o1r, o2r) that never gained over the other strategies on samples of BC7 VT tile groups are
+        // not tried.  The content gate's fast path tries 5 of the strategies below, its safe path 7 (fewer where the ordering variants
+        // don't apply): the others gained least on those samples
+        auto addSplit = [&](SplitStrat& ss, bool onFast, bool onSafe)
+        {
+            if ((gate == ContentGate::Fast && !onFast) || (gate == ContentGate::Safe && !onSafe))
+            {
+                return;
+            }
+            splitStrategies.push_back(&ss);
+            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss.Options, &metrics, candParams, &splitOutputCache, &ss.DestA, &ss.DestB, &hr);
+        };
+        addSplit(ss1, false, true);
+        addSplit(ss1r, true, true);
+        addSplit(ss2, false, false);
         if (maxOrderStrategies > 0)
         {
-            splitStrategies.push_back(&ss2o1r);
-            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss2o1r.Options, &metrics, &params, &splitOutputCache, &ss2o1r.DestA, &ss2o1r.DestB, &hr);
+            addSplit(ss2o1r, true, true);
         }
-
-        splitStrategies.push_back(&ss3);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss3.Options, &metrics, &params, &splitOutputCache, &ss3.DestA, &ss3.DestB, &hr);
+        addSplit(ss3, true, true);
         if (maxOrderStrategies > 1)
         {
-            splitStrategies.push_back(&ss3o2r);
-            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss3o2r.Options, &metrics, &params, &splitOutputCache, &ss3o2r.DestA, &ss3o2r.DestB, &hr);
+            addSplit(ss3o2r, true, true);
         }
-
-        splitStrategies.push_back(&ss7);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss7.Options, &metrics, &params, &splitOutputCache, &ss7.DestA, &ss7.DestB, &hr);
-
-        splitStrategies.push_back(&ss4);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss4.Options, &metrics, &params, &splitOutputCache, &ss4.DestA, &ss4.DestB, &hr);
+        addSplit(ss7, false, false);
+        addSplit(ss4, true, true);
         if (maxOrderStrategies > 0)
         {
-            splitStrategies.push_back(&ss4o1r);
-            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss4o1r.Options, &metrics, &params, &splitOutputCache, &ss4o1r.DestA, &ss4o1r.DestB, &hr);
+            addSplit(ss4o1r, false, true);
         }
-
-        splitStrategies.push_back(&ss5r);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss5r.Options, &metrics, &params, &splitOutputCache, &ss5r.DestA, &ss5r.DestB, &hr);
-
+        addSplit(ss5r, false, false);
     }
 
     for (auto& task : tasks) task.join();
@@ -1551,7 +1590,7 @@ HRESULT ShuffleCompress_BC7(
     if (bIncludeJoinMode && encodedStreamIsCurved && curveTiles <= 255 && (joinModeAlt.empty() || codedAlt > 0))
     {
         BC7TextureMetrics linearMetrics = {};
-        strat_BC7_JoinMode(srcforUncurvedTransforms, srcSize, &optJoin, &linearMetrics, 0, &params, &joinLinear, &hr);
+        strat_BC7_JoinMode(srcforUncurvedTransforms, srcSize, &optJoin, &linearMetrics, 0, candParams, &joinLinear, &hr, nullptr, &joinOutputCache);
         if (!SUCCEEDED(hr))
         {
             Utility::Printf(GACL_Logging_Priority_High, L"Fatal shuffle+compress error.\n");
@@ -1611,6 +1650,82 @@ HRESULT ShuffleCompress_BC7(
         }
     }
 
+    // content gate, fast path: the 6 smallest distinct candidates at level 6 are compressed again, from their kept streams, at the
+    // final level; the others are dropped (the byte remap never runs with the gate: it needs a level above the size default)
+    if (gate == ContentGate::Fast)
+    {
+        struct Ranked
+        {
+            vector<uint8_t>* Out;
+            StreamOutputCache* Cache;   // holds the candidate's stream (nullptr: the unshuffled source)
+        };
+        vector<Ranked> ranked = { { &noShuffle, nullptr }, { &curvedNoShuffle, &joinOutputCache }, { &joinMode, &joinOutputCache },
+            { &joinModeNM, &joinOutputCache }, { &joinModeAlt, &joinOutputCache }, { &joinModeRot256, &joinOutputCache }, { &joinLinear, &joinOutputCache } };
+        for (SplitStrat* ss : splitStrategies)
+        {
+            ranked.push_back({ &ss->DestA, &splitOutputCache });
+            ranked.push_back({ &ss->DestB, &splitOutputCache });
+        }
+        vector<Ranked> order;
+        for (const Ranked& r : ranked)
+        {
+            if (!r.Out->empty())
+            {
+                order.push_back(r);
+            }
+        }
+        stable_sort(order.begin(), order.end(), [](const Ranked& x, const Ranked& y) { return x.Out->size() < y.Out->size(); });
+        vector<Ranked> picks;
+        for (const Ranked& r : order)
+        {
+            if (picks.size() == gateFinalists)
+            {
+                break;
+            }
+            if (none_of(picks.begin(), picks.end(), [&](const Ranked& p) { return *p.Out == *r.Out; }))
+            {
+                picks.push_back(r);
+            }
+        }
+        vector<const vector<uint8_t>*> streams(picks.size(), nullptr);
+        for (size_t j = 0; j < picks.size(); j++)
+        {
+            if (picks[j].Cache != nullptr)
+            {
+                streams[j] = picks[j].Cache->FindStream(*picks[j].Out);
+                if (streams[j] == nullptr)
+                {
+                    hr = E_FAIL;
+                }
+            }
+        }
+        vector<vector<uint8_t>> finals(picks.size());
+        if (SUCCEEDED(hr))
+        {
+            tasks.clear();
+            for (size_t j = 0; j < picks.size(); j++)
+            {
+                ADDTASK(CompressTask, streams[j] ? streams[j]->data() : srcforUncurvedTransforms, streams[j] ? streams[j]->size() : srcSize,
+                    &finals[j], std::ref(params), std::ref(hr));
+            }
+            for (auto& task : tasks) task.join();
+        }
+        for (const Ranked& r : ranked)
+        {
+            r.Out->clear();
+        }
+        for (size_t j = 0; j < picks.size(); j++)
+        {
+            picks[j].Out->swap(finals[j]);
+        }
+        if (!SUCCEEDED(hr))
+        {
+            Utility::Printf(GACL_Logging_Priority_High, L"Fatal shuffle+compress error.\n");
+            *destTransformId = GACL_SHUFFLE_TRANSFORM_NONE;
+            return hr;
+        }
+    }
+
     size_t bestSize = srcSize;
     const uint8_t* best = src;
     for (auto b : { &noShuffle, &curvedNoShuffle, &joinMode, &joinModeNM, &joinModeAlt, &joinLinear, &joinModeRot256, &joinRemapAlt })
@@ -1637,9 +1752,7 @@ HRESULT ShuffleCompress_BC7(
 
     wchar_t compressionStr[20] = L"(custom)";
 
-    if (GACL_Compression_InitRoutine == &GACL_Compression_DefaultInitRoutine &&
-        GACL_Compression_CompressRoutine == &GACL_Compression_DefaultCompressRoutine &&
-        GACL_Compression_CleanupRoutine == &GACL_Compression_DefaultCleanupRoutine)
+    if (defaultRoutines)
     {
         swprintf_s(compressionStr, _countof(compressionStr), L"(zstd-%d)", params.CompressSettings.Default.ZstdCompressionLevel);
     }
