@@ -1472,10 +1472,11 @@ HRESULT ShuffleCompress_BC7(
 
 
     // mode-split streams record any space curve, index prediction and section layout in the stream header.  The section layout trials
-    // use the requested zstd level (capped at 18, the default for large sources), else the size based default level
+    // run at the requested zstd level capped at 6 (6 if none is requested): on samples of BC7 VT tile groups, higher trial levels cost
+    // much more and chose no better layouts
     const int requestedZstdLevel = int(params.CompressSettings.Default.ZstdCompressionLevel);
     const int defaultZstdLevel = srcSize <= 16 * 1024 ? 12 : (srcSize <= 256 * 1024 ? 14 : 18);     // as GACL_Compression_DefaultInitRoutine
-    const int sectionTrialLevel = requestedZstdLevel > 0 ? (std::min)(requestedZstdLevel, 18) : defaultZstdLevel;
+    const int sectionTrialLevel = requestedZstdLevel > 0 ? (std::min)(requestedZstdLevel, 6) : 6;
     // the strategies share section trial results: a mode's sections recur across strategies with the same pattern, ordering and rotation
     BC7ModeSplitTrialCache splitTrialCache;
     SplitOutputCache splitOutputCache;

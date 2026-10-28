@@ -181,7 +181,7 @@ struct BC7ModeSplitShuffleOptions
     uint32_t SpaceCurveWidthInPixels;   // 0 if the source is linear, else the width the source was space curved with (recorded in the stream header, max 16384)
     uint8_t IndexPrediction;            // 1 = index fields are stored as spatial prediction residuals (recorded in the stream header)
     uint8_t SectionLayout;              // per-mode section layout (recorded in the stream header): 0 off, 1 chosen by zstd trials, 2 forced SectionSelectors (testing)
-    uint8_t SectionTrialLevel;          // zstd level of the SectionLayout 1 trials (0 = 18)
+    uint8_t SectionTrialLevel;          // zstd level of the SectionLayout 1 trials (0 = 6)
     uint8_t SectionSelectors[8];        // SectionLayout 2 selector per mode, see SplitSectionLayout (invalid units fall back to none)
     BC7ModeSplitTrialCache* TrialCache; // optional SectionLayout 1 trial results shared with other transforms of the same source (nullptr = none)
 };

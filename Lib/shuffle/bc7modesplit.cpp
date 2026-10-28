@@ -4255,7 +4255,7 @@ namespace SplitSectionLayout
     constexpr size_t FixedBytes = 26;
     constexpr uint8_t RemapBit = 0x04;
     constexpr unsigned MiscShift = 4;
-    constexpr int DefaultTrialLevel = 18;
+    constexpr int DefaultTrialLevel = 6;
 
     inline size_t UnitBytes(unsigned code) { return code ? size_t(1) << (code - 1) : 0; }
 
