@@ -4,6 +4,10 @@ A thin native Windows x64 launcher for the four existing GoogleTest executables:
 
 Build the runner and suites from `gacl.sln` in Debug or Release x64. With v143, the executables are in `bin/v143/x64/<configuration>/`. Preserve the suites' existing runtime DLLs, shader `.cso` files, and applicable fixtures/models. The launcher does not build or download dependencies or change graphics settings.
 
+## Dependency download cache
+
+The Agility SDK, DirectStorage SDK and optional Microsoft-GACL ONNX Runtime overlay use a cache-first NuGet helper. If their original archive is already in vcpkg's download cache under the port's expected filename, its pinned SHA-512 is checked before any NuGet service-index request. A corrupt cached archive fails; a cache miss retains the existing configured-feed/public-download behavior. Package versions and extraction rules are unchanged. Cache provisioning is an external build-environment concern; no internal paths, credentials or feed configuration are required by the helper.
+
 ## Run a content folder
 
 From the binary directory:
