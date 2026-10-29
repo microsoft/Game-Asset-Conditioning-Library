@@ -90,6 +90,12 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gId : SV_GroupID, uint gindex 
         {
             scratchBuffer.Store(4u, modesUsedCount);
             scratchBuffer.Store(GACL_BC7_SC_WIDTH_OFFSET, spaceCurveWidthInPixels);
+
+            // Mode 8 blocks have no stream data, so the parse below writes no layout for them; zero their slot, as the binning pass
+            // multiplies every mode's sizes by its block count and the host's scratch may hold anything.  The parse may then write the
+            // slot's +0 (LUT entry 8, with all 9 modes used), and the prefix sum pass writes its count (+8)
+            scratchBuffer.Store4(GACL_BC7_PER_MODE_OFFSET + (GACL_BC7_PER_MODE_STRIDE * 8u), uint4(0u, 0u, 0u, 0u));
+            scratchBuffer.Store4(GACL_BC7_PER_MODE_OFFSET + (GACL_BC7_PER_MODE_STRIDE * 8u) + 16u, uint4(0u, 0u, 0u, 0u));
         }
 
         // The rest of the header is read 8 bytes at a time, with 12 byte reads.  Each mode 0-7 block adds at least 15 bytes after
