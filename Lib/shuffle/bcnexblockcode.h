@@ -1,5 +1,5 @@
 //-------------------------------------------------------------------------------------
-// bc5blockcode.h
+// bcnexblockcode.h
 //
 // Game Asset Conditioning Library - Microsoft toolkit for game asset compression
 //

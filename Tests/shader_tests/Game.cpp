@@ -11,7 +11,7 @@
 #include "SharedDefinitions.h"
 #include "TestParameters.h"
 #include "bcnex.h"
-#include "bc5blockcode.h"
+#include "bcnexblockcode.h"
 #include "streamheader.h"
 #include <filesystem>
 

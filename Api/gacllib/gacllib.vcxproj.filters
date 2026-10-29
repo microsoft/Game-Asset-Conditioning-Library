@@ -45,7 +45,7 @@
     <ClInclude Include="..\..\lib\shuffle\bcnex.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\lib\shuffle\bc5blockcode.h">
+    <ClInclude Include="..\..\lib\shuffle\bcnexblockcode.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\lib\shuffle\bc7joinblockcode.h">

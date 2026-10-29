@@ -140,7 +140,7 @@
     <ClInclude Include="..\..\Lib\shuffle\bc7.h" />
     <ClInclude Include="..\..\Lib\shuffle\streamheader.h" />
     <ClInclude Include="..\..\Lib\shuffle\bcnex.h" />
-    <ClInclude Include="..\..\Lib\shuffle\bc5blockcode.h" />
+    <ClInclude Include="..\..\Lib\shuffle\bcnexblockcode.h" />
     <ClInclude Include="..\..\Lib\shuffle\bc7joinblockcode.h" />
     <ClInclude Include="..\..\Lib\shuffle\bc7joinremap.h" />
   </ItemGroup>

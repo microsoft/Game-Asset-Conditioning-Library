@@ -20,7 +20,7 @@
 //      alpha and both BC5 channels) and the 2-bit indices of the BC1-style color halves (BC1, BC3 color)
 //   2. the stream header (streamheader.h): duplicate blocks are removed to make room for the header in the first k
 //      blocks, and streams short of duplicates code their cheapest blocks in the header (kBC1BlockCode for BC1,
-//      kBC5BlockCode for BC3/4/5, bc5blockcode.h); the header transform code names one of the format's shuffle patterns
+//      kBC5BlockCode for BC3/4/5, bcnexblockcode.h); the header transform code names one of the format's shuffle patterns
 //   3. the format's SoA shuffle (Shuffle_BC1/3/4/5, version by pattern) of the n - k kept blocks, stored after the header
 // so the decoded size equals the input size. BC7 Join streams carrying a header are GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX
 // streams (header code 0). With BCNEX_UNSHUFFLED in the header's prediction mask the kept blocks skip step 3 and follow

@@ -59,7 +59,7 @@
 //
 // EG(v): with x = v + 1 and b = floor(log2(x)), b zero bits, a one bit, then the low b bits of x (LSB first).
 // The coded-block code is a static table shared by encoder and decoder (StreamHeaderBlockCode): kBC7JoinBlockCode
-// (bc7joinblockcode.h) for BC7 Join, kBC1BlockCode for BC1 and kBC5BlockCode for BC3/4/5 (bc5blockcode.h; EX
+// (bc7joinblockcode.h) for BC7 Join, kBC1BlockCode for BC1 and kBC5BlockCode for BC3/4/5 (bcnexblockcode.h; EX
 // header codes 1-7, bcnex.h; BC4 uses kBC5BlockCode's first 8 byte positions).
 // Decoding the descriptor (including coded entries) is a serial bit-stream walk done once per stream; afterwards
 // every block maps independently (StreamHeader_MapBlock). Header-bearing streams use the EX transform id of their

@@ -10,7 +10,7 @@
 
 #include "gacl.h"
 #include "bcnex.h"
-#include "bc5blockcode.h"
+#include "bcnexblockcode.h"
 #include "bc7.h"
 #include "streamheader.h"
 #include <intrin.h>
