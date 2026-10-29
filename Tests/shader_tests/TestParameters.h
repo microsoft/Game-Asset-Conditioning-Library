@@ -23,6 +23,7 @@ constexpr std::tuple<uint32_t, uint32_t, bool, bool> g_testResolutions[] =
     { 1011, 953, false, false },
     { 2048, 2048, true, true },         // Space Curve eligible: BC1, BC3, BC4, BC5, BC7
     //{ 16384,16384, true, true },      // extremely large test case, disabled for now
+    //{ 16384, 128, true, true },       // widest space curve, disabled as it slows testing too much
     { 128, 128, false, true },           // Space Curve eligible: BC3, BC5, BC7
     { 128, 384, false, true },           // Space Curve eligible: BC3, BC5, BC7
     { 128, 400, false, false },
