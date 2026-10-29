@@ -91,23 +91,17 @@ inline uint8_t BC7_JoinModeMask(const BC7TextureMetrics& m, size_t mode)
     return m.JoinModeMasks ? m.JoinModeMask[mode] : uint8_t(m.Statics | m.LowEntropy);
 }
 
-struct BC7ModeJoinShuffleOptions
-{
-    bool AltEncode;
-};
-
 // BC7 shuffle tries a variety of transforms and keeps the best.
 // Since the compress is already done as part of transform selection, a "transform-only" version of BC7 is not included
 
 void BC7_Mode45_ReorderRGBA(const uint8_t* src, size_t srcSize, std::vector<uint8_t>& dest);
 void BC7_CollectTextureMetrics(const uint8_t* src, size_t srcSize, BC7TextureMetrics& m);
 
-void BC7_ModeJoin_RotateColors(const uint8_t* src, size_t srcSize, std::vector<uint8_t>& dest, bool altEncoding, size_t regionSize);
-void BC7_ModeJoin_Transform(const uint8_t* src, size_t srcSize, std::vector<uint8_t>& dest, BC7ModeJoinShuffleOptions& opt, BC7TextureMetrics& metrics, std::vector<uint8_t>& controlBytes);
+void BC7_ModeJoin_Transform(const uint8_t* src, size_t srcSize, std::vector<uint8_t>& dest, BC7TextureMetrics& metrics, std::vector<uint8_t>& controlBytes);
 // Exact inverse of BC7_ModeJoin_Transform for the mask the stream was shuffled with (bc7modejoinreverse.cpp). Returns false
-// when this build's Join field transforms have no reverse (BC7_ModeJoin_FieldConfig() < 0), for AltEncode, or for
-// data that isn't a Join stream of this mask.
-bool BC7_ModeJoin_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8_t>& dest, const BC7ModeJoinShuffleOptions& opt, const BC7TextureMetrics& metrics);
+// when this build's Join field transforms have no reverse (BC7_ModeJoin_FieldConfig() < 0) or for data that isn't a
+// Join stream of this mask.
+bool BC7_ModeJoin_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8_t>& dest, const BC7TextureMetrics& metrics);
 // Decodes a complete GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN or ..._BC7_EX Join stream (after zstd decompression) back to
 // BC7 blocks (BC7_EX streams of a curve-only header are BCnEx_Decode's). Curved streams are uncurved unless uncurve is
 // false; curveWidthTilesOut receives the curve width parameter.

@@ -1010,10 +1010,9 @@ bool BC7_JoinStream_Encode(const uint8_t* src, size_t srcSize, const BC7TextureM
 
     // the same steps as a Join candidate of the BC7 shuffle (strat_BC7_JoinMode)
     BC7TextureMetrics m = metrics;
-    BC7ModeJoinShuffleOptions opt = { false };
     vector<uint8_t> reordered45, ctrl;
     BC7_Mode45_ReorderRGBA(src, srcSize, reordered45);
-    BC7_ModeJoin_Transform(reordered45.data(), reordered45.size(), dest, opt, m, ctrl);
+    BC7_ModeJoin_Transform(reordered45.data(), reordered45.size(), dest, m, ctrl);
 
     const bool header = BC7_JoinNeedsHeader(m, curveWidthTiles);
     size_t coded = 0;
@@ -1138,7 +1137,7 @@ static void strat_BC7_CurveOnly(const uint8_t* src, size_t srcSize, uint8_t curv
 
 // codedOut (optional) receives the number of blocks the stream header had to code itself (0 when the candidate is dropped).
 // outputCache (optional) compresses the stream once with any identical stream of the other trials sharing it.
-static void strat_BC7_JoinMode(const uint8_t* src, size_t srcSize, BC7ModeJoinShuffleOptions* opt, BC7TextureMetrics* metrics, uint8_t curveWidthTiles, SHUFFLE_COMPRESS_PARAMETERS* params, vector<uint8_t>* compressedData, HRESULT* errorOut, size_t* codedOut = nullptr, StreamOutputCache* outputCache = nullptr)
+static void strat_BC7_JoinMode(const uint8_t* src, size_t srcSize, BC7TextureMetrics* metrics, uint8_t curveWidthTiles, SHUFFLE_COMPRESS_PARAMETERS* params, vector<uint8_t>* compressedData, HRESULT* errorOut, size_t* codedOut = nullptr, StreamOutputCache* outputCache = nullptr)
 {
     std::vector<uint8_t> shuffled, reordered45;
     std::vector<uint8_t> ctrl;
@@ -1151,7 +1150,7 @@ static void strat_BC7_JoinMode(const uint8_t* src, size_t srcSize, BC7ModeJoinSh
 #endif
 
 
-    BC7_ModeJoin_Transform(reordered45.data(), reordered45.size(), shuffled, *opt, *metrics, ctrl);
+    BC7_ModeJoin_Transform(reordered45.data(), reordered45.size(), shuffled, *metrics, ctrl);
 
     const bool header = BC7_JoinNeedsHeader(*metrics, curveWidthTiles);
     size_t coded = 0;
@@ -1184,19 +1183,6 @@ static void strat_BC7_JoinMode(const uint8_t* src, size_t srcSize, BC7ModeJoinSh
     {
         CompressTask(shuffled.data(), shuffled.size(), compressedData, *params, *errorOut);
     }
-}
-
-
-static void strat_BC7_JoinModeRot(const uint8_t* src, size_t srcSize, BC7ModeJoinShuffleOptions* opt, BC7TextureMetrics* metrics, SHUFFLE_COMPRESS_PARAMETERS* params, size_t rotationRegionSize, vector<uint8_t>* compressedData, HRESULT* errorOut)
-{
-    std::vector<uint8_t> shuffled, reordered45, rotated;
-    std::vector<uint8_t> ctrl;
-
-    BC7_Mode45_ReorderRGBA(src, srcSize, reordered45);
-    BC7_ModeJoin_RotateColors(reordered45.data(), reordered45.size(), rotated, opt->AltEncode, rotationRegionSize);
-    BC7_ModeJoin_Transform(rotated.data(), rotated.size(), shuffled, *opt, *metrics, ctrl);
-
-    CompressTask(shuffled.data(), shuffled.size(), compressedData, *params, *errorOut);
 }
 
 static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplitShuffleOptions* opt, BC7TextureMetrics* metrics, SHUFFLE_COMPRESS_PARAMETERS* params, StreamOutputCache* outputCache, vector<uint8_t>* compressedDataA, vector<uint8_t>* compressedDataB, HRESULT* errorOut)
@@ -1408,7 +1394,7 @@ HRESULT ShuffleCompress_BC7(
     const uint8_t* src = encodedStreamIsCurved ? srcForCurvedTransforms : srcforUncurvedTransforms;
 
     // join-mode compressed output vectors
-    vector<uint8_t> joinMode, joinModeNM, joinModeAlt, joinModeRot256;
+    vector<uint8_t> joinMode, joinModeHcAlpha, joinModeHcNone, joinModeHcAlphaBlue;
 
     // Join trial metrics live at function scope: worker threads hold pointers to them until the join below.
     // Hardcoded-assumption Join candidates plus a no-statics trial (HCN).
@@ -1426,24 +1412,19 @@ HRESULT ShuffleCompress_BC7(
     pmmMetrics = metrics;
     pmmMetrics.JoinModeMasks = true;
 #endif
-    BC7ModeJoinShuffleOptions optJoin = { false };
     // blocks each Join trial's stream header had to code itself (streamheader.h coded entries)
-    size_t codedJoin = 0, codedNM = 0, codedAlt = 0, codedRot256 = 0;
+    size_t codedJoin = 0, codedHcAlpha = 0, codedHcNone = 0, codedHcAlphaBlue = 0;
     if (bIncludeJoinMode && curveTiles <= 255)    // skip mode-join shuffles if the caller has explicitly requested only mode-split
     {
-        BC7ModeJoinShuffleOptions optJoinAlt = { true };
-        (void)&optJoinAlt;
-        (void)&strat_BC7_JoinModeRot;
-
-        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &metrics, curveWidthTiles, candParams, &joinMode, &hr, &codedJoin, &joinOutputCache);
+        ADDTASK(strat_BC7_JoinMode, src, srcSize, &metrics, curveWidthTiles, candParams, &joinMode, &hr, &codedJoin, &joinOutputCache);
         // a zero hc mask would duplicate the no-statics trial, so the trial is dropped
 #if GACL_HCA || GACL_PMMT == 2
-        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &hcAlphaMetrics, curveWidthTiles, candParams, &joinModeNM, &hr, &codedNM, &joinOutputCache);
+        ADDTASK(strat_BC7_JoinMode, src, srcSize, &hcAlphaMetrics, curveWidthTiles, candParams, &joinModeHcAlpha, &hr, &codedHcAlpha, &joinOutputCache);
 #endif
 #if GACL_HCAB || GACL_PMMT == 3
-        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &hcAlphaBlueMetrics, curveWidthTiles, candParams, &joinModeRot256, &hr, &codedRot256, &joinOutputCache);
+        ADDTASK(strat_BC7_JoinMode, src, srcSize, &hcAlphaBlueMetrics, curveWidthTiles, candParams, &joinModeHcAlphaBlue, &hr, &codedHcAlphaBlue, &joinOutputCache);
 #endif
-        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &blankMetrics, curveWidthTiles, candParams, &joinModeAlt, &hr, &codedAlt, &joinOutputCache);   // HCN: no-statics trial
+        ADDTASK(strat_BC7_JoinMode, src, srcSize, &blankMetrics, curveWidthTiles, candParams, &joinModeHcNone, &hr, &codedHcNone, &joinOutputCache);   // HCN: no-statics trial
     }
     
     struct SplitStrat{
@@ -1670,10 +1651,10 @@ HRESULT ShuffleCompress_BC7(
     // (GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN)
     vector<uint8_t> joinLinear;
 #if GACL_JHF
-    if (bIncludeJoinMode && encodedStreamIsCurved && curveTiles <= 255 && (joinModeAlt.empty() || codedAlt > 0))
+    if (bIncludeJoinMode && encodedStreamIsCurved && curveTiles <= 255 && (joinModeHcNone.empty() || codedHcNone > 0))
     {
         BC7TextureMetrics linearMetrics = {};
-        strat_BC7_JoinMode(srcforUncurvedTransforms, srcSize, &optJoin, &linearMetrics, 0, candParams, &joinLinear, &hr, nullptr, &joinOutputCache);
+        strat_BC7_JoinMode(srcforUncurvedTransforms, srcSize, &linearMetrics, 0, candParams, &joinLinear, &hr, nullptr, &joinOutputCache);
         if (!SUCCEEDED(hr))
         {
             Utility::Printf(GACL_Logging_Priority_High, L"Fatal shuffle+compress error.\n");
@@ -1686,14 +1667,14 @@ HRESULT ShuffleCompress_BC7(
     // Byte remap (bc7joinremap.h): about 0.5% smaller Join streams, but the GPU Join decode loses about a fifth of its
     // throughput undoing it, so it is only tried above the default zstd level (where the encoder trades speed for size).
     // It needs the stream header (parameter 4), so it redoes the best header-capable Join trial, with each set.
-    vector<uint8_t> joinRemapAlt;
+    vector<uint8_t> joinRemap;
     BC7TextureMetrics remapMetrics = {};
     size_t codedRemap = 0;
     const bool joinRemapTried = bIncludeJoinMode && curveTiles <= 255 && requestedZstdLevel > defaultZstdLevel && BC7_ModeJoin_RemapSets() > 0;
     if (joinRemapTried)
     {
         const vector<uint8_t>* bj = nullptr;
-        for (auto b : { &joinMode, &joinModeNM, &joinModeAlt, &joinModeRot256 })
+        for (auto b : { &joinMode, &joinModeHcAlpha, &joinModeHcNone, &joinModeHcAlphaBlue })
         {
             if (b->size() > 0 && (!bj || b->size() < bj->size()))
             {
@@ -1702,8 +1683,8 @@ HRESULT ShuffleCompress_BC7(
         }
         if (bj)
         {
-            const BC7TextureMetrics& bm = bj == &joinMode ? metrics : bj == &joinModeNM ? hcAlphaMetrics :
-                bj == &joinModeRot256 ? hcAlphaBlueMetrics : blankMetrics;
+            const BC7TextureMetrics& bm = bj == &joinMode ? metrics : bj == &joinModeHcAlpha ? hcAlphaMetrics :
+                bj == &joinModeHcAlphaBlue ? hcAlphaBlueMetrics : blankMetrics;
             const unsigned sets = BC7_ModeJoin_RemapSets();
             vector<vector<uint8_t>> alts(sets + 1);
             vector<BC7TextureMetrics> altMetrics(sets + 1, bm);
@@ -1712,7 +1693,7 @@ HRESULT ShuffleCompress_BC7(
             for (unsigned s = 1; s <= sets; s++)
             {
                 altMetrics[s].JoinRemap = uint8_t(s);
-                ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &altMetrics[s], curveWidthTiles, &params, &alts[s], &hr, &altCoded[s], nullptr);
+                ADDTASK(strat_BC7_JoinMode, src, srcSize, &altMetrics[s], curveWidthTiles, &params, &alts[s], &hr, &altCoded[s], nullptr);
             }
             for (auto& task : tasks) task.join();
             if (!SUCCEEDED(hr))
@@ -1723,9 +1704,9 @@ HRESULT ShuffleCompress_BC7(
             }
             for (unsigned s = 1; s <= sets; s++)
             {
-                if (alts[s].size() > 0 && (joinRemapAlt.empty() || alts[s].size() < joinRemapAlt.size()))
+                if (alts[s].size() > 0 && (joinRemap.empty() || alts[s].size() < joinRemap.size()))
                 {
-                    joinRemapAlt.swap(alts[s]);
+                    joinRemap.swap(alts[s]);
                     remapMetrics = altMetrics[s];
                     codedRemap = altCoded[s];
                 }
@@ -1743,7 +1724,7 @@ HRESULT ShuffleCompress_BC7(
             StreamOutputCache* Cache;   // holds the candidate's stream (nullptr: the unshuffled source)
         };
         vector<Ranked> ranked = { { &noShuffle, nullptr }, { &curvedNoShuffle, &joinOutputCache }, { &joinMode, &joinOutputCache },
-            { &joinModeNM, &joinOutputCache }, { &joinModeAlt, &joinOutputCache }, { &joinModeRot256, &joinOutputCache }, { &joinLinear, &joinOutputCache } };
+            { &joinModeHcAlpha, &joinOutputCache }, { &joinModeHcNone, &joinOutputCache }, { &joinModeHcAlphaBlue, &joinOutputCache }, { &joinLinear, &joinOutputCache } };
         for (SplitStrat* ss : splitStrategies)
         {
             ranked.push_back({ &ss->DestA, &splitOutputCache });
@@ -1811,7 +1792,7 @@ HRESULT ShuffleCompress_BC7(
 
     size_t bestSize = srcSize;
     const uint8_t* best = src;
-    for (auto b : { &noShuffle, &curvedNoShuffle, &joinMode, &joinModeNM, &joinModeAlt, &joinLinear, &joinModeRot256, &joinRemapAlt })
+    for (auto b : { &noShuffle, &curvedNoShuffle, &joinMode, &joinModeHcAlpha, &joinModeHcNone, &joinLinear, &joinModeHcAlphaBlue, &joinRemap })
     {
         if (b->size() < bestSize && b->size() > 0)
         {
@@ -1858,17 +1839,17 @@ HRESULT ShuffleCompress_BC7(
     {
         Utility::Printf(L"Join (metrics)..............................................%u%c  \n", joinMode.size(), (best == joinMode.data() ? L'*' : L' '));
 #if GACL_PMMT == 2
-        Utility::Printf(L"Join (per-mode)                                               %u%c  \n", joinModeNM.size(), (best == joinModeNM.data() ? L'*' : L' '));
+        Utility::Printf(L"Join (per-mode)                                               %u%c  \n", joinModeHcAlpha.size(), (best == joinModeHcAlpha.data() ? L'*' : L' '));
 #endif
-        Utility::Printf(L"Join (hc None)                                                %u%c  \n", joinModeAlt.size(), (best == joinModeAlt.data() ? L'*' : L' '));
+        Utility::Printf(L"Join (hc None)                                                %u%c  \n", joinModeHcNone.size(), (best == joinModeHcNone.data() ? L'*' : L' '));
         if (!joinLinear.empty())
         {
             Utility::Printf(L"Join (hc None, linear)                                        %u%c  \n", joinLinear.size(), (best == joinLinear.data() ? L'*' : L' '));
         }
-        Utility::Printf(L"Join (hc Alpha+Blue)                                          %u%c  \n", joinModeRot256.size(), (best == joinModeRot256.data() ? L'*' : L' '));
+        Utility::Printf(L"Join (hc Alpha+Blue)                                          %u%c  \n", joinModeHcAlphaBlue.size(), (best == joinModeHcAlphaBlue.data() ? L'*' : L' '));
         if (joinRemapTried)
         {
-            Utility::Printf(L"Join (byte remap %u)                                          %u%c  \n", unsigned(remapMetrics.JoinRemap), joinRemapAlt.size(), (best == joinRemapAlt.data() ? L'*' : L' '));
+            Utility::Printf(L"Join (byte remap %u)                                          %u%c  \n", unsigned(remapMetrics.JoinRemap), joinRemap.size(), (best == joinRemap.data() ? L'*' : L' '));
         }
     }
     if (bIncludeSplitMode)
@@ -1914,22 +1895,22 @@ HRESULT ShuffleCompress_BC7(
             *destTransformId = GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN;
         }
         else if (best == joinMode.data() ||
-            best == joinModeNM.data() ||
-            best == joinModeAlt.data() ||
-            best == joinModeRot256.data() ||
-            best == joinRemapAlt.data())
+            best == joinModeHcAlpha.data() ||
+            best == joinModeHcNone.data() ||
+            best == joinModeHcAlphaBlue.data() ||
+            best == joinRemap.data())
         {
             const BC7TextureMetrics& bestMetrics =
                 best == joinMode.data() ? metrics :
-                best == joinModeNM.data() ? hcAlphaMetrics :
-                best == joinModeRot256.data() ? hcAlphaBlueMetrics :
-                best == joinRemapAlt.data() ? remapMetrics : blankMetrics;
+                best == joinModeHcAlpha.data() ? hcAlphaMetrics :
+                best == joinModeHcAlphaBlue.data() ? hcAlphaBlueMetrics :
+                best == joinRemap.data() ? remapMetrics : blankMetrics;
             *destTransformId = BC7_JoinNeedsHeader(bestMetrics, curveWidthTiles) ? GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX : GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN;
             const size_t bestCoded =
                 best == joinMode.data() ? codedJoin :
-                best == joinModeNM.data() ? codedNM :
-                best == joinModeRot256.data() ? codedRot256 :
-                best == joinRemapAlt.data() ? codedRemap : codedAlt;
+                best == joinModeHcAlpha.data() ? codedHcAlpha :
+                best == joinModeHcAlphaBlue.data() ? codedHcAlphaBlue :
+                best == joinRemap.data() ? codedRemap : codedHcNone;
             if (bestCoded)
             {
                 Utility::Printf(L"Header coded blocks                                           %u\n", unsigned(bestCoded));

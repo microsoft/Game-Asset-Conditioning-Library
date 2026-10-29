@@ -363,10 +363,10 @@ namespace
     }
 }
 
-bool BC7_ModeJoin_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8_t>& dest, const BC7ModeJoinShuffleOptions& opt, const BC7TextureMetrics& metrics)
+bool BC7_ModeJoin_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8_t>& dest, const BC7TextureMetrics& metrics)
 {
     const int config = BC7_ModeJoin_FieldConfig();
-    if (opt.AltEncode || config < 0 || BC7_ModeJoin_LayoutFieldConfig() != 0 || (srcSize % 16) != 0)
+    if (config < 0 || BC7_ModeJoin_LayoutFieldConfig() != 0 || (srcSize % 16) != 0)
     {
         return false;
     }
@@ -541,8 +541,7 @@ bool BC7_JoinStream_Decode(const uint8_t* src, size_t srcSize, uint8_t transform
     }
 
     std::vector<uint8_t> reordered45;
-    const BC7ModeJoinShuffleOptions opt = { false };
-    if (!BC7_ModeJoin_Reverse(join, joinSize, reordered45, opt, metrics))
+    if (!BC7_ModeJoin_Reverse(join, joinSize, reordered45, metrics))
     {
         return false;
     }
@@ -588,7 +587,6 @@ size_t BC7_ModeJoin_ReverseSelfTest()
         }
     }
 
-    const BC7ModeJoinShuffleOptions opt = { false };
     if (BC7_ModeJoin_FieldConfig() < 0)
     {
         return failures;
@@ -621,9 +619,8 @@ size_t BC7_ModeJoin_ReverseSelfTest()
                 metrics.JoinModeMask[mode] = uint8_t(rng());
             }
         }
-        BC7ModeJoinShuffleOptions topt = opt;
-        BC7_ModeJoin_Transform(blocks.data(), blocks.size(), shuffled, topt, metrics, ctrl);
-        if (!BC7_ModeJoin_Reverse(shuffled.data(), shuffled.size(), restored, opt, metrics))
+        BC7_ModeJoin_Transform(blocks.data(), blocks.size(), shuffled, metrics, ctrl);
+        if (!BC7_ModeJoin_Reverse(shuffled.data(), shuffled.size(), restored, metrics))
         {
             failures += 9 * kBlocksPerMode;
             continue;

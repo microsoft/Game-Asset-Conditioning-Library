@@ -8,9 +8,19 @@
 //
 //-------------------------------------------------------------------------------------
 
-// The BC7 Join fast paths compiled a second time with every field transform off. What remains is the
-// pure bit layout (a permutation per mode and statics mask), which BC7_ModeJoin_Reverse probes to build its inverse.
-// The field transforms are undone separately (bc7modejoinreverse.cpp).
+// The BC7 Join fast paths compiled a second time with every field transform off. What remains is the pure bit layout
+// (per mode and statics mask; mostly a bit permutation), which BC7_ModeJoin_Reverse probes to build its inverse. The
+// field transforms are undone separately (bc7modejoinreverse.cpp).
+//
+// This is what keeps the CPU Join decoder in sync with the encoder: the decoder's inverse layout is derived from the
+// encoder's own fast paths, so a Join layout change needs no CPU decoder change (the hand-written op lists that used to
+// decode Join fell out of date with the fast paths).
+//
+// The field transforms are compile-time switches inside the fast paths, so a layout-only copy needs a second compile:
+// this file turns the switches off and includes bc7modejoin.cpp, where the fast paths live, inside namespace
+// BC7JoinLayout, which gives the copy its own symbols. Only the copy's BC7_ModeJoin_Shuffle_Fast and
+// BC7_ModeJoin_FieldConfig are used. A new field-transform switch in bc7modejoin.cpp needs a matching line here;
+// BC7_ModeJoin_ReverseSelfTest and the Join round-trip tests fail if the decoder and encoder drift apart.
 
 #include "gacl.h"
 #include "../BCnBlockDefs.h"
@@ -86,7 +96,7 @@ namespace BC7JoinLayout
 
 void BC7_ModeJoin_LayoutShuffle(unsigned mode, const void* src, void* dest, const BC7TextureMetrics& metrics)
 {
-    BC7JoinLayout::BC7_ModeJoin_Shuffle_Fast[mode][0](src, dest, metrics);
+    BC7JoinLayout::BC7_ModeJoin_Shuffle_Fast[mode](src, dest, metrics);
 }
 
 int BC7_ModeJoin_LayoutFieldConfig()
