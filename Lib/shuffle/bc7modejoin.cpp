@@ -11,6 +11,7 @@
 #include "gacl.h"
 #include "../BCnBlockDefs.h"
 #include "bc7.h"
+#include "bc7anchors.h"
 
 #include <intrin.h>
 #include <immintrin.h>
@@ -23,6 +24,10 @@
 namespace 
 {
 
+// _pdep_u64 deposit masks that interleave n endpoint fields bit by bit (the non-static fields of the Join layouts): bit b of
+// maskTable[n][0] is set when b % n == 0, so field i's bits go to bits i, i + n, i + 2n, ... (mask << i). [1] continues the
+// pattern into a second 64-bit word (bit b set when (64 + b) % n == 0) for the layouts that overflow 64 bits; rows 15, 10 and
+// 14 (Modes 2, 3 and 7) read it. Row 0 is unused.
 const uint64_t maskTable[17][2] = {
     {0b0000000000000000000000000000000000000000000000000000000000000000, // 0 non-static bits
      0b0000000000000000000000000000000000000000000000000000000000000000},
@@ -64,7 +69,7 @@ const uint64_t maskTable[17][2] = {
      0b0000000100000000000100000000000100000000000100000000000100000000},
 
     {0b0000000000010000000000001000000000000100000000000010000000000001, // 13 non-static bits
-	 0b0000000000001000000000010000000000001000000000000100000000000010}, 
+	 0b0000000000100000000000010000000000001000000000000100000000000010}, 
 
     {0b0000000100000000000001000000000000010000000000000100000000000001, // 14 non-static bits
 	 0b0100000000000001000000000000010000000000000100000000000001000000},
@@ -228,6 +233,7 @@ static inline void BC7_ModeJoin_RawPut(uint64_t* r, unsigned p, unsigned w, uint
 static inline void BC7_ModeJoin_RawPre(uint64_t* r, unsigned mode, unsigned statics)
 {
 #if GACL_IEDL
+    // Endpoint fields of each mode: channel c's endpoint k at bit kStart + kW * (c * kEpc + k), kEpc endpoints per channel
     static const uint8_t kStart[8] = { 5, 8, 9, 10, 8, 8, 7, 14 }, kW[8] = { 4, 6, 5, 7, 5, 7, 7, 5 }, kEpc[8] = { 6, 4, 6, 4, 2, 2, 2, 4 };
     if (mode == 5 || mode == 6 || (GACL_IEDX & (1u << mode)))
     {
@@ -273,6 +279,7 @@ static inline void BC7_ModeJoin_RawPre(uint64_t* r, unsigned mode, unsigned stat
 #if GACL_IMS
     if (((GACL_IMSM >> mode) & 1) && (mode == 5 || mode == 6 || (GACL_IEDX & (1u << mode))))
     {
+        // the endpoint fields of kStart / kW / kEpc (which only exist with IEDL)
         static const uint8_t kStartM[8] = { 5, 8, 9, 10, 8, 8, 7, 14 }, kWM[8] = { 4, 6, 5, 7, 5, 7, 7, 5 }, kEpcM[8] = { 6, 4, 6, 4, 2, 2, 2, 4 };
         const unsigned S = mode < 4 ? (statics & 0x3f) : statics, w = kWM[mode];
         const unsigned chans = (mode == 7 && (GACL_IMS & 2)) ? 4 : 3;
@@ -452,7 +459,8 @@ static inline uint64_t BC7_ModeJoin_IndexResidual(uint64_t v, unsigned bits, uin
     return out;
 }
 #if GACL_IIPM & 0x1F0
-// BC7 partition (2 bits per pixel, pixel i at bits 2i) and anchor-pixel masks for 2 and 3 subsets
+// BC7 partition tables of the 2- and 3-subset modes, by partition number: the subset of pixel i at bits 2i (the anchor pixel
+// masks, kBC7Anchor2/3, are in bc7anchors.h)
 static const uint32_t kBC7Part2[64] = {
     0x50505050, 0x40404040, 0x54545454, 0x54505040, 0x50404000, 0x55545450, 0x55545040, 0x54504000,
     0x50400000, 0x55555450, 0x55544000, 0x54400000, 0x55555440, 0x55550000, 0x55555500, 0x55000000,
@@ -472,18 +480,6 @@ static const uint32_t kBC7Part3[64] = {
     0x500AA550, 0xAAAA4444, 0x66660000, 0xA5A0A5A0, 0x50A050A0, 0x69286928, 0x44AAAA44, 0x66666600,
     0xAA444444, 0x54A854A8, 0x95809580, 0x96969600, 0xA85454A8, 0x80959580, 0xAA141414, 0x96960000,
     0xAAAA1414, 0xA05050A0, 0xA0A5A5A0, 0x96000000, 0x40804080, 0xA9A8A9A8, 0xAAAAAA44, 0x2A4A5254,
-};
-static const uint16_t kBC7Anchor2[64] = {
-    0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001,
-    0x8001, 0x0005, 0x0101, 0x0005, 0x0005, 0x0101, 0x0101, 0x8001, 0x0005, 0x0101, 0x0005, 0x0005, 0x0101, 0x0101, 0x0005, 0x0005,
-    0x8001, 0x8001, 0x0041, 0x0101, 0x0005, 0x0101, 0x8001, 0x8001, 0x0005, 0x0101, 0x0005, 0x0005, 0x0005, 0x8001, 0x8001, 0x0041,
-    0x0041, 0x0005, 0x0041, 0x0101, 0x8001, 0x8001, 0x0005, 0x0005, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x0005, 0x0005, 0x8001,
-};
-static const uint16_t kBC7Anchor3[64] = {
-    0x8009, 0x0109, 0x8101, 0x8009, 0x8101, 0x8009, 0x8009, 0x8101, 0x8101, 0x8101, 0x8041, 0x8041, 0x8041, 0x8021, 0x8009, 0x0109,
-    0x8009, 0x0109, 0x8101, 0x8009, 0x8009, 0x0109, 0x8041, 0x0501, 0x0029, 0x8101, 0x0141, 0x0441, 0x8101, 0x8021, 0x8401, 0x8101,
-    0x8101, 0x8009, 0x8009, 0x0421, 0x0441, 0x0501, 0x0301, 0x8401, 0x8041, 0x8009, 0x8101, 0x8021, 0x8009, 0x8041, 0x8041, 0x8101,
-    0x8009, 0x8009, 0x8021, 0x8021, 0x8021, 0x8101, 0x8021, 0x8401, 0x8021, 0x8401, 0x8101, 0xA001, 0x8009, 0x9001, 0x8009, 0x0109,
 };
 // Index bits [ipos, ipos + ilen) of raw[1] -> residuals; partition id at raw[0] bits [pshift, pshift + 6) & pmask.
 static inline void BC7_ModeJoin_IndexResidualPart(uint64_t* raw, unsigned pshift, unsigned pmask, const uint32_t* part, const uint16_t* anchors, unsigned ipos, unsigned ilen, unsigned bits)
@@ -2038,24 +2034,18 @@ static_assert(_countof(BC7_ModeJoin_Shuffle_Fast) == 8, "BC7_ModeJoin_Shuffle_Fa
 #define GACL_JFP7 0x20200
 #endif
 
-// JFP: anchor-texel masks (bit t = texel t) of the 2-subset partitions (kBC7Anchor2 only exists with IIP)
-static const uint16_t kJfpAnchor2[64] = {
-    0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001,
-    0x8001, 0x0005, 0x0101, 0x0005, 0x0005, 0x0101, 0x0101, 0x8001, 0x0005, 0x0101, 0x0005, 0x0005, 0x0101, 0x0101, 0x0005, 0x0005,
-    0x8001, 0x8001, 0x0041, 0x0101, 0x0005, 0x0101, 0x8001, 0x8001, 0x0005, 0x0101, 0x0005, 0x0005, 0x0005, 0x8001, 0x8001, 0x0041,
-    0x0041, 0x0005, 0x0041, 0x0101, 0x8001, 0x8001, 0x0005, 0x0005, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x0005, 0x0005, 0x8001,
-};
-
-// JFP texel scan orders: raster texel index per scan position (all start at the anchor texel 0)
+// JFP texel scan orders: raster texel index per scan position (all start at the anchor texel 0). A JFP setting v selects
+// row ((v >> 8) & 7) | ((v >> 16) & 3) << 3 (BC7_ModeJoin_IndexFieldScan); the defaults use rows 6 (GACL_JFP1), 14
+// (GACL_JFP3 and GACL_JFP5), 15 (GACL_JFP4), 16 (GACL_JFP6) and 18 (GACL_JFP7). Rows 19-31 are zero, not valid scans.
 static const uint8_t kJfpScan[32][16] = {
-    { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },   // raster
-    { 0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15 },   // column-major
-    { 0, 1, 4, 5, 2, 3, 6, 7, 8, 9, 12, 13, 10, 11, 14, 15 },   // Z-order (2x2 quads)
-    { 0, 1, 2, 3, 7, 6, 5, 4, 8, 9, 10, 11, 15, 14, 13, 12 },   // serpentine rows
-    { 0, 1, 2, 3, 4, 8, 12, 5, 6, 7, 9, 10, 11, 13, 14, 15 },   // edges first (row 0, column 0), then interior raster
-    { 0, 5, 6, 7, 9, 10, 11, 13, 14, 15, 1, 2, 3, 4, 8, 12 },   // interior raster first, then edges
-    { 0, 4, 1, 5, 2, 6, 3, 7, 8, 12, 9, 13, 10, 14, 11, 15 },   // row pairs, column-major within (2x4 strips)
-    { 0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15 },   // column pairs (two 2-wide strips)
+    { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },   // 0: raster
+    { 0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15 },   // 1: column-major
+    { 0, 1, 4, 5, 2, 3, 6, 7, 8, 9, 12, 13, 10, 11, 14, 15 },   // 2: Z-order (2x2 quads)
+    { 0, 1, 2, 3, 7, 6, 5, 4, 8, 9, 10, 11, 15, 14, 13, 12 },   // 3: serpentine rows
+    { 0, 1, 2, 3, 4, 8, 12, 5, 6, 7, 9, 10, 11, 13, 14, 15 },   // 4: edges first (row 0, column 0), then interior raster
+    { 0, 5, 6, 7, 9, 10, 11, 13, 14, 15, 1, 2, 3, 4, 8, 12 },   // 5: interior raster first, then edges
+    { 0, 4, 1, 5, 2, 6, 3, 7, 8, 12, 9, 13, 10, 14, 11, 15 },   // 6: row pairs, column-major within (2x4 strips)
+    { 0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15 },   // 7: column pairs (two 2-wide strips)
     { 0, 1, 2, 3, 4, 8, 12, 5, 9, 13, 6, 10, 14, 7, 11, 15 },   // 8: row 0, column 0, interior column-major
     { 0, 4, 8, 12, 1, 2, 3, 5, 9, 13, 6, 10, 14, 7, 11, 15 },   // 9: column 0, row 0, interior column-major
     { 0, 4, 8, 12, 1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15 },   // 10: column 0, row 0, interior raster
@@ -2122,8 +2112,9 @@ void BC7_ModeJoin_IndexFieldPermuteScan(uint64_t* x, unsigned mode, uint64_t v64
     }
     else if (mode == 1 || mode == 3 || mode == 7)
     {
-        // rotated layout: Mode 1 = P bits 0-1, indices 2-47, partition 122-127; Modes 3/7 = partition 0-5, P bits 6-9, indices 10-39
-        anchors = kJfpAnchor2[mode == 1 ? unsigned(x[1] >> 58) : unsigned(x[0] & 63)];
+        // rotated layout: Mode 1 = P bits 0-1, indices 2-47, partition 122-127; Modes 3/7 = partition 0-5, P bits 6-9, indices 10-39.
+        // The field positions depend on the partition's second anchor (its anchor class): the GPU has a T row per class.
+        anchors = kBC7Anchor2[mode == 1 ? unsigned(x[1] >> 58) : unsigned(x[0] & 63)];
         gs[0] = mode == 1 ? 2 : 10; gw[0] = mode == 1 ? 3 : 2; ga[0] = gw[0] - 1;
 #if GACL_JBO == 4
         if ((GACL_JBOM >> mode) & 1)
@@ -2360,7 +2351,9 @@ void BC7_ModeJoin_Transform(const uint8_t* src, size_t srcSize, std::vector<uint
         uint64_t ds[2] = { (d[0] << sh) | (d[1] >> (64 - sh)) , (d[1] << sh) | (d[0] >> (64 - sh)) };
 #endif
 #if GACL_JBO == 4
-        // After the 24-bit rotation every mode's index region starts the block and the mode byte is byte 15
+        // After the 24-bit rotation the index bits sit low in the block and the mode byte is byte 15: bits [kIdxLo,
+        // kIdxHi) hold the index bits and the P bits stored just below them (Mode 0: its last 3, Modes 1/3/7: all), and
+        // bit lo + k swaps with bit hi - 1 - k (BC7_ModeJoin_Reverse repeats the table)
         if (mode < 8 && ((GACL_JBOM >> mode) & 1))
         {
             static const uint8_t kIdxLo[8] = { 0, 0, 1, 6, 0, 0, 1, 6 }, kIdxHi[8] = { 48, 48, 30, 40, 78, 62, 64, 40 };

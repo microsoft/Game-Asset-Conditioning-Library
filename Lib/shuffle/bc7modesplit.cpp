@@ -11,6 +11,7 @@
 #include "gacl.h"
 #include "../BCnBlockDefs.h"
 #include "bc7.h"
+#include "bc7anchors.h"
 
 #include <intrin.h>
 #include <immintrin.h>
@@ -4073,20 +4074,6 @@ void BC7_ModeSplit_Shuffle_Slow(uint8_t mode, const void* src, BC7_ModeSplitBuff
 // The Mode 4 2-bit and Mode 6 residual fields are then stored bit reversed.
 namespace SplitIndexPrediction
 {
-    // Anchor pixel masks of the 2 / 3 subset partitions (bit 0 = the subset 0 anchor)
-    const uint16_t kAnchor2[64] = {
-        0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001,
-        0x8001, 0x0005, 0x0101, 0x0005, 0x0005, 0x0101, 0x0101, 0x8001, 0x0005, 0x0101, 0x0005, 0x0005, 0x0101, 0x0101, 0x0005, 0x0005,
-        0x8001, 0x8001, 0x0041, 0x0101, 0x0005, 0x0101, 0x8001, 0x8001, 0x0005, 0x0101, 0x0005, 0x0005, 0x0005, 0x8001, 0x8001, 0x0041,
-        0x0041, 0x0005, 0x0041, 0x0101, 0x8001, 0x8001, 0x0005, 0x0005, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x0005, 0x0005, 0x8001,
-    };
-    const uint16_t kAnchor3[64] = {
-        0x8009, 0x0109, 0x8101, 0x8009, 0x8101, 0x8009, 0x8009, 0x8101, 0x8101, 0x8101, 0x8041, 0x8041, 0x8041, 0x8021, 0x8009, 0x0109,
-        0x8009, 0x0109, 0x8101, 0x8009, 0x8009, 0x0109, 0x8041, 0x0501, 0x0029, 0x8101, 0x0141, 0x0441, 0x8101, 0x8021, 0x8401, 0x8101,
-        0x8101, 0x8009, 0x8009, 0x0421, 0x0441, 0x0501, 0x0301, 0x8401, 0x8041, 0x8009, 0x8101, 0x8021, 0x8009, 0x8041, 0x8041, 0x8101,
-        0x8009, 0x8009, 0x8021, 0x8021, 0x8021, 0x8101, 0x8021, 0x8401, 0x8021, 0x8401, 0x8101, 0xA001, 0x8009, 0x9001, 0x8009, 0x0109,
-    };
-
     inline uint64_t Get(const uint64_t* x, unsigned p, unsigned w)
     {
         const uint64_t v = p >= 64 ? x[1] >> (p - 64) : ((x[0] >> p) | (p ? x[1] << (64 - p) : 0));
@@ -4207,14 +4194,14 @@ namespace SplitIndexPrediction
         _BitScanForward(&mode, uint8_t(x[0]) | 0x100u);
         switch (mode)
         {
-        case 0: Field(x, 83, 3, kAnchor3[Get(x, 1, 4)], false, inverse); break;
-        case 1: Field(x, 82, 3, kAnchor2[Get(x, 2, 6)], false, inverse); break;
-        case 2: Field(x, 99, 2, kAnchor3[Get(x, 3, 6)], false, inverse); break;
-        case 3: Field(x, 98, 2, kAnchor2[Get(x, 4, 6)], false, inverse); break;
+        case 0: Field(x, 83, 3, kBC7Anchor3[Get(x, 1, 4)], false, inverse); break;
+        case 1: Field(x, 82, 3, kBC7Anchor2[Get(x, 2, 6)], false, inverse); break;
+        case 2: Field(x, 99, 2, kBC7Anchor3[Get(x, 3, 6)], false, inverse); break;
+        case 3: Field(x, 98, 2, kBC7Anchor2[Get(x, 4, 6)], false, inverse); break;
         case 4: Field(x, 50, 2, 1, true, inverse); Field(x, 81, 3, 1, false, inverse); break;
         case 5: Field(x, 66, 2, 1, false, inverse); Field(x, 97, 2, 1, false, inverse); break;
         case 6: Field(x, 65, 4, 1, true, inverse); break;
-        case 7: Field(x, 98, 2, kAnchor2[Get(x, 8, 6)], false, inverse); break;
+        case 7: Field(x, 98, 2, kBC7Anchor2[Get(x, 8, 6)], false, inverse); break;
         default: break;
         }
     }

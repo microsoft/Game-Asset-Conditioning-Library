@@ -54,6 +54,9 @@
     <ClInclude Include="..\..\lib\shuffle\bc7joinremap.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\lib\shuffle\bc7anchors.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\lib\RDO_ML\KmeansRDO.h">
       <Filter>Header Files</Filter>
     </ClInclude>

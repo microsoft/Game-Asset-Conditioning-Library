@@ -18,7 +18,9 @@
 //  - residuals are folded around the prediction (0, -1, +1, -2, +2, ... then the one-sided remainder)
 // The Mode 4 2-bit and Mode 6 residual fields are stored bit reversed.
 
-// Anchor pixel masks of the 2 / 3 subset partitions (bit 0 = the subset 0 anchor)
+// Anchor pixel masks of the BC7 2 / 3 subset partitions, by partition number (bit i = pixel i): pixel 0 (the subset 0 anchor)
+// and the BC7 fix-up pixels of subsets 1 and 2, whose indices are stored with one bit fewer. BC7JoinDecode.hlsli also takes
+// the Join anchor class of Modes 1/3/7 from kIndexPredictionAnchor2.
 static const uint kIndexPredictionAnchor2[64] =
 {
     0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001,

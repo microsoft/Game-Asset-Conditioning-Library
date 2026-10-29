@@ -761,6 +761,8 @@ bool Game::RunBC7JoinTest(GTestParameters const& params)
     }
     else if (params.BC7Join.masks == 2)
     {
+        // a different mask per mode (bits 2c / 2c + 1 flag channel c's E0s / E1s): none, the E0s, the E1s, every color
+        // field, then mixed channels
         const uint8_t modeMasks[8] = { 0x00, 0x15, 0x2a, 0x3f, 0x0b, 0x34, 0x1c, 0xe3 };
         metrics.JoinModeMasks = true;
         memcpy(metrics.JoinModeMask, modeMasks, sizeof(modeMasks));

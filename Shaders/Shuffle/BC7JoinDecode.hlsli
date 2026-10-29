@@ -33,7 +33,8 @@
 groupshared uint gsJoinMask[8];     // (Statics | LowEntropy) Join mask of each mode
 groupshared uint gsJoinT[544];      // T rows (bytes), 17 x 128: raw bit r is stored bit T(r)
 
-// First T row of each mode (Modes 1/3/7 have one per anchor class) and the mode of each row
+// First T row of each mode (Modes 1/3/7 have one per anchor class, 0-3 for the partition's second anchor texel 15 / 2 / 8 / 6)
+// and the mode of each row
 static const uint kJoinRowBase[8] = { 0, 1, 5, 6, 10, 11, 12, 13 };
 static const uint kJoinRowMode[17] = { 0, 1, 1, 1, 1, 2, 3, 3, 3, 3, 4, 5, 6, 7, 7, 7, 7 };
 

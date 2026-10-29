@@ -16,6 +16,7 @@
 #include "gacl.h"
 #include "../BCnBlockDefs.h"
 #include "bc7.h"
+#include "bc7anchors.h"
 #include "streamheader.h"
 #include "bcnex.h"
 #include "bc7joinblockcode.h"
@@ -240,20 +241,6 @@ namespace
         return out;
     }
 
-    // Anchor-pixel masks (bit i = pixel i) of the 2- and 3-subset partitions
-    const uint16_t kAnchor2[64] = {
-        0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001,
-        0x8001, 0x0005, 0x0101, 0x0005, 0x0005, 0x0101, 0x0101, 0x8001, 0x0005, 0x0101, 0x0005, 0x0005, 0x0101, 0x0101, 0x0005, 0x0005,
-        0x8001, 0x8001, 0x0041, 0x0101, 0x0005, 0x0101, 0x8001, 0x8001, 0x0005, 0x0101, 0x0005, 0x0005, 0x0005, 0x8001, 0x8001, 0x0041,
-        0x0041, 0x0005, 0x0041, 0x0101, 0x8001, 0x8001, 0x0005, 0x0005, 0x8001, 0x8001, 0x8001, 0x8001, 0x8001, 0x0005, 0x0005, 0x8001,
-    };
-    const uint16_t kAnchor3[64] = {
-        0x8009, 0x0109, 0x8101, 0x8009, 0x8101, 0x8009, 0x8009, 0x8101, 0x8101, 0x8101, 0x8041, 0x8041, 0x8041, 0x8021, 0x8009, 0x0109,
-        0x8009, 0x0109, 0x8101, 0x8009, 0x8009, 0x0109, 0x8041, 0x0501, 0x0029, 0x8101, 0x0141, 0x0441, 0x8101, 0x8021, 0x8401, 0x8101,
-        0x8101, 0x8009, 0x8009, 0x0421, 0x0441, 0x0501, 0x0301, 0x8401, 0x8041, 0x8009, 0x8101, 0x8021, 0x8009, 0x8041, 0x8041, 0x8101,
-        0x8009, 0x8009, 0x8021, 0x8021, 0x8021, 0x8101, 0x8021, 0x8401, 0x8021, 0x8401, 0x8101, 0xA001, 0x8009, 0x9001, 0x8009, 0x0109,
-    };
-
     // Endpoint fields: channel c, endpoint k at start + w * (c * epc + k)
     struct EndpointLayout { uint8_t Start, W, Epc; };
     const EndpointLayout kEndpoints[8] = { { 5, 4, 6 }, { 8, 6, 4 }, { 9, 5, 6 }, { 10, 7, 4 }, { 8, 5, 2 }, { 8, 7, 2 }, { 7, 7, 2 }, { 14, 5, 4 } };
@@ -351,14 +338,14 @@ namespace
         const auto Field = [&](unsigned p, unsigned len, unsigned bits, uint32_t anchors) { Put(x, p, len, IndexInverse(Get(x, p, len), bits, anchors)); };
         switch (mode)
         {
-        case 0: Field(83, 45, 3, kAnchor3[Get(x, 1, 4)]); break;
-        case 1: Field(82, 46, 3, kAnchor2[Get(x, 2, 6)]); break;
-        case 2: Field(99, 29, 2, kAnchor3[Get(x, 3, 6)]); break;
-        case 3: Field(98, 30, 2, kAnchor2[Get(x, 4, 6)]); break;
+        case 0: Field(83, 45, 3, kBC7Anchor3[Get(x, 1, 4)]); break;
+        case 1: Field(82, 46, 3, kBC7Anchor2[Get(x, 2, 6)]); break;
+        case 2: Field(99, 29, 2, kBC7Anchor3[Get(x, 3, 6)]); break;
+        case 3: Field(98, 30, 2, kBC7Anchor2[Get(x, 4, 6)]); break;
         case 4: Field(50, 31, 2, 1); Field(81, 47, 3, 1); break;
         case 5: Field(66, 31, 2, 1); Field(97, 31, 2, 1); break;
         case 6: Field(65, 63, 4, 1); break;
-        default: Field(98, 30, 2, kAnchor2[Get(x, 8, 6)]); break;
+        default: Field(98, 30, 2, kBC7Anchor2[Get(x, 8, 6)]); break;
         }
     }
 }
@@ -403,7 +390,8 @@ bool BC7_ModeJoin_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8_
         }
         if (idxRevModes)
         {
-            // index bits [lo, hi) stored reversed; the mode byte (byte 15) is untouched
+            // index bits [lo, hi) stored reversed (BC7_ModeJoin_Transform's ranges, which include the P bits stored just
+            // below the indices); the mode byte (byte 15) is untouched
             unsigned long m;
             _BitScanForward(&m, (s[1] >> 56) | 0x100u);
             if (m < 8 && ((idxRevModes >> m) & 1))

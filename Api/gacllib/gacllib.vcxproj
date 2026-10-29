@@ -143,6 +143,7 @@
     <ClInclude Include="..\..\Lib\shuffle\bcnexblockcode.h" />
     <ClInclude Include="..\..\Lib\shuffle\bc7joinblockcode.h" />
     <ClInclude Include="..\..\Lib\shuffle\bc7joinremap.h" />
+    <ClInclude Include="..\..\Lib\shuffle\bc7anchors.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\Helpers\FileUtility.cpp" />

@@ -43,7 +43,8 @@ namespace
         return p - a >= 0 ? p - a : p + a;
     }
 
-    // ramp order: 8-value mode (e0 > e1) e0, 2..7, e1; 6-value mode e0, 2..5, e1, then the 0 / 255 constants
+    // ramp order: 8-value mode (e0 > e1) e0, 2..7, e1; 6-value mode e0, 2..5, e1, then the 0 / 255 constants. kPos maps an
+    // index to its ramp position, kIdx a ramp position to its index
     const uint8_t kPos8[8] = { 0, 7, 1, 2, 3, 4, 5, 6 }, kIdx8[8] = { 0, 2, 3, 4, 5, 6, 7, 1 };
     const uint8_t kPos6[8] = { 0, 5, 1, 2, 3, 4, 6, 7 }, kIdx6[8] = { 0, 2, 3, 4, 5, 1, 6, 7 };
 
@@ -83,7 +84,7 @@ namespace
     }
 
     // BC1-style color half (bytes 0-3 two 5:6:5 endpoints, bytes 4-7 sixteen 2-bit indices). Ramp order: four-color
-    // mode (BC3, or BC1 with c0 > c1) c0, 2, 3, c1; three-color mode c0, 2, c1, then 3 (black).
+    // mode (BC3, or BC1 with c0 > c1) c0, 2, 3, c1; three-color mode c0, 2, c1, then 3 (black). kPos / kIdx as above.
     const uint8_t kPos4[4] = { 0, 3, 1, 2 }, kIdx4[4] = { 0, 2, 3, 1 };
     const uint8_t kPos3[4] = { 0, 2, 1, 3 };    // its own inverse
 

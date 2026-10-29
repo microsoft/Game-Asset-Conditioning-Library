@@ -684,6 +684,7 @@ uint4 DecodeBody(inout uint bodyPos, bool join, uint G, uint bs, inout bool ok)
 // groupThread is the group's first thread.
 void ParseHeader(uint groupThread)
 {
+    // GACL_SHUFFLE_TRANSFORM of each header transform code (kStreamHeaderTransforms, streamheader.h)
     static const uint kTransforms[8] = { TRANSFORM_BC7_JOIN, TRANSFORM_BC1_224, TRANSFORM_BC1_44, TRANSFORM_BC3_116224,
         TRANSFORM_BC3_664, TRANSFORM_BC4_116, TRANSFORM_BC5_116116, TRANSFORM_BC5_2266 };
 
