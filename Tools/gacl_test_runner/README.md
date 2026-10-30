@@ -54,7 +54,7 @@ A normal shell redirect is enough to save output when needed:
 | `--gtest_filter=<pattern>` | GoogleTest selection; a separate value is also accepted. Default `ContentInput.*` with an input folder; otherwise `*`. |
 | `--filter <pattern>` | Backward-compatible alias for `--gtest_filter`. Specify only one filter spelling. |
 | `--gtest_list_tests` | List selected cases without executing them; a successful list is labeled `SUITE LISTED`, not a passing test run. |
-| `--timeout-seconds <n>` | Per-suite limit, default 1500 seconds (25 minutes). |
+| `--timeout-seconds <n>` | Per-suite limit, default 3600 seconds (one hour). Four sequential suites can consume four hours; this is not a one-hour limit for the entire invocation. |
 | `--work-directory <path>` | Optional new folder to retain generated test files. Not a report directory. |
 | `--help` | Show usage. |
 

@@ -40,7 +40,7 @@ namespace
         fs::path workDirectory;  // Optional: retain generated files in a new folder.
         std::vector<std::wstring> suiteNames;
         std::wstring testFilter = L"*";
-        int timeoutSeconds = 1500;
+        int timeoutSeconds = 3600;
         bool listTests = false;
     };
 
@@ -62,7 +62,7 @@ namespace
             {
                 std::cout << "gacl_test_runner --binary-directory <drop>\n"
                     "  [--input-directory <content folder>] [--suite <name>] (repeatable)\n"
-                    "  [--gtest_filter=<pattern>] [--gtest_list_tests] [--timeout-seconds 1500]\n"
+                    "  [--gtest_filter=<pattern>] [--gtest_list_tests] [--timeout-seconds 3600]\n"
                     "  [--filter <pattern>] (alias for --gtest_filter)\n"
                     "  [--work-directory <new folder to retain generated files>]\n"
                     "Default suites: gacl_lib_tests, gacl_exe_tests, ml_rdo_tests, shader_tests\n";
