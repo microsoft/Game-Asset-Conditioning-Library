@@ -184,7 +184,8 @@ void
 
 /// <summary>
 /// Logging callback for routing debug\warning\error messages to content pipeline handers.  
-/// Default handler will route messages to OutputDebugString.  The gacl.exe front end helper demonstrates
+/// Default handler will route medium and high priority messages to OutputDebugString, and low priority messages only while
+/// a debugger is attached.  The gacl.exe front end helper demonstrates
 /// overriding to route messages to standard command line output streams based on message priority and verbosity settings.
 /// </summary>
 /// <param name="callback">Routine to receive log messages.  Pass nullptr to disable logging.</param>

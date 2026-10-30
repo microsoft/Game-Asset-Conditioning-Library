@@ -76,12 +76,20 @@ struct BC7TextureMetrics
     uint8_t Statics;
     uint8_t LowEntropy;
 
+    // Join per-mode (Statics | LowEntropy) masks; when JoinModeMasks is set they replace the group-wide mask
+    bool JoinModeMasks;
+    uint8_t JoinModeMask[8];
+
+    // Join byte remap (bc7joinremap.h): 0 = none, s = table set s - 1 (1..BC7_ModeJoin_RemapSets()); nonzero needs the stream header.
+    // The BC7 shuffle only tries it above the default zstd level: it costs the GPU Join decode a fifth of its throughput.
+    uint8_t JoinRemap;
 };
 
-struct BC7ModeJoinShuffleOptions
+// The Join (Statics | LowEntropy) mask the blocks of a mode are shuffled with.
+inline uint8_t BC7_JoinModeMask(const BC7TextureMetrics& m, size_t mode)
 {
-    bool AltEncode;
-};
+    return m.JoinModeMasks ? m.JoinModeMask[mode] : uint8_t(m.Statics | m.LowEntropy);
+}
 
 // BC7 shuffle tries a variety of transforms and keeps the best.
 // Since the compress is already done as part of transform selection, a "transform-only" version of BC7 is not included
@@ -89,9 +97,37 @@ struct BC7ModeJoinShuffleOptions
 void BC7_Mode45_ReorderRGBA(const uint8_t* src, size_t srcSize, std::vector<uint8_t>& dest);
 void BC7_CollectTextureMetrics(const uint8_t* src, size_t srcSize, BC7TextureMetrics& m);
 
-void BC7_ModeJoin_RotateColors(const uint8_t* src, size_t srcSize, std::vector<uint8_t>& dest, bool altEncoding, size_t regionSize);
-void BC7_ModeJoin_Transform(const uint8_t* src, size_t srcSize, std::vector<uint8_t>& dest, BC7ModeJoinShuffleOptions& opt, BC7TextureMetrics& metrics, std::vector<uint8_t>& controlBytes);
-void BC7_ModeJoin_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8_t>& dest, BC7ModeJoinShuffleOptions& opt, BC7TextureMetrics& metrics, std::vector<uint8_t>& controlBytes);
+void BC7_ModeJoin_Transform(const uint8_t* src, size_t srcSize, std::vector<uint8_t>& dest, BC7TextureMetrics& metrics, std::vector<uint8_t>& controlBytes);
+// Exact inverse of BC7_ModeJoin_Transform for the mask the stream was shuffled with (bc7modejoinreverse.cpp). Returns false
+// when this build's Join field transforms have no reverse (BC7_ModeJoin_FieldConfig() < 0) or for data that isn't a
+// Join stream of this mask.
+bool BC7_ModeJoin_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8_t>& dest, const BC7TextureMetrics& metrics);
+// Decodes a complete GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN or ..._BC7_EX Join stream (after zstd decompression) back to
+// BC7 blocks (BC7_EX streams of a curve-only header are BCnEx_Decode's). Curved streams are uncurved unless uncurve is
+// false; curveWidthTilesOut receives the curve width parameter.
+bool BC7_JoinStream_Decode(const uint8_t* src, size_t srcSize, uint8_t transformId, std::vector<uint8_t>& dest, bool uncurve = true, uint8_t* curveWidthTilesOut = nullptr);
+// Encodes BC7 blocks the way a Join candidate of the BC7 shuffle is (Mode 4/5 RGBA reorder, Join transform with the
+// metrics' masks, stream header): a headerless GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN stream when no parameter is
+// needed, otherwise a ..._BC7_EX stream (transformIdOut). src must already be space curved when curveWidthTiles
+// (texture width in 128-pixel tiles) is nonzero. codedOut receives the number of blocks the header codes itself.
+// Returns false, leaving dest empty, when the header doesn't fit in BCNEX_MAX_HEADER_BLOCKS blocks, or when the curve
+// doesn't fit the stream (GACL_Shuffle_ApplySpaceCurve's geometry).
+bool BC7_JoinStream_Encode(const uint8_t* src, size_t srcSize, const BC7TextureMetrics& metrics, uint8_t curveWidthTiles,
+    std::vector<uint8_t>& dest, uint8_t* transformIdOut, size_t* codedOut = nullptr);
+// Static code of the blocks a Join stream header stores itself (coded entries, streamheader.h; table in bc7joinblockcode.h)
+struct StreamHeaderBlockCode;
+const StreamHeaderBlockCode* BC7_JoinBlockCode();
+int BC7_ModeJoin_FieldConfig();             // 0 = layout only, 1 = production field transforms, -1 = no reverse
+unsigned BC7_ModeJoin_IndexReverseModes();  // mode mask of index-bit reversal (JBO=4), applied after either config
+uint64_t BC7_ModeJoin_IndexFieldPerm(unsigned mode);    // index field permutation (JFP) of a mode, 0 = none
+void BC7_ModeJoin_IndexFieldPermute(uint64_t* x, unsigned mode, uint64_t v, bool inverse);
+const uint8_t* BC7_ModeJoin_IndexFieldScan(uint64_t v);    // texel scan (16 raster texel indices) selected by a JFP setting
+void BC7_ModeJoin_IndexFieldPermuteScan(uint64_t* x, unsigned mode, uint64_t v, bool inverse, const uint8_t* scan);   // explicit texel scan
+void BC7_ModeJoin_ByteRemap(uint8_t* block, bool inverse, const BC7TextureMetrics& metrics);  // fixed per mode/byte remap of a finished Join block with set metrics.JoinRemap - 1; no-op for JoinRemap 0 or JBRT off
+unsigned BC7_ModeJoin_RemapSets();          // number of byte-remap table sets, the largest valid JoinRemap: 1 (base table), 0 with JBRT off
+size_t BC7_ModeJoin_ReverseSelfTest();      // random-block round trip; returns the failure count
+void BC7_ModeJoin_LayoutShuffle(unsigned mode, const void* src, void* dest, const BC7TextureMetrics& metrics);  // layout only (no field transforms)
+int BC7_ModeJoin_LayoutFieldConfig();       // always 0
 
 
 enum BC7ModeSplitModeTransform
@@ -117,6 +153,19 @@ enum BC7ModeSplitFieldOrderStrategy
     DropLeastEntropic = 2,
 };
 
+// SectionLayout 1 trial results keyed by section content, shared by the concurrent mode-split transforms of one source
+class BC7ModeSplitTrialCache
+{
+public:
+    BC7ModeSplitTrialCache();
+    ~BC7ModeSplitTrialCache();
+    BC7ModeSplitTrialCache(const BC7ModeSplitTrialCache&) = delete;
+    BC7ModeSplitTrialCache& operator=(const BC7ModeSplitTrialCache&) = delete;
+
+    struct Impl;
+    Impl* const m;
+};
+
 struct BC7ModeSplitShuffleOptions
 {
     BC7ModeSplitModeTransform ModeTransform;
@@ -124,6 +173,11 @@ struct BC7ModeSplitShuffleOptions
     uint8_t EndpointOrderStrategy;
     uint32_t RotationRegionSize;
     uint32_t SpaceCurveWidthInPixels;   // 0 if the source is linear, else the width the source was space curved with (recorded in the stream header, max 16384)
+    uint8_t IndexPrediction;            // 1 = index fields are stored as spatial prediction residuals (recorded in the stream header)
+    uint8_t SectionLayout;              // per-mode section layout (recorded in the stream header): 0 off, 1 chosen by zstd trials, 2 forced SectionSelectors (testing)
+    uint8_t SectionTrialLevel;          // zstd level of the SectionLayout 1 trials (0 = 6)
+    uint8_t SectionSelectors[8];        // SectionLayout 2 selector per mode, see SplitSectionLayout (invalid units fall back to none)
+    BC7ModeSplitTrialCache* TrialCache; // optional SectionLayout 1 trial results shared with other transforms of the same source (nullptr = none)
 };
 
 

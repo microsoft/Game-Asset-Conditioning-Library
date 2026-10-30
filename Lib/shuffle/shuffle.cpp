@@ -13,6 +13,7 @@
 #include "../BCnBlockDefs.h"
 #include "../helpers/FormatHelper.h"
 #include "../helpers/Utility.h"
+#include "bcnex.h"
 
 #include <intrin.h>
 #include <immintrin.h>
@@ -22,6 +23,7 @@
 #include <thread>
 #include <vector>
 #include <atomic>
+#include <algorithm>
 
 
 /* Applies or reverses a screen space adjacency curve to texture data to improve compression later */
@@ -41,9 +43,9 @@ bool GACL_Shuffle_ApplySpaceCurve(
 
     const size_t heightInElements = (sizeBytes + pitchBytes - 1) / pitchBytes;
 
-    // 16KB micro tiles in z-order, applicable when height\width in tiles is power of 2
+    // 16KB micro tiles in z-order, applicable when height\width in tiles is power of 2 and the data is whole rows
     if ((elementSizeBytes == 8 || elementSizeBytes == 16) &&
-        sizeBytes > 16ull * 1024 &&
+        sizeBytes > 16ull * 1024 && sizeBytes % pitchBytes == 0 &&
         _mm_popcnt_u64(widthInElements) == 1 && widthInElements >= (elementSizeBytes == 8 ? 64u: 32u) &&
         _mm_popcnt_u64(heightInElements) == 1 && heightInElements >= 32u)
     {
@@ -205,6 +207,23 @@ bool GACL_Shuffle_ApplySpaceCurveDecoded(
 }
 
 
+/*  The single point at which GACL's window-size policy is applied.  Every GACL compression
+    path routes through here (including the BC7 mode-split section layout trials in
+    bc7modesplit.cpp), so changing that policy - for example to require an exact window
+    rather than a maximum - is one edit rather than a search.
+
+    This caps only; it never raises a smaller window.  zstd reduces windowLog to fit the source
+    at compression time and never grows it, so the cap reaches the frame as an upper bound.  */
+
+void GACL_ApplyWindowPolicy(ZSTD_compressionParameters& zParams)
+{
+    if (zParams.windowLog > GACL_ZSTD_MAX_WINDOW_LOG)
+    {
+        zParams.windowLog = GACL_ZSTD_MAX_WINDOW_LOG;
+    }
+}
+
+
 namespace
 {
     /*  Selects the compression parameters GACL uses for a given input size.  Level 0 means "let
@@ -228,21 +247,6 @@ namespace
         }
 
         return ZSTD_getCParams(18, srcBytes, 0);      // min size to enforce btopt & 3 byte matching
-    }
-
-    /*  The single point at which GACL's window-size policy is applied.  Every GACL compression
-        path routes through here, so changing that policy - for example to require an exact window
-        rather than a maximum - is one edit rather than a search.
-
-        This caps only; it never raises a smaller window.  zstd reduces windowLog to fit the source
-        at compression time and never grows it, so the cap reaches the frame as an upper bound.  */
-
-    void GACL_ApplyWindowPolicy(ZSTD_compressionParameters& zParams)
-    {
-        if (zParams.windowLog > GACL_ZSTD_MAX_WINDOW_LOG)
-        {
-            zParams.windowLog = GACL_ZSTD_MAX_WINDOW_LOG;
-        }
     }
 
     /*  Applies GACL's parameters and target block size to a context.  */
@@ -505,7 +509,7 @@ HRESULT GACL_ShuffleCompress_BCn(
     }
 
     PSHUFFLE_FUNCTION pShuffle = nullptr;
-    GACL_SHUFFLE_TRANSFORM tid1, tid1sc, tid2, tid2sc;
+    GACL_SHUFFLE_TRANSFORM tid1, tid2;
     size_t variants = 1;
 
 
@@ -514,35 +518,28 @@ HRESULT GACL_ShuffleCompress_BCn(
     case DXGI_FORMAT_BC1_TYPELESS:
         pShuffle = &Shuffle_BC1;
         tid1 = GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224;
-        tid1sc = GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224_SC;
         tid2 = GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44;
-        tid2sc = GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44_SC;
         variants = 2;
         break;
 
     case DXGI_FORMAT_BC3_TYPELESS:
         pShuffle = &Shuffle_BC3;
         tid1 = GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_116224;
-        tid1sc = GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_116224_SC;
         tid2 = GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_664;
-        tid2sc = GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_664_SC;
         variants = 2;
         break;
 
     case DXGI_FORMAT_BC4_TYPELESS:
         pShuffle = &Shuffle_BC4;
         tid1 = GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116;
-        tid1sc = GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116_SC;
         tid2 = GACL_SHUFFLE_TRANSFORM_NONE;
-        tid2sc = GACL_SHUFFLE_TRANSFORM_NONE;
         break;
 
     case DXGI_FORMAT_BC5_TYPELESS:
         pShuffle = &Shuffle_BC5;
         tid1 = GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116;
-        tid1sc = GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116_SC;
-        tid2 = GACL_SHUFFLE_TRANSFORM_NONE;
-        tid2sc = GACL_SHUFFLE_TRANSFORM_NONE;
+        tid2 = GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_2266;
+        variants = 2;
         break;
 
     case DXGI_FORMAT_BC7_TYPELESS:
@@ -554,15 +551,114 @@ HRESULT GACL_ShuffleCompress_BCn(
         return E_INVALIDARG;
     }
 
+    const GACL_SHUFFLE_TRANSFORM requested = *destTransformId;
+    const bool anySupported = requested >= GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED;
+    const bool anyExperimental = requested >= GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL;
+    const GACL_SHUFFLE_TRANSFORM ex = GACL_SHUFFLE_TRANSFORM(BCnEx_TransformId(uint8_t(tid1)));     // the format's EX id
+    const bool includeEx = anyExperimental || requested == ex;
+
+    // curved EX streams record the texture width in 16KB micro-tiles (32 16-byte or 64 8-byte blocks wide)
+    size_t curveTiles = 0;
+    if (dataForCurvedTransforms != nullptr &&
+        GACL_Shuffle_ApplySpaceCurve(nullptr, nullptr, params.SizeInBytes, elementSize, params.CurvedTransforms.WidthInPixels, true))
+    {
+        curveTiles = ((params.CurvedTransforms.WidthInPixels + 3) / 4) / (elementSize == 16 ? 32 : 64);
+        curveTiles = curveTiles <= 255 ? curveTiles : 0;
+    }
+
+    struct Candidate
+    {
+        const wchar_t* Label;
+        GACL_SHUFFLE_TRANSFORM Id;          // transform id of the result
+        GACL_SHUFFLE_TRANSFORM Pattern;     // headerless shuffle pattern, NONE = not shuffled
+        size_t Version;                     // pShuffle version of the pattern
+        const uint8_t* Src;
+        uint8_t CurveTiles;                 // EX curve width parameter
+        bool Included;
+        bool NoHeaderRoom = false;
+        size_t HeaderBlocks = 0;
+        size_t CodedBlocks = 0;             // header blocks the EX header codes
+        std::vector<uint8_t> Data;
+        int Prediction = -1;                // EX index prediction mask, -1 = the transform's default
+        std::vector<uint8_t> Stream;        // the stream Data compresses, kept for a two-stage search (empty: Src)
+    };
+
+    const uint8_t* const linear = params.TextureData;
+    const uint8_t* const curved = dataForCurvedTransforms;
+    const bool v2 = variants >= 2;
+    const uint8_t exTiles = uint8_t(curveTiles);
+
+    // EX adds a header to the shuffle; linear streams only gain from it when it also adds index prediction. The
+    // curve-only EX stream (no shuffle, no prediction) replaces the former ZSTD_SC transform.
+    std::vector<Candidate> candidates =
+    {
+        { L"Compressed",                  GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY, GACL_SHUFFLE_TRANSFORM_NONE, 0, linear, 0, linear && (anySupported || requested == GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY) },
+        { L"Compressed EX SC",            ex, GACL_SHUFFLE_TRANSFORM_NONE, 0, curved, exTiles, exTiles && includeEx },
+        { L"Shuffle compressed",          tid1, tid1, 1, linear, 0, linear && (anySupported || requested == tid1) },
+        // [experimental - preview does not include v2 shuffle]
+        { L"Shuffle compressed v2",       tid2, tid2, 2, linear, 0, v2 && linear && (anyExperimental || requested == tid2) },
+        { L"Shuffle compressed EX",       ex, tid1, 1, linear, 0, linear && includeEx && (BCnEx_Predicted(uint8_t(tid1)) || requested == ex) },
+        { L"Shuffle compressed EX v2",    ex, tid2, 2, linear, 0, v2 && linear && includeEx && (BCnEx_Predicted(uint8_t(tid2)) || requested == ex) },
+        { L"Shuffle compressed EX SC",    ex, tid1, 1, curved, exTiles, exTiles && includeEx },
+        { L"Shuffle compressed EX v2 SC", ex, tid2, 2, curved, exTiles, v2 && exTiles && includeEx },
+    };
+
+    // per-stream index prediction (header parameter 2, BCNEX_PARAM_PREDICTION): the BC1 / BC3 EX candidates are
+    // also tried without color prediction, which loses on some textures; linear ones only while they still predict
+    // something (BC3 alpha)
+    static const wchar_t* const kNoColourLabels[2][2] =
+    {
+        { L"Shuffle compressed EX no color prediction", L"Shuffle compressed EX SC no color prediction" },
+        { L"Shuffle compressed EX v2 no color prediction", L"Shuffle compressed EX v2 SC no color prediction" },
+    };
+    for (size_t i = 0, count = candidates.size(); i < count; i++)
+    {
+        Candidate c = candidates[i];
+        const uint8_t defaultMask = BCnEx_DefaultPrediction(uint8_t(c.Pattern));
+        const uint8_t mask = uint8_t(defaultMask & ~BCNEX_PREDICT_COLOUR);
+        if (c.Id != ex || !c.Included || mask == defaultMask || (c.CurveTiles == 0 && mask == 0))
+        {
+            continue;
+        }
+        c.Label = kNoColourLabels[c.Version - 1][c.CurveTiles != 0];
+        c.Prediction = mask;
+        candidates.push_back(c);
+    }
+
+    const bool defaultCompression = GACL_Compression_InitRoutine == &GACL_Compression_DefaultInitRoutine &&
+        GACL_Compression_CompressRoutine == &GACL_Compression_DefaultCompressRoutine &&
+        GACL_Compression_CleanupRoutine == &GACL_Compression_DefaultCleanupRoutine;
+    const int requestedZstdLevel = int(params.CompressSettings.Default.ZstdCompressionLevel);
+    const int defaultZstdLevel = params.SizeInBytes <= 16 * 1024 ? 12 : (params.SizeInBytes <= 256 * 1024 ? 14 : 18);     // as GACL_Compression_DefaultInitRoutine
+    const int finalZstdLevel = requestedZstdLevel != 0 ? requestedZstdLevel : defaultZstdLevel;
+
+    // BC1 two-stage search.  With GACL's default zstd routines and a final level above 3 up to the size default, zstd level 3 first
+    // compresses every candidate to rank them, and only the 4 smallest distinct ones are compressed again at the final level, plus the
+    // smallest without coded blocks if all 4 have them (the coded-block gate below compares with it).  On BC1 VT tile groups and
+    // non-RDO textures that costs under 0.001% of their size, for about 0.85x their BC1 CPU.  Above the default level every
+    // candidate is compressed at the final level.
+    constexpr int rankZstdLevel = 3;
+    constexpr size_t rankFinalists = 4;
+    size_t includedCount = 0;
+    for (const Candidate& c : candidates)
+    {
+        includedCount += c.Included ? 1 : 0;
+    }
+    const bool twoStage = baseFormat == DXGI_FORMAT_BC1_TYPELESS && defaultCompression && includedCount > rankFinalists &&
+        finalZstdLevel > rankZstdLevel && finalZstdLevel <= defaultZstdLevel;
+    SHUFFLE_COMPRESS_PARAMETERS rankParams = params;
+    rankParams.CompressSettings.Default.ZstdCompressionLevel = rankZstdLevel;
+    // the parameters every candidate is first compressed with
+    const SHUFFLE_COMPRESS_PARAMETERS* const candParams = twoStage ? &rankParams : &params;
 
     std::vector<std::thread> tasks;
     std::atomic<HRESULT> lastError = S_OK;
 
-    auto compressTask = [&](std::vector<uint8_t>& dest, const uint8_t* src, size_t srcBytes)
+    auto compressTask = [&](std::vector<uint8_t>& dest, const uint8_t* src, size_t srcBytes, const SHUFFLE_COMPRESS_PARAMETERS* compressParams)
         {
             void* cc = nullptr;
             size_t compressedBytes;
-            HRESULT hr = GACL_Compression_InitRoutine(&cc, &compressedBytes, &params);
+            HRESULT hr = GACL_Compression_InitRoutine(&cc, &compressedBytes, compressParams);
 
             if (SUCCEEDED(hr) && cc != nullptr)
             {
@@ -591,180 +687,184 @@ HRESULT GACL_ShuffleCompress_BCn(
             }
         };
 
-
-    // uncurved compress only
-    std::vector<uint8_t> result_zstd_only;
-    bool incZstdOnly = false;
-    if (params.TextureData != nullptr && (*destTransformId >= GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED || *destTransformId == GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY))
+    for (Candidate& candidate : candidates)
     {
-        incZstdOnly = true;
-        tasks.push_back(std::thread([&] {
-            compressTask(result_zstd_only, params.TextureData, params.SizeInBytes);
-            }));
-    }
-
-    // curved zstd only  [experimental - preview does not include a standalone reverse-curve shader]
-    std::vector<uint8_t> result_zstd_sc;
-    bool inclZstdSc = false;
-    if (dataForCurvedTransforms != nullptr && (*destTransformId >= GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL || *destTransformId == GACL_SHUFFLE_TRANSFORM_ZSTD_SC))
-    {
-        inclZstdSc = true;
-        tasks.push_back(std::thread([&] {
-            compressTask(result_zstd_sc, dataForCurvedTransforms, params.SizeInBytes);
-            }));
-    }
-
-    // uncurved v1 shuffle
-    std::vector<uint8_t> result_v1;
-    bool incResultV1 = false;
-    if (params.TextureData != nullptr && (*destTransformId >= GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED || *destTransformId == tid1))
-    {
-        incResultV1 = true;
-        tasks.push_back(std::thread([&] {
-            std::vector<uint8_t> shuffled(params.SizeInBytes);
-            pShuffle(shuffled.data(), params.TextureData, params.SizeInBytes, 1);
-            compressTask(result_v1, shuffled.data(), params.SizeInBytes);
-            }));
-    }
-
-    bool incResultV1sc = false;
-    // curved v1 shuffle  [experimental - preview does not include reverse-curve support]
-    std::vector<uint8_t> result_v1sc;
-    if (dataForCurvedTransforms != nullptr && (*destTransformId == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL || *destTransformId == tid1sc))
-    {
-        incResultV1sc = true;
-        tasks.push_back(std::thread([&] {
-            std::vector<uint8_t> shuffled(params.SizeInBytes);
-            pShuffle(shuffled.data(), dataForCurvedTransforms, params.SizeInBytes, 1);
-            compressTask(result_v1sc, shuffled.data(), params.SizeInBytes);
-            }));
-    }
-
-    std::vector<uint8_t> result_v2;
-    std::vector<uint8_t> result_v2sc;
-    bool incResultV2 = false;
-    bool incResultV2sc = false;
-    if (variants >= 2)
-    {
-        // uncurved v2 shuffle  [experimental - preview does not include v2 shuffle]
-        if (params.TextureData != nullptr && (*destTransformId == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL || *destTransformId == tid2))
+        if (!candidate.Included)
         {
-            incResultV2 = true;
-            tasks.push_back(std::thread([&] {
-                std::vector<uint8_t> shuffled(params.SizeInBytes);
-                pShuffle(shuffled.data(), params.TextureData, params.SizeInBytes, 2);
-                compressTask(result_v2, shuffled.data(), params.SizeInBytes);
-                }));
+            continue;
         }
-
-        // curved v2 shuffle  [experimental - preview does not include v2 shuffle]
-        if (dataForCurvedTransforms != nullptr && (*destTransformId == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL || *destTransformId == tid2sc))
-        {
-            incResultV2sc = true;
-            tasks.push_back(std::thread([&] {
+        tasks.push_back(std::thread([&, pc = &candidate] {
+            Candidate& c = *pc;
+            if (c.Id == ex)
+            {
+                std::vector<uint8_t> stream;
+                c.NoHeaderRoom = c.Pattern == GACL_SHUFFLE_TRANSFORM_NONE ?
+                    !BCnEx_EncodeCurveOnly(c.Src, params.SizeInBytes, uint8_t(tid1), c.CurveTiles, stream, &c.HeaderBlocks, &c.CodedBlocks) :
+                    !BCnEx_Encode(c.Src, params.SizeInBytes, uint8_t(c.Pattern), c.CurveTiles, stream, &c.HeaderBlocks, c.Prediction, &c.CodedBlocks);
+                if (!c.NoHeaderRoom)
+                {
+#if _DEBUG || GACL_EXCHK
+                    // checked against the candidate's own source, still curved: curved candidates encode the curved-space
+                    // data, which can differ from TextureData (RDO applied in curved space) or be the only input
+                    std::vector<uint8_t> back;
+                    uint8_t backCurveTiles = 0;
+                    if (!BCnEx_Decode(stream.data(), stream.size(), uint8_t(c.Id), back, false, nullptr, &backCurveTiles) ||
+                        backCurveTiles != c.CurveTiles || back.size() != params.SizeInBytes || memcmp(back.data(), c.Src, back.size()) != 0)
+                    {
+                        Utility::Printf(GACL_Logging_Priority_High, L"%s round trip failed.\n", c.Label);
+                        lastError = E_FAIL;
+                    }
+#endif
+                    compressTask(c.Data, stream.data(), stream.size(), candParams);
+                    if (twoStage)
+                    {
+                        c.Stream.swap(stream);
+                    }
+                }
+            }
+            else if (c.Pattern != GACL_SHUFFLE_TRANSFORM_NONE)
+            {
                 std::vector<uint8_t> shuffled(params.SizeInBytes);
-                pShuffle(shuffled.data(), dataForCurvedTransforms, params.SizeInBytes, 2);
-                compressTask(result_v2sc, shuffled.data(), params.SizeInBytes);
-                }));
-        }
+                pShuffle(shuffled.data(), c.Src, params.SizeInBytes, c.Version);
+                compressTask(c.Data, shuffled.data(), params.SizeInBytes, candParams);
+                if (twoStage)
+                {
+                    c.Stream.swap(shuffled);
+                }
+            }
+            else
+            {
+                compressTask(c.Data, c.Src, params.SizeInBytes, candParams);
+            }
+            }));
     }
 
     if (tasks.size() > 0)
     {
         for (auto& task : tasks) task.join();
 
+        // the two-stage search's finalists, the smallest distinct candidates at the ranking level, are compressed again at the final level
+        if (twoStage && SUCCEEDED(status) && SUCCEEDED(lastError.load()))
+        {
+            std::vector<Candidate*> order;
+            for (Candidate& c : candidates)
+            {
+                if (c.Included && c.Data.size() > 0)
+                {
+                    order.push_back(&c);
+                }
+            }
+            std::stable_sort(order.begin(), order.end(), [](const Candidate* x, const Candidate* y) { return x->Data.size() < y->Data.size(); });
+            std::vector<Candidate*> finalists;
+            bool coded = false, uncoded = false;
+            for (Candidate* c : order)
+            {
+                if (finalists.size() == rankFinalists)
+                {
+                    break;
+                }
+                // identical compressed streams come from identical streams
+                const bool duplicate = std::any_of(finalists.begin(), finalists.end(), [c](const Candidate* f)
+                    { return f->Data.size() == c->Data.size() && memcmp(f->Data.data(), c->Data.data(), c->Data.size()) == 0; });
+                if (!duplicate)
+                {
+                    finalists.push_back(c);
+                    (c->CodedBlocks > 0 ? coded : uncoded) = true;
+                }
+            }
+            if (coded && !uncoded)
+            {
+                const auto firstUncoded = std::find_if(order.begin(), order.end(), [](const Candidate* c) { return c->CodedBlocks == 0; });
+                if (firstUncoded != order.end())
+                {
+                    finalists.push_back(*firstUncoded);
+                }
+            }
+            std::vector<std::thread> finalTasks;
+            for (Candidate* c : finalists)
+            {
+                finalTasks.push_back(std::thread([&, c] {
+                    compressTask(c->Data, c->Stream.empty() ? c->Src : c->Stream.data(), c->Stream.empty() ? params.SizeInBytes : c->Stream.size(), &params);
+                    }));
+            }
+            for (auto& task : finalTasks) task.join();
+            for (Candidate& c : candidates)
+            {
+                if (std::find(finalists.begin(), finalists.end(), &c) == finalists.end())
+                {
+                    c.Data.clear();
+                }
+            }
+        }
+
         if (SUCCEEDED(status) && SUCCEEDED(lastError.load()))
         {
-            std::vector<uint8_t>* bestData = nullptr;;
+            // Coded blocks slow the GPU decode (UnshuffleBCnEx.hlsl): BC1 streams with them take about four times a
+            // headerless stream's latency. So at or below the default zstd level (and with custom compression routines,
+            // which have no zstd level) a BC1 stream with coded blocks must be at least 1% smaller than the best stream
+            // without them, else that stream (or the uncompressed texture) ships; above it the smallest stream wins.
+            const bool gateCoded = baseFormat == DXGI_FORMAT_BC1_TYPELESS && (!defaultCompression || requestedZstdLevel <= defaultZstdLevel);
+            size_t uncodedSize = params.SizeInBytes;
+            for (const Candidate& c : candidates)
+            {
+                if (c.Included && c.Data.size() > 0 && c.CodedBlocks == 0 && c.Data.size() < uncodedSize)
+                {
+                    uncodedSize = c.Data.size();
+                }
+            }
+            auto gated = [&](const Candidate& c) { return gateCoded && c.CodedBlocks > 0 && c.Data.size() * 100 > uncodedSize * 99; };
+
+            const Candidate* best = nullptr;
             size_t bestSize = params.SizeInBytes;
 
-            for (auto d : { &result_zstd_only, &result_zstd_sc, &result_v1, &result_v1sc, &result_v2, &result_v2sc })
+            for (const Candidate& c : candidates)
             {
-                if (d->size() > 0 && d->size() < bestSize)
+                if (c.Included && c.Data.size() > 0 && c.Data.size() < bestSize && !gated(c))
                 {
-                    bestData = d;
-                    bestSize = bestData->size();
+                    best = &c;
+                    bestSize = c.Data.size();
                 }
             }
 
             wchar_t compressionStr[20] = L"(custom)";
 
-            if (GACL_Compression_InitRoutine == &GACL_Compression_DefaultInitRoutine &&
-                GACL_Compression_CompressRoutine == &GACL_Compression_DefaultCompressRoutine &&
-                GACL_Compression_CleanupRoutine == &GACL_Compression_DefaultCleanupRoutine)
+            if (defaultCompression)
             {
                 swprintf_s(compressionStr, _countof(compressionStr), L"(zstd-%d)", params.CompressSettings.Default.ZstdCompressionLevel);
             }
 
-            Utility::Printf(L"Original texture                   %u%wc  \n", params.SizeInBytes, bestData == nullptr ? L'*' : L' ');
-            if (incZstdOnly)
+            Utility::Printf(L"Original texture                   %zu%wc  \n", params.SizeInBytes, best == nullptr ? L'*' : L' ');
+            for (const Candidate& c : candidates)
             {
-                Utility::Printf(L"Compressed               %s  %u%wc  \n", compressionStr, result_zstd_only.size(), bestData == &result_zstd_only ? L'*' : L' ');
-            }
-            if (inclZstdSc)
-            {
-                Utility::Printf(L"Compressed SC            %s  %u%wc  \n", compressionStr, result_zstd_sc.size(), bestData == &result_zstd_sc ? L'*' : L' ');
-            }
-            if (incResultV1)
-            {
-                Utility::Printf(L"Shuffle compressed       %s  %u%wc  \n", compressionStr, result_v1.size(), bestData == &result_v1 ? L'*' : L' ');
-            }
-            if (incResultV1sc)
-            {
-                Utility::Printf(L"Shuffle compressed SC    %s  %u%wc  \n", compressionStr, result_v1sc.size(), bestData == &result_v1sc ? L'*' : L' ');
-            }
-            if (incResultV2)
-            {
-                Utility::Printf(L"Shuffle compressed v2    %s  %u%wc  \n", compressionStr, result_v2.size(), bestData == &result_v1 ? L'*' : L' ');
-            }
-            if (incResultV2sc)
-            {
-                Utility::Printf(L"Shuffle compressed v2 SC %s  %u%wc  \n", compressionStr, result_v2sc.size(), bestData == &result_v2sc ? L'*' : L' ');
+                if (!c.Included)
+                {
+                    continue;
+                }
+                if (c.NoHeaderRoom)
+                {
+                    Utility::Printf(L"%-24s %s  - (no duplicate blocks to make room for the stream header)\n", c.Label, compressionStr);
+                }
+                else if (c.Id == ex)
+                {
+                    Utility::Printf(L"%-24s %s  %zu%wc  (header %zu blocks%s)\n", c.Label, compressionStr, c.Data.size(), best == &c ? L'*' : L' ', c.HeaderBlocks,
+                        gated(c) ? L"; its coded blocks save under 1%, not used at this zstd level" : L"");
+                }
+                else
+                {
+                    Utility::Printf(L"%-24s %s  %zu%wc  \n", c.Label, compressionStr, c.Data.size(), best == &c ? L'*' : L' ');
+                }
             }
 
-            if (bestData == nullptr)
+            if (best == nullptr)
             {
                 Utility::Printf(L"Shuffle compression %s did not yield a smaller size\n", compressionStr);
                 *destTransformId = GACL_SHUFFLE_TRANSFORM_NONE;
                 return S_FALSE;
             }
 
-            if (bestData == &result_zstd_only)
-            {
-                memcpy_s(dest, params.SizeInBytes, result_zstd_only.data(), result_zstd_only.size());
-                *destTransformId = GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY;
-                *destBytesWritten = result_zstd_only.size();
-            }
-            else if (bestData == &result_zstd_sc)
-            {
-                memcpy_s(dest, params.SizeInBytes, result_zstd_sc.data(), result_zstd_sc.size());
-                *destTransformId = GACL_SHUFFLE_TRANSFORM_ZSTD_SC;
-                *destBytesWritten = result_zstd_sc.size();
-            }
-            else if (bestData == &result_v1)
-            {
-                memcpy_s(dest, params.SizeInBytes, result_v1.data(), result_v1.size());
-                *destTransformId = tid1;
-                *destBytesWritten = result_v1.size();
-            }
-            else if (bestData == &result_v1sc)
-            {
-                memcpy_s(dest, params.SizeInBytes, result_v1sc.data(), result_v1sc.size());
-                *destTransformId = tid1sc;
-                *destBytesWritten = result_v1sc.size();
-            }
-            else if (bestData == &result_v2)
-            {
-                memcpy_s(dest, params.SizeInBytes, result_v2.data(), result_v2.size());
-                *destTransformId = tid2;
-                *destBytesWritten = result_v2.size();
-            }
-            else
-            {
-                memcpy_s(dest, params.SizeInBytes, result_v2sc.data(), result_v2sc.size());
-                *destTransformId = tid2sc;
-                *destBytesWritten = result_v2sc.size();
-            }
+            memcpy_s(dest, params.SizeInBytes, best->Data.data(), best->Data.size());
+            *destTransformId = best->Id;
+            *destBytesWritten = best->Data.size();
             return status;
         }
         else
@@ -791,53 +891,47 @@ const wchar_t* GACL_ShuffleCompress_GetFileExtensionForTransform(
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224:
         return L"gacl.bc11";
 
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224_SC:
-        return L"gacl.bc11s";
-
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44:
         return L"gacl.bc12";
-
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44_SC:
-        return L"gacl.bc12s";
 
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_116224:
         return L"gacl.bc31";
 
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_116224_SC:
-        return L"gacl.bc31s";
-
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_664:
         return L"gacl.bc32";
-
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_664_SC:
-        return L"gacl.bc32s";
 
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116:
         return L"gacl.bc41";
 
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116_SC:
-        return L"gacl.bc41s";
-
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116:
         return L"gacl.bc51";
 
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116_SC:
-        return L"gacl.bc51s";
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_2266:
+        return L"gacl.bc52";
 
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN:
         return L"gacl.bc7j";
 
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN_SC:
-        return L"gacl.bc7js";
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_EX:
+        return L"gacl.bc1ex";
+
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_EX:
+        return L"gacl.bc3ex";
+
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_EX:
+        return L"gacl.bc4ex";
+
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_EX:
+        return L"gacl.bc5ex";
+
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX:
+        return L"gacl.bc7ex";
 
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT:
         return L"gacl.bc7s";
 
     case GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY:
         return L"zstd";   // No shuffle, compressed only
-
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_SC:
-        return L"gacl.zstds";
 
     default:
         return L"unsupported";

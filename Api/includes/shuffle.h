@@ -21,34 +21,41 @@ enum GACL_SHUFFLE_TRANSFORM
 {
     GACL_SHUFFLE_TRANSFORM_NONE = 0,
 
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224          = 1,     // 3 streams (1:1:2):         color_0, color_1, index bit stream   (DSTORAGE_GACL_SHUFFLE_TRANSFORM_BC1)
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224_SC       = 17,    // 3 streams (1:1:2):         color_0, color_1, index bit stream, space curve (experimental)
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224          = 0x01,  // 3 streams (1:1:2):         color_0, color_1, index bit stream   (DSTORAGE_GACL_SHUFFLE_TRANSFORM_BC1)
 
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_116224       = 2,     // 6 streams (1:1:6:2:2:4)    alpha_0, alpha_1, Alpha index, color_0, color_1, color index stream (DSTORAGE_GACL_SHUFFLE_TRANSFORM_BC3)
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_116224_SC    = 18,    // 6 streams (1:1:6:2:2:4)    alpha_0, alpha_1, Alpha index, color_0, color_1, color index stream, space curve (experimental)
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_116224       = 0x02,  // 6 streams (1:1:6:2:2:4)    alpha_0, alpha_1, Alpha index, color_0, color_1, color index stream (DSTORAGE_GACL_SHUFFLE_TRANSFORM_BC3)
 
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116          = 3,     // 3 streams (1:1:6)          red_0, red_1, red index stream (DSTORAGE_GACL_SHUFFLE_TRANSFORM_BC4)
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116_SC       = 19,    // 3 streams (1:1:6)          red_0, red_1, red index stream, space curve (experimental)
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116          = 0x03,  // 3 streams (1:1:6)          red_0, red_1, red index stream (DSTORAGE_GACL_SHUFFLE_TRANSFORM_BC4)
 
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116       = 4,     // 6 streams (1:1:6:1:1:6)    red_0, red_1, red index stream, green_0, green_1, green index stream (DSTORAGE_GACL_SHUFFLE_TRANSFORM_BC5)
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116_SC    = 20,    // 6 streams (1:1:6:1:1:6)    red_0, red_1, red index stream, green_0, green_1, green index stream, space curve (experimental)
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116       = 0x04,  // 6 streams (1:1:6:1:1:6)    red_0, red_1, red index stream, green_0, green_1, green index stream (DSTORAGE_GACL_SHUFFLE_TRANSFORM_BC5)
 
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT        = 5,     // mode-specific streams and transforms, control bytes within compressed stream	(better compression, slower reverse transform, experimental))
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT        = 0x05,  // mode-specific streams and transforms, control bytes within compressed stream	(better compression, slower reverse transform, experimental))
 
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN         = 6,     // mode-specific transforms, control bytes outside of compressed stream (less compression, trivial+fast reverse transform, experimental)
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN_SC      = 22,    // as above, but data is curved, can only be decompressed into a target with dimensionality that supports reverse mapping
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN         = 0x06,  // mode-specific transforms, no statics/low-entropy handling, no stream header (Fast unshuffle, less compression for large streams, experimental)
 
-    GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY             = 7,
-    GACL_SHUFFLE_TRANSFORM_ZSTD_SC               = 23,    // (experimental)
-
+    GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY             = 0x07,
 
     // v2 (experimental) shuffle patterns
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44           = 32,	  // 2 streams (1:1):            interleaved color_0 + color_1, index bit stream
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44_SC,	              // 2 streams (1:1):            As above, with curve
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44           = 0x08,  // 2 streams (1:1):            interleaved color_0 + color_1, index bit stream
 
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_664,		          // 3 streams (3:3:2)           alpha_0 + alpha_1 + color_0 + color_1, Alpha index, color index stream
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_664_SC,		          // 3 streams (3:3:2)           alpha_0 + alpha_1 + color_0 + color_1, Alpha index, color index stream
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_664          = 0x09,  // 3 streams (3:3:2)           alpha_0 + alpha_1 + color_0 + color_1, Alpha index, color index stream
 
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_2266         = 0x0A,  // 4 streams (2:2:6:6)         red_0+red_1, green_0+green_1, red index stream, green index stream (experimental)
+
+    // Extensible BCn streams (experimental), one id per block format: an in-stream parameter header (streamheader.h)
+    // names one of the format's shuffle patterns (BC1_224 or BC1_44; BC3_116224 or BC3_664; BC4_116; BC5_116116 or
+    // BC5_2266; BC7 Join) and carries its parameters, e.g. the space curve width (the stream is curved iff that
+    // parameter is present) or the BC7 Join statics masks and byte remap (which the encoder only tries above the default
+    // zstd level: it slows the GPU decode). BC1, BC3, BC4 and BC5 streams use index prediction unless a header parameter
+    // turns part of it off (the encoder picks BC1 and BC3 color index prediction per stream). Streams short of
+    // duplicate blocks code blocks in the header, which are slower to decode. Reversed by UnshuffleBCnEx.hlsl in
+    // ceil((n / G + n % G) / 256) thread groups for a stream of n blocks of B bytes (n = stream size / B) and G blocks
+    // per thread:
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_EX           = 0x0B,  // B 8, G 2
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_EX           = 0x0C,  // B 16, G 4
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_EX           = 0x0D,  // B 8, G 4
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_EX           = 0x0E,  // B 16, G 4
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX           = 0x0F,  // B 16, G 1
 
     // masks for API callers
     GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED    = 0x8004,    // This define will change value over time

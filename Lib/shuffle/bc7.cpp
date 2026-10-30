@@ -11,6 +11,8 @@
 #include "gacl.h"
 #include "../BCnBlockDefs.h"
 #include "bc7.h"
+#include "streamheader.h"
+#include "bcnex.h"
 #include "../helpers/Utility.h"
 #include "../helpers/FileUtility.h"
 #include "../helpers/FormatHelper.h"
@@ -21,10 +23,13 @@
 #include <zstd.h>
 
 #include <thread>
+#include <mutex>
+#include <memory>
 #include <fstream>
 #include <vector>
 #include <cassert>
 #include <algorithm>
+#include <functional>
 
 using namespace std;
 
@@ -496,16 +501,43 @@ void BC7_CollectTextureMetrics(const uint8_t* src, size_t srcSize, BC7TextureMet
     size_t endpointPairsPerMode[] = { 3, 2, 3, 2, 1, 1, 1, 2 };
     m.LowEntropy = uint8_t(~m.Statics);
 
+    // Number of most-frequent values whose combined share must meet the thresholds below to flag a field as low-entropy.
+    constexpr size_t kLowEntropyTopN = 3;
+#ifndef GACL_LET
+#define GACL_LET 55
+#endif
+    constexpr size_t kLowEntropyThresholdNum = GACL_LET;   // LET: Join threshold (top-3 >= 55%)
+    constexpr size_t kLowEntropyThresholdDen = 100;
+
+    // SPLITLE: Split consumes the per-mode masks (M[mode].LowEntropy); Join consumes the group-wide mask,
+    // which is reduced from per-mode masks evaluated with the Join threshold above.
+    constexpr size_t kSplitLowEntropyTopN = kLowEntropyTopN;
+    constexpr size_t kSplitLowEntropyThresholdNum = 75;
+    constexpr size_t kSplitLowEntropyThresholdDen = kLowEntropyThresholdDen;
 
     uint8_t LowEntropyOrdered[8] = {};
 
+    // A mode must clear BOTH an absolute floor (enough samples for the top-N stat to be meaningful)
+    // AND a relative floor (a meaningful share of the whole group) before it's allowed to evaluate/reduce
+    // the global LowEntropy mask.  Guards against a handful of stray blocks skewing the whole-group flag.
+#ifndef GACL_LEMA
+#define GACL_LEMA 16    // LEM: absolute mode-count floor for the LE significance gate
+#endif
+#ifndef GACL_LEMR
+#define GACL_LEMR 512   // LEM: relative floor block_count / GACL_LEMR
+#endif
+    constexpr size_t kLowEntropyModeMinAbsolute = GACL_LEMA;
+    constexpr size_t kLowEntropyModeMinRelativeDen = GACL_LEMR; // block_count / 512
+    uint8_t joinModeLowEntropyPerMode[8] = {};
+
     for (size_t mode = 0; mode < 8; mode++)
     {
-        if (m.ModeCounts[mode] > 16)
+        if (m.ModeCounts[mode] > kLowEntropyModeMinAbsolute && m.ModeCounts[mode] > block_count / kLowEntropyModeMinRelativeDen)
         {
-            const size_t endpointFieldsInMode = mode < 6 ? 6 : 8;
+            const size_t endpointFieldsInMode = mode < 4 ? 6 : 8;   // modes 4-7 carry alpha endpoints
             const size_t endpointPairsInMode = endpointPairsPerMode[mode];
             const uint8_t endpointMaxInMode = fieldMaxPerMode[mode];
+            uint8_t joinModeLowEntropy = 0;
 
             for (size_t e = 0; e < endpointFieldsInMode; e++)
             {
@@ -516,7 +548,20 @@ void BC7_CollectTextureMetrics(const uint8_t* src, size_t srcSize, BC7TextureMet
                 memcpy(sortedValues, M[mode].Totals.EC[e], sizeof(size_t) * endpointMaxInMode);
                 std::sort(sortedValues, sortedValues + endpointMaxInMode, std::greater<size_t>());
 
-                if (sortedValues[0] + sortedValues[1] >= m.ModeCounts[mode] * endpointPairsInMode * 8 / 10)  //  <--  80% threshold in 2 values means low entropy
+                size_t topNSum = 0;
+                for (size_t t = 0; t < kLowEntropyTopN && t < endpointMaxInMode; t++)
+                    topNSum += sortedValues[t];
+
+                if (topNSum >= m.ModeCounts[mode] * endpointPairsInMode * kLowEntropyThresholdNum / kLowEntropyThresholdDen)  //  <-- threshold in top-N values means low entropy
+                {
+                    joinModeLowEntropy |= uint8_t(1 << e);
+                }
+
+                size_t splitTopNSum = 0;
+                for (size_t t = 0; t < kSplitLowEntropyTopN && t < endpointMaxInMode; t++)
+                    splitTopNSum += sortedValues[t];
+
+                if (splitTopNSum >= m.ModeCounts[mode] * endpointPairsInMode * kSplitLowEntropyThresholdNum / kSplitLowEntropyThresholdDen)
                 {
                     m.M[mode].LowEntropy |= (1 << e);
                 }
@@ -525,15 +570,48 @@ void BC7_CollectTextureMetrics(const uint8_t* src, size_t srcSize, BC7TextureMet
                 memcpy(sortedOrderedValues, M[mode].Totals.OC[e], sizeof(size_t) * endpointMaxInMode);
                 std::sort(sortedOrderedValues, sortedOrderedValues + endpointMaxInMode, std::greater<size_t>());
 
-                if (sortedOrderedValues[0] + sortedOrderedValues[1] >= m.ModeCounts[mode] * endpointPairsInMode * 8 / 10)  //  <--  80% threshold in 2 values means low entropy
+                size_t topNOrderedSum = 0;
+                for (size_t t = 0; t < kLowEntropyTopN && t < endpointMaxInMode; t++)
+                    topNOrderedSum += sortedOrderedValues[t];
+
+                if (topNOrderedSum >= m.ModeCounts[mode] * endpointPairsInMode * kLowEntropyThresholdNum / kLowEntropyThresholdDen)  //  <-- threshold in top-N values means low entropy
                 {
                     LowEntropyOrdered[mode] |= (1 << e);
                 }
             }
-        }
 
-        m.LowEntropy &= (m.M[mode].LowEntropy | m.M[mode].Statics);
+            // Only modes that met the min-sample guard above reduce the global LowEntropy mask; letting every mode
+            // reduce it (unused modes AND in 0) wiped the mask almost always.
+            // RGB-only modes (0-3) have no alpha, so treat alpha as "don't care" (matches the statics combine).
+            m.LowEntropy &= (joinModeLowEntropy | m.M[mode].Statics | (mode < 4 ? 0xC0 : 0));
+            joinModeLowEntropyPerMode[mode] = joinModeLowEntropy;
+        }
     }
+
+#ifndef GACL_PMM
+#define GACL_PMM 6      // PMM: per-mode Join masks, OR of: 1 = group mask, 2 = mode statics, 4 = mode LE flags, 8 = mode Split LE flags (75%)
+#endif
+#ifndef GACL_PMMT
+#define GACL_PMMT 2     // PMMT: with PMM, per-mode masks only in a separate Join trial (2 = replaces hc Alpha, 3 = replaces hc Alpha+Blue)
+#endif
+#if GACL_PMM
+    // Every mode that passed the LE gate already covers the group-wide mask, so with bit 1 the mode bits only add
+    // flags; modes with fewer than two blocks keep the group mask.
+    {
+        const uint8_t group = m.Statics | m.LowEntropy;
+        for (size_t mode = 0; mode < 8; mode++)
+        {
+            uint8_t mm = group;
+            if (m.ModeCounts[mode] > 1)
+            {
+                mm = uint8_t(((GACL_PMM & 1) ? group : 0) | ((GACL_PMM & 2) ? m.M[mode].Statics : 0) |
+                    ((GACL_PMM & 4) ? joinModeLowEntropyPerMode[mode] : 0) | ((GACL_PMM & 8) ? m.M[mode].LowEntropy : 0));
+            }
+            m.JoinModeMask[mode] = uint8_t(mode < 4 ? (mm & 0x3f) : mm);
+        }
+        m.JoinModeMasks = !GACL_PMMT;
+    }
+#endif
 
     // note the best bit-spend strategies for endpoint re-ordering.
     for (size_t mode = 0; mode < 8; mode++)
@@ -844,7 +922,222 @@ static void strat_BC7_NoShuffle(const uint8_t* src, size_t srcSize, SHUFFLE_COMP
     CompressTask(src, srcSize, compressedData, *params, *errorOut);
 }
 
-static void strat_BC7_JoinMode(const uint8_t* src, size_t srcSize, BC7ModeJoinShuffleOptions* opt, BC7TextureMetrics* metrics, SHUFFLE_COMPRESS_PARAMETERS* params, vector<uint8_t>* compressedData, HRESULT* errorOut)
+#ifndef GACL_JOINCHK
+#define GACL_JOINCHK 0  // verify every Join candidate decodes (header, layout and field transforms) in release builds
+#endif
+
+// Developer knob, disabled by default for its encode time vs compression trade-off: also try the 7 endpoint ordering variants of
+// the Split strategies (o1r and o2r of 1 and 7, o2r of 2 and 4, o1r of 3) where the content gate doesn't limit the Split search.  On
+// held-out samples of BC7 VT tile groups they saved 0-0.008% (RDO) and 0.022% (non-RDO) of the size, for about 1.4-1.75x the CPU.
+#ifndef GACL_SPLIT_ORDER_VARIANTS
+#define GACL_SPLIT_ORDER_VARIANTS 0
+#endif
+
+// Join streams with no statics mask, space curve or byte remap need no parameters and are stored without a
+// header (GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN). All others carry an in-stream parameter header (..._BC7_EX).
+static bool BC7_JoinNeedsHeader(const BC7TextureMetrics& metrics, uint8_t curveWidthTiles)
+{
+    uint8_t any = 0;
+    for (size_t mode = 0; mode < 8; mode++)
+    {
+        any |= BC7_JoinModeMask(metrics, mode);
+    }
+    return any != 0 || curveWidthTiles != 0 || metrics.JoinRemap != 0;
+}
+
+#ifndef GACL_JHC
+#define GACL_JHC 1      // Join stream headers may code blocks themselves when the stream has too few duplicate blocks (streamheader.h)
+#endif
+
+// Places the parameter header in front of a Join-shuffled stream. The header is added after the shuffle so a
+// decoder can read it without knowing the parameters. Returns false when there is no room for the header within
+// BCNEX_MAX_HEADER_BLOCKS blocks (the GPU decoder's limit), or when the curve doesn't fit the stream
+// (GACL_Shuffle_ApplySpaceCurve's geometry), which the decoders would reject.
+static bool BC7_JoinAddHeader(vector<uint8_t>& shuffled, const BC7TextureMetrics& metrics, uint8_t curveWidthTiles, size_t* codedOut)
+{
+    if (curveWidthTiles && !GACL_Shuffle_ApplySpaceCurve(nullptr, nullptr, shuffled.size(), 16, size_t(curveWidthTiles) * 128, true))
+    {
+        return false;
+    }
+    vector<StreamHeaderParam> hp;
+    if (curveWidthTiles)
+    {
+        hp.push_back({ GACL_STREAMHEADER_PARAM_CURVE_WIDTH_TILES, { curveWidthTiles } });
+    }
+    // modes 0-3 have no alpha, so their alpha flags don't matter
+    vector<uint8_t> modeMasks(8);
+    bool uniform = true;
+    for (size_t mode = 0; mode < 8; mode++)
+    {
+        const uint8_t care = mode < 4 ? 0x3f : 0xff;
+        modeMasks[mode] = BC7_JoinModeMask(metrics, mode) & care;
+        uniform = uniform && modeMasks[mode] == (BC7_JoinModeMask(metrics, 7) & care);
+    }
+    if (!uniform)
+    {
+        hp.push_back({ GACL_STREAMHEADER_PARAM_BC7_JOIN_MODE_STATICS, modeMasks });
+    }
+    else if (BC7_JoinModeMask(metrics, 7))
+    {
+        hp.push_back({ GACL_STREAMHEADER_PARAM_BC7_JOIN_STATICS, { BC7_JoinModeMask(metrics, 7) } });
+    }
+    if (metrics.JoinRemap)
+    {
+        hp.push_back({ GACL_STREAMHEADER_PARAM_BC7_JOIN_REMAP, { metrics.JoinRemap } });
+    }
+
+    vector<uint8_t> withHeader;
+    StreamHeaderInfo info;
+    if (!StreamHeader_Encode(shuffled.data(), shuffled.size(), 16, uint8_t(GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN), hp, withHeader, &info,
+        GACL_JHC ? BC7_JoinBlockCode() : nullptr) || info.HeaderBlocks > BCNEX_MAX_HEADER_BLOCKS)
+    {
+        return false;
+    }
+
+    *codedOut = info.Coded.size();
+    shuffled.swap(withHeader);
+    return true;
+}
+
+bool BC7_JoinStream_Encode(const uint8_t* src, size_t srcSize, const BC7TextureMetrics& metrics, uint8_t curveWidthTiles,
+    vector<uint8_t>& dest, uint8_t* transformIdOut, size_t* codedOut)
+{
+    dest.clear();
+    if (src == nullptr || srcSize == 0 || srcSize % 16 != 0)
+    {
+        return false;
+    }
+
+    // the same steps as a Join candidate of the BC7 shuffle (strat_BC7_JoinMode)
+    BC7TextureMetrics m = metrics;
+    vector<uint8_t> reordered45, ctrl;
+    BC7_Mode45_ReorderRGBA(src, srcSize, reordered45);
+    BC7_ModeJoin_Transform(reordered45.data(), reordered45.size(), dest, m, ctrl);
+
+    const bool header = BC7_JoinNeedsHeader(m, curveWidthTiles);
+    size_t coded = 0;
+    if (header && !BC7_JoinAddHeader(dest, m, curveWidthTiles, &coded))
+    {
+        dest.clear();
+        return false;
+    }
+    if (transformIdOut)
+    {
+        *transformIdOut = uint8_t(header ? GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX : GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN);
+    }
+    if (codedOut)
+    {
+        *codedOut = coded;
+    }
+    return true;
+}
+
+#if _DEBUG || GACL_JOINCHK
+// Decodes a finished Join candidate the way a consumer would (by transform id) and compares it with the shuffle
+// input. Builds whose Join field transforms have no reverse skip the check.
+static bool BC7_JoinVerify(const vector<uint8_t>& stream, bool header, uint8_t curveWidthTiles, const uint8_t* src, size_t srcSize)
+{
+    if (BC7_ModeJoin_FieldConfig() < 0)
+    {
+        return true;
+    }
+    vector<uint8_t> decoded;
+    uint8_t decodedCurveWidthTiles = 0;
+    const uint8_t id = uint8_t(header ? GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX : GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN);
+    return BC7_JoinStream_Decode(stream.data(), stream.size(), id, decoded, false, &decodedCurveWidthTiles) &&
+        decodedCurveWidthTiles == curveWidthTiles && decoded.size() == srcSize && memcmp(decoded.data(), src, srcSize) == 0;
+}
+#endif
+
+// Compressed candidate streams shared by the trials of one source.  Trials whose streams coincide (such as Split strategies that differ
+// only in the patterns of modes the source lacks, which the stream header doesn't record, or Join trials whose metrics lead to the same
+// layout) compress once.  Streams are matched by full comparison, so a shared result is always that of the same bytes.  A cache serves
+// one set of compression parameters, and keeps the streams until it is destroyed.
+class StreamOutputCache
+{
+public:
+    // the stream that compressed to the given output (nullptr if none did); call once no compression is in progress
+    const vector<uint8_t>* FindStream(const vector<uint8_t>& compressed)
+    {
+        lock_guard<mutex> guard(m_lock);
+        for (const unique_ptr<Entry>& x : m_entries)
+        {
+            if (!compressed.empty() && x->compressed == compressed)
+            {
+                return &x->stream;
+            }
+        }
+        return nullptr;
+    }
+
+    // takes the stream, unless an identical one is already held
+    void Compress(vector<uint8_t>&& stream, vector<uint8_t>* compressed, SHUFFLE_COMPRESS_PARAMETERS& params, HRESULT& errorOut)
+    {
+        Entry* e = nullptr;
+        {
+            lock_guard<mutex> guard(m_lock);
+            for (const unique_ptr<Entry>& x : m_entries)
+            {
+                if (x->stream.size() == stream.size() && memcmp(x->stream.data(), stream.data(), stream.size()) == 0)
+                {
+                    e = x.get();
+                    break;
+                }
+            }
+            if (e == nullptr)
+            {
+                m_entries.push_back(make_unique<Entry>());
+                e = m_entries.back().get();
+                e->stream = std::move(stream);
+            }
+        }
+        call_once(e->once, [&] { CompressTask(e->stream.data(), e->stream.size(), &e->compressed, params, e->status); });
+        if (!SUCCEEDED(e->status))
+        {
+            errorOut = e->status;
+        }
+        compressed->assign(e->compressed.begin(), e->compressed.end());
+    }
+
+private:
+    struct Entry
+    {
+        once_flag once;
+        vector<uint8_t> stream;
+        vector<uint8_t> compressed;
+        HRESULT status = S_OK;
+    };
+    mutex m_lock;
+    vector<unique_ptr<Entry>> m_entries;
+};
+
+// Curve-only BC7_EX stream (BCnEx_EncodeCurveOnly): the curved blocks unshuffled behind a stream header. Leaves
+// compressedData empty when there is no room for the header.
+static void strat_BC7_CurveOnly(const uint8_t* src, size_t srcSize, uint8_t curveWidthTiles, SHUFFLE_COMPRESS_PARAMETERS* params, StreamOutputCache* outputCache, vector<uint8_t>* compressedData, HRESULT* errorOut, size_t* codedOut)
+{
+    vector<uint8_t> stream;
+    if (!BCnEx_EncodeCurveOnly(src, srcSize, uint8_t(GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN), curveWidthTiles, stream, nullptr, codedOut))
+    {
+        compressedData->resize(0);
+        return;
+    }
+#if _DEBUG || GACL_JOINCHK
+    vector<uint8_t> back;
+    if (!BCnEx_Decode(stream.data(), stream.size(), uint8_t(GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX), back, false) || back.size() != srcSize || memcmp(back.data(), src, srcSize) != 0)
+    {
+        Utility::Printf(GACL_Logging_Priority_High, L"BC7 curve-only round trip failed.\n");
+        assert(false);
+        *errorOut = E_FAIL;
+        compressedData->resize(0);
+        return;
+    }
+#endif
+    outputCache->Compress(std::move(stream), compressedData, *params, *errorOut);
+}
+
+// codedOut (optional) receives the number of blocks the stream header had to code itself (0 when the candidate is dropped).
+// outputCache (optional) compresses the stream once with any identical stream of the other trials sharing it.
+static void strat_BC7_JoinMode(const uint8_t* src, size_t srcSize, BC7TextureMetrics* metrics, uint8_t curveWidthTiles, SHUFFLE_COMPRESS_PARAMETERS* params, vector<uint8_t>* compressedData, HRESULT* errorOut, size_t* codedOut = nullptr, StreamOutputCache* outputCache = nullptr)
 {
     std::vector<uint8_t> shuffled, reordered45;
     std::vector<uint8_t> ctrl;
@@ -857,32 +1150,44 @@ static void strat_BC7_JoinMode(const uint8_t* src, size_t srcSize, BC7ModeJoinSh
 #endif
 
 
-    BC7_ModeJoin_Transform(reordered45.data(), reordered45.size(), shuffled, *opt, *metrics, ctrl);
+    BC7_ModeJoin_Transform(reordered45.data(), reordered45.size(), shuffled, *metrics, ctrl);
 
-    vector<uint8_t> unshuffled;
-    BC7_ModeJoin_Reverse(shuffled.data(), shuffled.size(), unshuffled, *opt, *metrics, ctrl);     // verify reversible
+    const bool header = BC7_JoinNeedsHeader(*metrics, curveWidthTiles);
+    size_t coded = 0;
+    if (header && !BC7_JoinAddHeader(shuffled, *metrics, curveWidthTiles, &coded))
+    {
+        compressedData->resize(0);      // no room for the header: candidate dropped
+        return;
+    }
+    if (codedOut)
+    {
+        *codedOut = coded;
+    }
 
-    assert(memcmp(unshuffled.data(), reordered45.data(), unshuffled.size()) == 0);
+#if _DEBUG || GACL_JOINCHK
+    if (!BC7_JoinVerify(shuffled, header, curveWidthTiles, src, srcSize))
+    {
+        Utility::Printf(GACL_Logging_Priority_High, L"BC7 Join round trip failed.\n");
+        assert(false);
+        *errorOut = E_FAIL;
+        compressedData->resize(0);
+        return;
+    }
+#endif
 
-    CompressTask(shuffled.data(), shuffled.size(), compressedData, *params, *errorOut);
+    if (outputCache != nullptr)
+    {
+        outputCache->Compress(std::move(shuffled), compressedData, *params, *errorOut);
+    }
+    else
+    {
+        CompressTask(shuffled.data(), shuffled.size(), compressedData, *params, *errorOut);
+    }
 }
 
-
-static void strat_BC7_JoinModeRot(const uint8_t* src, size_t srcSize, BC7ModeJoinShuffleOptions* opt, BC7TextureMetrics* metrics, SHUFFLE_COMPRESS_PARAMETERS* params, size_t rotationRegionSize, vector<uint8_t>* compressedData, HRESULT* errorOut)
+static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplitShuffleOptions* opt, BC7TextureMetrics* metrics, SHUFFLE_COMPRESS_PARAMETERS* params, StreamOutputCache* outputCache, vector<uint8_t>* compressedDataA, vector<uint8_t>* compressedDataB, HRESULT* errorOut)
 {
-    std::vector<uint8_t> shuffled, reordered45, rotated;
-    std::vector<uint8_t> ctrl;
-
-    BC7_Mode45_ReorderRGBA(src, srcSize, reordered45);
-    BC7_ModeJoin_RotateColors(reordered45.data(), reordered45.size(), rotated, opt->AltEncode, rotationRegionSize);
-    BC7_ModeJoin_Transform(rotated.data(), rotated.size(), shuffled, *opt, *metrics, ctrl);
-
-    CompressTask(shuffled.data(), shuffled.size(), compressedData, *params, *errorOut);
-}
-
-static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplitShuffleOptions* opt, BC7TextureMetrics* metrics, SHUFFLE_COMPRESS_PARAMETERS* params, vector<uint8_t>* compressedDataA, vector<uint8_t>* compressedDataB, HRESULT* errorOut)
-{
-#if _DEBUG
+#if _DEBUG || GACL_JOINCHK
     // Reverse yields linear data, so re-apply any space curve before comparing against the (possibly curved) source
     auto validateReverse = [&](const vector<uint8_t>& shuffled)
     {
@@ -894,7 +1199,11 @@ static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplit
             GACL_Shuffle_ApplySpaceCurve(recurved.data(), unshuffled.data(), srcSize, 16, opt->SpaceCurveWidthInPixels, true);
             unshuffled.swap(recurved);
         }
-        assert(memcmp(unshuffled.data(), src, unshuffled.size()) == 0);
+        if (memcmp(unshuffled.data(), src, unshuffled.size()) != 0)
+        {
+            Utility::Printf(GACL_Logging_Priority_High, L"BC7 Split round trip failed.\n");
+            assert(false);
+        }
     };
 #endif
 
@@ -903,9 +1212,13 @@ static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplit
 
     BC7_ModeSplit_Transform(src, srcSize, outA, outB, *opt, *metrics);
 
+    // the streams are validated before the cache takes them
     if ((opt->ModeTransform == BC7ModeSplitModeTransformA || opt->ModeTransform == BC7ModeSplitModeTransformAny) && outA.size() <= srcSize)
     {
-        thread t([&] { CompressTask(outA.data(), outA.size(), compressedDataA, *params, *errorOut); });
+#if _DEBUG || GACL_JOINCHK
+        validateReverse(outA);
+#endif
+        thread t([&] { outputCache->Compress(std::move(outA), compressedDataA, *params, *errorOut); });
         compressTaskA.swap(t);
     }
     else
@@ -915,23 +1228,19 @@ static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplit
 
     if (outB.size() <= srcSize)
     {
-        CompressTask(outB.data(), outB.size(), compressedDataB, *params, *errorOut);
-#if _DEBUG
+#if _DEBUG || GACL_JOINCHK
         validateReverse(outB);
 #endif
+        outputCache->Compress(std::move(outB), compressedDataB, *params, *errorOut);
     }
     else
     {
         compressedDataB->resize(0);     // enforce that shuffled size <= original
     }
 
-    if (opt->ModeTransform == BC7ModeSplitModeTransformA || opt->ModeTransform == BC7ModeSplitModeTransformAny && outA.size() <= srcSize)
+    if (compressTaskA.joinable())
     {
         compressTaskA.join();
-#if _DEBUG
-        validateReverse(outA);
-#endif
-
     }
 }
 
@@ -966,6 +1275,16 @@ HRESULT ShuffleCompress_BC7(
         destBytesWritten == nullptr)
         return E_INVALIDARG;
 
+#if _DEBUG || GACL_JOINCHK
+    static const size_t joinSelfTestFailures = BC7_ModeJoin_ReverseSelfTest();
+    if (joinSelfTestFailures)
+    {
+        Utility::Printf(GACL_Logging_Priority_High, L"BC7 Join reverse self-test: %zu failures.\n", joinSelfTestFailures);
+        assert(false);
+        return E_FAIL;
+    }
+#endif
+
     const bool bIncludeSplitMode =
         *destTransformId == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT ||
         //destTransformId == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED ||                  // Experimental transform, temporarily removed from supported list
@@ -973,7 +1292,7 @@ HRESULT ShuffleCompress_BC7(
 
     const bool bIncludeJoinMode =
         *destTransformId == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN ||
-        *destTransformId == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN_SC ||
+        *destTransformId == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX ||
         //destTransformId == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED ||                  // Experimental transform, temporarily removed from supported list
         *destTransformId == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL;
 
@@ -1018,17 +1337,56 @@ HRESULT ShuffleCompress_BC7(
 #endif
     }
 
+    // BC7 content gate.  Where Split runs on a stream of up to 512 KB, with GACL's default zstd routines and a final level above 6 up
+    // to the size default, zstd level 6 first compresses the unshuffled stream.  If that leaves under a quarter of it (typical of RDO
+    // content), the fast path compresses the candidates at level 6 to rank them, and only the 6 smallest distinct ones again at the
+    // final level; it tries 5 of the Split strategies.  Otherwise level 6 ranks them too poorly: the safe path compresses every
+    // candidate at the final level, and tries 7 Split strategies.  On BC7 VT tile groups the gate costs about 0.002% of their size
+    // for about 0.7x their CPU.  Larger streams keep the full search: the gate was measured on streams of 64 to 320 KB, and level 6
+    // trials misjudge large textures.
+    const bool defaultRoutines =
+        GACL_Compression_InitRoutine == &GACL_Compression_DefaultInitRoutine &&
+        GACL_Compression_CompressRoutine == &GACL_Compression_DefaultCompressRoutine &&
+        GACL_Compression_CleanupRoutine == &GACL_Compression_DefaultCleanupRoutine;
+    const int requestedZstdLevel = int(params.CompressSettings.Default.ZstdCompressionLevel);
+    const int defaultZstdLevel = srcSize <= 16 * 1024 ? 12 : (srcSize <= 256 * 1024 ? 14 : 18);     // as GACL_Compression_DefaultInitRoutine
+    const int finalZstdLevel = requestedZstdLevel != 0 ? requestedZstdLevel : defaultZstdLevel;
+    constexpr int gateRankLevel = 6;
+    constexpr size_t gateFinalists = 6;
+    enum class ContentGate { Off, Fast, Safe } gate = ContentGate::Off;
+    if (bIncludeSplitMode && defaultRoutines && srcSize <= 512 * 1024 && finalZstdLevel > gateRankLevel && finalZstdLevel <= defaultZstdLevel)
+    {
+        vector<uint8_t> probe(ZSTD_compressBound(srcSize));
+        // TextureData can be null (no uncurved transforms): the curved source stands in
+        const uint8_t* const probeSrc = srcforUncurvedTransforms != nullptr ? srcforUncurvedTransforms : srcForCurvedTransforms;
+        const size_t probeSize = ZSTD_compress(probe.data(), probe.size(), probeSrc, srcSize, gateRankLevel);
+        gate = !ZSTD_isError(probeSize) && probeSize * 4 < srcSize ? ContentGate::Fast : ContentGate::Safe;
+    }
+    SHUFFLE_COMPRESS_PARAMETERS rankParams = params;
+    rankParams.CompressSettings.Default.ZstdCompressionLevel = gateRankLevel;
+    // the parameters every candidate is first compressed with
+    SHUFFLE_COMPRESS_PARAMETERS* const candParams = gate == ContentGate::Fast ? &rankParams : &params;
+
     BC7TextureMetrics metrics = {}; // , metrics16K, metrics256K;
     BC7_CollectTextureMetrics((srcForCurvedTransforms ? srcForCurvedTransforms : srcforUncurvedTransforms), srcSize, metrics);
-    ADDTASK(strat_BC7_NoShuffle, srcforUncurvedTransforms, srcSize, &params, &noShuffle, &hr);
+    ADDTASK(strat_BC7_NoShuffle, srcforUncurvedTransforms, srcSize, candParams, &noShuffle, &hr);
 
-    bool bIncludeCurvedZstdOnly = nullptr != srcForCurvedTransforms &&
-        (*destTransformId == GACL_SHUFFLE_TRANSFORM_ZSTD_SC || *destTransformId == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL);
+    // curved streams record the texture width in 16KB micro-tiles (32 BC7 blocks each) in the stream header
+    const size_t curveTiles = encodedStreamIsCurved ? ((params.CurvedTransforms.WidthInPixels + 3) / 4) / 32 : 0;
+    const uint8_t curveWidthTiles = uint8_t(curveTiles);
+
+    // the curve-only EX stream (no shuffle) replaces the former ZSTD_SC transform
+    const bool bIncludeCurvedZstdOnly = curveTiles >= 1 && curveTiles <= 255 &&
+        (*destTransformId == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX || *destTransformId == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL);
 
     vector<uint8_t> curvedNoShuffle;
+    size_t codedCurved = 0;
+    // the curve-only and Join candidates' streams: the Join trials often produce identical streams (when their masks select the same
+    // layout for the source), which compress once
+    StreamOutputCache joinOutputCache;
     if (bIncludeCurvedZstdOnly)
     {
-        ADDTASK(strat_BC7_NoShuffle, srcForCurvedTransforms, srcSize, &params, &curvedNoShuffle, &hr);
+        ADDTASK(strat_BC7_CurveOnly, srcForCurvedTransforms, srcSize, curveWidthTiles, candParams, &joinOutputCache, &curvedNoShuffle, &hr, &codedCurved);
     }
 
 
@@ -1036,19 +1394,37 @@ HRESULT ShuffleCompress_BC7(
     const uint8_t* src = encodedStreamIsCurved ? srcForCurvedTransforms : srcforUncurvedTransforms;
 
     // join-mode compressed output vectors
-    vector<uint8_t> joinMode, joinModeNM, joinModeAlt, joinModeRot16, joinModeRot256;
-    if (bIncludeJoinMode)    // skip mode-join shuffles if the caller has explicitly requested only mode-split
+    vector<uint8_t> joinMode, joinModeHcAlpha, joinModeHcNone, joinModeHcAlphaBlue;
+
+    // Join trial metrics live at function scope: worker threads hold pointers to them until the join below.
+    // Hardcoded-assumption Join candidates plus a no-statics trial (HCN).
+    BC7TextureMetrics blankMetrics = {};
+#ifndef GACL_HCA
+#define GACL_HCA 0      // HCA: mask of the "hc Alpha" Join trial (PMMT 2 runs the per-mode mask trial in its place)
+#endif
+    BC7TextureMetrics hcAlphaMetrics = {}; hcAlphaMetrics.LowEntropy = GACL_HCA;
+#ifndef GACL_HCAB
+#define GACL_HCAB 0xC3  // HCAB: mask of the "hc Alpha+Blue" Join trial
+#endif
+    BC7TextureMetrics hcAlphaBlueMetrics = {}; hcAlphaBlueMetrics.LowEntropy = GACL_HCAB;
+#if GACL_PMMT
+    BC7TextureMetrics& pmmMetrics = GACL_PMMT == 2 ? hcAlphaMetrics : hcAlphaBlueMetrics;
+    pmmMetrics = metrics;
+    pmmMetrics.JoinModeMasks = true;
+#endif
+    // blocks each Join trial's stream header had to code itself (streamheader.h coded entries)
+    size_t codedJoin = 0, codedHcAlpha = 0, codedHcNone = 0, codedHcAlphaBlue = 0;
+    if (bIncludeJoinMode && curveTiles <= 255)    // skip mode-join shuffles if the caller has explicitly requested only mode-split
     {
-        BC7TextureMetrics blankMetrics = {};
-
-        BC7ModeJoinShuffleOptions optJoin = { false };
-        BC7ModeJoinShuffleOptions optJoinAlt = { true };
-
-        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &metrics, &params, &joinMode, &hr);
-        ADDTASK(strat_BC7_JoinMode, src, srcSize, &optJoin, &blankMetrics, &params, &joinModeNM, &hr);
-        //ADDTASKstrat_BC7_JoinMode, src, srcSize, &optJoinAlt, &metrics, &params, &joinModeAlt, &hr);
-        ADDTASK(strat_BC7_JoinModeRot, src, srcSize, &optJoin, &metrics, &params, 16 * 1024, &joinModeRot16, &hr);
-        ADDTASK(strat_BC7_JoinModeRot, src, srcSize, &optJoin, &metrics, &params, 256 * 1024, &joinModeRot256, &hr);
+        ADDTASK(strat_BC7_JoinMode, src, srcSize, &metrics, curveWidthTiles, candParams, &joinMode, &hr, &codedJoin, &joinOutputCache);
+        // a zero hc mask would duplicate the no-statics trial, so the trial is dropped
+#if GACL_HCA || GACL_PMMT == 2
+        ADDTASK(strat_BC7_JoinMode, src, srcSize, &hcAlphaMetrics, curveWidthTiles, candParams, &joinModeHcAlpha, &hr, &codedHcAlpha, &joinOutputCache);
+#endif
+#if GACL_HCAB || GACL_PMMT == 3
+        ADDTASK(strat_BC7_JoinMode, src, srcSize, &hcAlphaBlueMetrics, curveWidthTiles, candParams, &joinModeHcAlphaBlue, &hr, &codedHcAlphaBlue, &joinOutputCache);
+#endif
+        ADDTASK(strat_BC7_JoinMode, src, srcSize, &blankMetrics, curveWidthTiles, candParams, &joinModeHcNone, &hr, &codedHcNone, &joinOutputCache);   // HCN: no-statics trial
     }
     
     struct SplitStrat{
@@ -1057,7 +1433,7 @@ HRESULT ShuffleCompress_BC7(
         vector<uint8_t> DestA;
         vector<uint8_t> DestB;
     };
-    vector<const SplitStrat*> splitStrategies;
+    vector<SplitStrat*> splitStrategies;
 
 
     // supported patterns:                          0   1   2   3   4   5   6   7
@@ -1081,12 +1457,14 @@ HRESULT ShuffleCompress_BC7(
     SplitStrat ss1r = { L"Stable(4,5,6), EQSBI(1,3,7), EP4b(0,2) r  ",
         { mt, { EndpointPair4bit, EndpointQuadSignificantBitInderleaved, EndpointPair4bit, EndpointQuadSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointQuadSignificantBitInderleavedAlt }, 0, _64MB }
     };
+#if GACL_SPLIT_ORDER_VARIANTS
     SplitStrat ss1o1r = { L"Stable(4,5,6), EQSBI(1,3,7), EP4b(0,2) o1r",
         { mt, { EndpointPair4bit, EndpointQuadSignificantBitInderleaved, EndpointPair4bit, EndpointQuadSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointQuadSignificantBitInderleavedAlt }, 1, _64MB }
     };
     SplitStrat ss1o2r = { L"Stable(4,5,6), EQSBI(1,3,7), EP4b(0,2) o2r",
         { mt, { EndpointPair4bit, EndpointQuadSignificantBitInderleaved, EndpointPair4bit, EndpointQuadSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointQuadSignificantBitInderleavedAlt }, 2, _64MB }
     };
+#endif
 
 
     // Strategy #2 - prefer stable island, endpoint quad, then 4 bit color plane
@@ -1096,17 +1474,21 @@ HRESULT ShuffleCompress_BC7(
     SplitStrat ss2o1r = { L"Stable(4,5,6), EQSBI(1,3,7), CP4b(0,2) o1r",
         { mt, { ColorPlane4bit, EndpointQuadSignificantBitInderleaved, ColorPlane4bit, EndpointQuadSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointQuadSignificantBitInderleavedAlt}, 1, _64MB }
     };
+#if GACL_SPLIT_ORDER_VARIANTS
     SplitStrat ss2o2r = { L"Stable(4,5,6), EQSBI(1,3,7), CP4b(0,2) o2r",
         { mt, { ColorPlane4bit, EndpointQuadSignificantBitInderleaved, ColorPlane4bit, EndpointQuadSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointQuadSignificantBitInderleavedAlt}, 2, _64MB }
     };
+#endif
 
     // Strategy #3 - prefer endpoint pair interleave 
     SplitStrat ss3 = { L"EPSBI(0,1,2,3,4,5,6,7)    ",
         { mt, { EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved}, 0, 0}
     };
+#if GACL_SPLIT_ORDER_VARIANTS
     SplitStrat ss3o1r = { L"EPSBI(0,1,2,3,4,5,6,7) o1r",
         { mt, { EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved}, 1, _64MB}
     };
+#endif
     SplitStrat ss3o2r = { L"EPSBI(0,1,2,3,4,5,6,7) o2r",
         { mt, { EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved}, 2, _64MB}
     };
@@ -1118,14 +1500,14 @@ HRESULT ShuffleCompress_BC7(
     SplitStrat ss4o1r = { L"Stable(4,5,6), EPSBI(1,3,7), CP4b(0,2) o1r",
         { mt, { ColorPlane4bit, EndpointPairSignificantBitInderleaved, ColorPlane4bit, EndpointPairSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointPairSignificantBitInderleaved}, 1, _64MB}
     };
+#if GACL_SPLIT_ORDER_VARIANTS
     SplitStrat ss4o2r = { L"Stable(4,5,6), EPSBI(1,3,7), CP4b(0,2) o2r",
         { mt, { ColorPlane4bit, EndpointPairSignificantBitInderleaved, ColorPlane4bit, EndpointPairSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointPairSignificantBitInderleaved}, 2, _64MB}
     };
+#endif
 
-    // Strategy #5 - similar to #3, but placing the smaller stable region of mode 7 quads at a different byte edge
-    SplitStrat ss5 = { L"Stable(4,5,6), EQSBI(1,3), EQSBIA(7), CP4b(0,2)  ",
-        { mt, { ColorPlane4bit, EndpointQuadSignificantBitInderleaved, ColorPlane4bit, EndpointQuadSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointQuadSignificantBitInderleavedAlt}, 0, 0 }
-    };
+    // Strategy #5 - placing the smaller stable region of mode 7 quads at a different byte edge.  #2 does the same
+    // (EQSBIA in mode 7), so only the rotated variant is tried
     SplitStrat ss5r = { L"Stable(4,5,6), EQSBI(1,3), EQSBIA(7), CP4b(0,2) r",
         { mt, { ColorPlane4bit, EndpointQuadSignificantBitInderleaved, ColorPlane4bit, EndpointQuadSignificantBitInderleaved, StableIsland, StableIsland, StableIsland, EndpointQuadSignificantBitInderleavedAlt}, 0, _64MB }
     };
@@ -1134,18 +1516,36 @@ HRESULT ShuffleCompress_BC7(
     SplitStrat ss7 = { L"EPSBI(1,3,4,5,6,7), CP4b(0,2)    ",
         { mt, { ColorPlane4bit, EndpointPairSignificantBitInderleaved, ColorPlane4bit, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved}, 0, 0}
     };
+#if GACL_SPLIT_ORDER_VARIANTS
     SplitStrat ss7o1r = { L"EPSBI(1,3,4,5,6,7), CP4b(0,2) o1r",
         { mt, { ColorPlane4bit, EndpointPairSignificantBitInderleaved, ColorPlane4bit, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved}, 1, _64MB}
     };
     SplitStrat ss7o2r = { L"EPSBI(1,3,4,5,6,7), CP4b(0,2) o2r",
         { mt, { ColorPlane4bit, EndpointPairSignificantBitInderleaved, ColorPlane4bit, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved, EndpointPairSignificantBitInderleaved}, 2, _64MB}
     };
+#endif
 
 
-    // mode-split streams record any space curve in the stream header
-    for (SplitStrat* ss : { &ss1, &ss1r, &ss1o1r, &ss1o2r, &ss2, &ss2o1r, &ss2o2r, &ss3, &ss3o1r, &ss3o2r, &ss4, &ss4o1r, &ss4o2r, &ss5, &ss5r, &ss7, &ss7o1r, &ss7o2r })
+    // mode-split streams record any space curve, index prediction and section layout in the stream header.  The section layout trials
+    // run at the requested zstd level capped at 6 (6 if none is requested): on samples of BC7 VT tile groups, higher trial levels cost
+    // much more and chose no better layouts.  Streams above 512 KB, requested above the size default level, run them at the requested
+    // level capped at 18: on whole textures that saves about 0.16% of their size, for about 1.65x their BC7 CPU
+    const int sectionTrialLevel = (srcSize > 512 * 1024 && requestedZstdLevel > defaultZstdLevel) ? (std::min)(requestedZstdLevel, 18) :
+        (requestedZstdLevel > 0 ? (std::min)(requestedZstdLevel, 6) : 6);
+    // the strategies share section trial results: a mode's sections recur across strategies with the same pattern, ordering and rotation
+    BC7ModeSplitTrialCache splitTrialCache;
+    StreamOutputCache splitOutputCache;
+    for (SplitStrat* ss : { &ss1, &ss1r, &ss2, &ss2o1r, &ss3, &ss3o2r, &ss4, &ss4o1r, &ss5r, &ss7
+#if GACL_SPLIT_ORDER_VARIANTS
+        , &ss1o1r, &ss1o2r, &ss2o2r, &ss3o1r, &ss4o2r, &ss7o1r, &ss7o2r
+#endif
+        })
     {
         ss->Options.SpaceCurveWidthInPixels = encodedStreamIsCurved ? static_cast<uint32_t>(params.CurvedTransforms.WidthInPixels) : 0u;
+        ss->Options.IndexPrediction = 1;
+        ss->Options.SectionLayout = 1;
+        ss->Options.SectionTrialLevel = static_cast<uint8_t>(sectionTrialLevel);
+        ss->Options.TrialCache = &splitTrialCache;
     }
 
     if (bIncludeSplitMode)  // skip mode-split shuffles if the caller has explicitly requested only mode-join
@@ -1162,79 +1562,76 @@ HRESULT ShuffleCompress_BC7(
             0, //metrics.M[7].OrderingStrategies->Count(),
         });
 
-        splitStrategies.push_back(&ss1);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss1.Options, &metrics, &params, &ss1.DestA, &ss1.DestB, &hr);
-        splitStrategies.push_back(&ss1r);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss1r.Options, &metrics, &params, &ss1r.DestA, &ss1r.DestB, &hr);
-
+        // the endpoint ordering variants (o1r, o2r) that never gained over the other strategies on samples of BC7 VT tile groups are
+        // not tried, unless GACL_SPLIT_ORDER_VARIANTS restores them (in their former order) where the content gate is off.  The content
+        // gate's fast path tries 5 of the strategies below, its safe path 7 (fewer where the ordering variants don't apply): the others
+        // gained least on those samples
+        auto addSplit = [&](SplitStrat& ss, bool onFast, bool onSafe)
+        {
+            if ((gate == ContentGate::Fast && !onFast) || (gate == ContentGate::Safe && !onSafe))
+            {
+                return;
+            }
+            splitStrategies.push_back(&ss);
+            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss.Options, &metrics, candParams, &splitOutputCache, &ss.DestA, &ss.DestB, &hr);
+        };
+        addSplit(ss1, false, true);
+        addSplit(ss1r, true, true);
+#if GACL_SPLIT_ORDER_VARIANTS
         if (maxOrderStrategies > 0)
         {
-            splitStrategies.push_back(&ss1o1r);
-            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss1o1r.Options, &metrics, &params, &ss1o1r.DestA, &ss1o1r.DestB, &hr);
+            addSplit(ss1o1r, false, false);
             if (maxOrderStrategies > 1)
             {
-                splitStrategies.push_back(&ss1o2r);
-                ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss1o2r.Options, &metrics, &params, &ss1o2r.DestA, &ss1o2r.DestB, &hr);
+                addSplit(ss1o2r, false, false);
             }
         }
-
-        splitStrategies.push_back(&ss2);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss2.Options, &metrics, &params, &ss2.DestA, &ss2.DestB, &hr);
+#endif
+        addSplit(ss2, false, false);
         if (maxOrderStrategies > 0)
         {
-            splitStrategies.push_back(&ss2o1r);
-            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss2o1r.Options, &metrics, &params, &ss2o1r.DestA, &ss2o1r.DestB, &hr);
+            addSplit(ss2o1r, true, true);
+#if GACL_SPLIT_ORDER_VARIANTS
             if (maxOrderStrategies > 1)
             {
-                splitStrategies.push_back(&ss2o2r);
-                ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss2o2r.Options, &metrics, &params, &ss2o2r.DestA, &ss2o2r.DestB, &hr);
+                addSplit(ss2o2r, false, false);
             }
+#endif
         }
-
-        splitStrategies.push_back(&ss3);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss3.Options, &metrics, &params, &ss3.DestA, &ss3.DestB, &hr);
+        addSplit(ss3, true, true);
+#if GACL_SPLIT_ORDER_VARIANTS
         if (maxOrderStrategies > 0)
         {
-            splitStrategies.push_back(&ss3o1r);
-            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss3o1r.Options, &metrics, &params, &ss3o1r.DestA, &ss3o1r.DestB, &hr);
-            if (maxOrderStrategies > 1)
-            {
-                splitStrategies.push_back(&ss3o2r);
-                ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss3o2r.Options, &metrics, &params, &ss3o2r.DestA, &ss3o2r.DestB, &hr);
-            }
+            addSplit(ss3o1r, false, false);
         }
-
-        splitStrategies.push_back(&ss7);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss7.Options, &metrics, &params, &ss7.DestA, &ss7.DestB, &hr);
+#endif
+        if (maxOrderStrategies > 1)
+        {
+            addSplit(ss3o2r, true, true);
+        }
+        addSplit(ss7, false, false);
+#if GACL_SPLIT_ORDER_VARIANTS
         if (maxOrderStrategies > 0)
         {
-            splitStrategies.push_back(&ss7o1r);
-            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss7o1r.Options, &metrics, &params, &ss7o1r.DestA, &ss7o1r.DestB, &hr);
+            addSplit(ss7o1r, false, false);
             if (maxOrderStrategies > 1)
             {
-                splitStrategies.push_back(&ss7o2r);
-                ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss7o2r.Options, &metrics, &params, &ss7o2r.DestA, &ss7o2r.DestB, &hr);
+                addSplit(ss7o2r, false, false);
             }
         }
-
-        splitStrategies.push_back(&ss4);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss4.Options, &metrics, &params, &ss4.DestA, &ss4.DestB, &hr);
+#endif
+        addSplit(ss4, true, true);
         if (maxOrderStrategies > 0)
         {
-            splitStrategies.push_back(&ss4o1r);
-            ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss4o1r.Options, &metrics, &params, &ss4o1r.DestA, &ss4o1r.DestB, &hr);
+            addSplit(ss4o1r, false, true);
+#if GACL_SPLIT_ORDER_VARIANTS
             if (maxOrderStrategies > 1)
             {
-                splitStrategies.push_back(&ss4o2r);
-                ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss4o2r.Options, &metrics, &params, &ss4o2r.DestA, &ss4o2r.DestB, &hr);
+                addSplit(ss4o2r, false, false);
             }
+#endif
         }
-
-        splitStrategies.push_back(&ss5);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss5.Options, &metrics, &params, &ss5.DestA, &ss5.DestB, &hr);
-        splitStrategies.push_back(&ss5r);
-        ADDTASK(strat_BC7_SplitMode, src, srcSize, &ss5r.Options, &metrics, &params, &ss5r.DestA, &ss5r.DestB, &hr);
-
+        addSplit(ss5r, false, false);
     }
 
     for (auto& task : tasks) task.join();
@@ -1246,9 +1643,156 @@ HRESULT ShuffleCompress_BC7(
         return hr;
     }
 
+#ifndef GACL_JHF
+#define GACL_JHF 1      // JHF: header-free Join fallback
+#endif
+    // JHF: when the curved no-statics trial has too few duplicate blocks to hold the parameter header (so it is dropped, or
+    // its header codes blocks itself), the trial is also redone on the uncurved blocks, which needs no header
+    // (GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN)
+    vector<uint8_t> joinLinear;
+#if GACL_JHF
+    if (bIncludeJoinMode && encodedStreamIsCurved && curveTiles <= 255 && (joinModeHcNone.empty() || codedHcNone > 0))
+    {
+        BC7TextureMetrics linearMetrics = {};
+        strat_BC7_JoinMode(srcforUncurvedTransforms, srcSize, &linearMetrics, 0, candParams, &joinLinear, &hr, nullptr, &joinOutputCache);
+        if (!SUCCEEDED(hr))
+        {
+            Utility::Printf(GACL_Logging_Priority_High, L"Fatal shuffle+compress error.\n");
+            *destTransformId = GACL_SHUFFLE_TRANSFORM_NONE;
+            return hr;
+        }
+    }
+#endif
+
+    // Byte remap (bc7joinremap.h): about 0.5% smaller Join streams, but the GPU Join decode loses about a fifth of its
+    // throughput undoing it, so it is only tried above the default zstd level (where the encoder trades speed for size).
+    // It needs the stream header (parameter 4), so it redoes the best header-capable Join trial, with each set.
+    vector<uint8_t> joinRemap;
+    BC7TextureMetrics remapMetrics = {};
+    size_t codedRemap = 0;
+    const bool joinRemapTried = bIncludeJoinMode && curveTiles <= 255 && requestedZstdLevel > defaultZstdLevel && BC7_ModeJoin_RemapSets() > 0;
+    if (joinRemapTried)
+    {
+        const vector<uint8_t>* bj = nullptr;
+        for (auto b : { &joinMode, &joinModeHcAlpha, &joinModeHcNone, &joinModeHcAlphaBlue })
+        {
+            if (b->size() > 0 && (!bj || b->size() < bj->size()))
+            {
+                bj = b;
+            }
+        }
+        if (bj)
+        {
+            const BC7TextureMetrics& bm = bj == &joinMode ? metrics : bj == &joinModeHcAlpha ? hcAlphaMetrics :
+                bj == &joinModeHcAlphaBlue ? hcAlphaBlueMetrics : blankMetrics;
+            const unsigned sets = BC7_ModeJoin_RemapSets();
+            vector<vector<uint8_t>> alts(sets + 1);
+            vector<BC7TextureMetrics> altMetrics(sets + 1, bm);
+            vector<size_t> altCoded(sets + 1);
+            tasks.clear();
+            for (unsigned s = 1; s <= sets; s++)
+            {
+                altMetrics[s].JoinRemap = uint8_t(s);
+                ADDTASK(strat_BC7_JoinMode, src, srcSize, &altMetrics[s], curveWidthTiles, &params, &alts[s], &hr, &altCoded[s], nullptr);
+            }
+            for (auto& task : tasks) task.join();
+            if (!SUCCEEDED(hr))
+            {
+                Utility::Printf(GACL_Logging_Priority_High, L"Fatal shuffle+compress error.\n");
+                *destTransformId = GACL_SHUFFLE_TRANSFORM_NONE;
+                return hr;
+            }
+            for (unsigned s = 1; s <= sets; s++)
+            {
+                if (alts[s].size() > 0 && (joinRemap.empty() || alts[s].size() < joinRemap.size()))
+                {
+                    joinRemap.swap(alts[s]);
+                    remapMetrics = altMetrics[s];
+                    codedRemap = altCoded[s];
+                }
+            }
+        }
+    }
+
+    // content gate, fast path: the 6 smallest distinct candidates at level 6 are compressed again, from their kept streams, at the
+    // final level; the others are dropped (the byte remap never runs with the gate: it needs a level above the size default)
+    if (gate == ContentGate::Fast)
+    {
+        struct Ranked
+        {
+            vector<uint8_t>* Out;
+            StreamOutputCache* Cache;   // holds the candidate's stream (nullptr: the unshuffled source)
+        };
+        vector<Ranked> ranked = { { &noShuffle, nullptr }, { &curvedNoShuffle, &joinOutputCache }, { &joinMode, &joinOutputCache },
+            { &joinModeHcAlpha, &joinOutputCache }, { &joinModeHcNone, &joinOutputCache }, { &joinModeHcAlphaBlue, &joinOutputCache }, { &joinLinear, &joinOutputCache } };
+        for (SplitStrat* ss : splitStrategies)
+        {
+            ranked.push_back({ &ss->DestA, &splitOutputCache });
+            ranked.push_back({ &ss->DestB, &splitOutputCache });
+        }
+        vector<Ranked> order;
+        for (const Ranked& r : ranked)
+        {
+            if (!r.Out->empty())
+            {
+                order.push_back(r);
+            }
+        }
+        stable_sort(order.begin(), order.end(), [](const Ranked& x, const Ranked& y) { return x.Out->size() < y.Out->size(); });
+        vector<Ranked> picks;
+        for (const Ranked& r : order)
+        {
+            if (picks.size() == gateFinalists)
+            {
+                break;
+            }
+            if (none_of(picks.begin(), picks.end(), [&](const Ranked& p) { return *p.Out == *r.Out; }))
+            {
+                picks.push_back(r);
+            }
+        }
+        vector<const vector<uint8_t>*> streams(picks.size(), nullptr);
+        for (size_t j = 0; j < picks.size(); j++)
+        {
+            if (picks[j].Cache != nullptr)
+            {
+                streams[j] = picks[j].Cache->FindStream(*picks[j].Out);
+                if (streams[j] == nullptr)
+                {
+                    hr = E_FAIL;
+                }
+            }
+        }
+        vector<vector<uint8_t>> finals(picks.size());
+        if (SUCCEEDED(hr))
+        {
+            tasks.clear();
+            for (size_t j = 0; j < picks.size(); j++)
+            {
+                ADDTASK(CompressTask, streams[j] ? streams[j]->data() : srcforUncurvedTransforms, streams[j] ? streams[j]->size() : srcSize,
+                    &finals[j], std::ref(params), std::ref(hr));
+            }
+            for (auto& task : tasks) task.join();
+        }
+        for (const Ranked& r : ranked)
+        {
+            r.Out->clear();
+        }
+        for (size_t j = 0; j < picks.size(); j++)
+        {
+            picks[j].Out->swap(finals[j]);
+        }
+        if (!SUCCEEDED(hr))
+        {
+            Utility::Printf(GACL_Logging_Priority_High, L"Fatal shuffle+compress error.\n");
+            *destTransformId = GACL_SHUFFLE_TRANSFORM_NONE;
+            return hr;
+        }
+    }
+
     size_t bestSize = srcSize;
     const uint8_t* best = src;
-    for (auto b : { &noShuffle, &curvedNoShuffle, &joinMode, &joinModeNM, &joinModeAlt, &joinModeRot16, &joinModeRot256 })
+    for (auto b : { &noShuffle, &curvedNoShuffle, &joinMode, &joinModeHcAlpha, &joinModeHcNone, &joinLinear, &joinModeHcAlphaBlue, &joinRemap })
     {
         if (b->size() < bestSize && b->size() > 0)
         {
@@ -1272,9 +1816,7 @@ HRESULT ShuffleCompress_BC7(
 
     wchar_t compressionStr[20] = L"(custom)";
 
-    if (GACL_Compression_InitRoutine == &GACL_Compression_DefaultInitRoutine &&
-        GACL_Compression_CompressRoutine == &GACL_Compression_DefaultCompressRoutine &&
-        GACL_Compression_CleanupRoutine == &GACL_Compression_DefaultCleanupRoutine)
+    if (defaultRoutines)
     {
         swprintf_s(compressionStr, _countof(compressionStr), L"(zstd-%d)", params.CompressSettings.Default.ZstdCompressionLevel);
     }
@@ -1284,15 +1826,31 @@ HRESULT ShuffleCompress_BC7(
 
     if (bIncludeCurvedZstdOnly)
     {
-        Utility::Printf(L"No Shuffle [curved]  %s                                %u%c  \n", compressionStr, curvedNoShuffle.size(), (bestSize > curvedNoShuffle.size() ? L'!' : L' '));
+        if (curvedNoShuffle.empty())
+        {
+            Utility::Printf(L"No Shuffle [curved]  %s                                -  (no duplicate blocks to make room for the stream header)\n", compressionStr);
+        }
+        else
+        {
+            Utility::Printf(L"No Shuffle [curved]  %s                                %u%c  \n", compressionStr, curvedNoShuffle.size(), (best == curvedNoShuffle.data() ? L'*' : L' '));
+        }
     }
     if (bIncludeJoinMode)
     {
-        Utility::Printf(L"Join..........................................................%u%c  \n", joinMode.size(), (best == joinMode.data() ? L'*' : L' '));
-        Utility::Printf(L"Join (no metrics)                                             %u%c  \n", joinModeNM.size(), (best == joinModeNM.data() ? L'*' : L' '));
-        Utility::Printf(L"Join (Alt)                                                    %u%c  \n", joinModeAlt.size(), (best == joinModeAlt.data() ? L'*' : L' '));
-        Utility::Printf(L"Join (4K rot)                                                 %u%c  \n", joinModeRot16.size(), (best == joinModeRot16.data() ? L'*' : L' '));
-        Utility::Printf(L"Join (256K rot)                                               %u%c  \n", joinModeRot256.size(), (best == joinModeRot256.data() ? L'*' : L' '));
+        Utility::Printf(L"Join (metrics)..............................................%u%c  \n", joinMode.size(), (best == joinMode.data() ? L'*' : L' '));
+#if GACL_PMMT == 2
+        Utility::Printf(L"Join (per-mode)                                               %u%c  \n", joinModeHcAlpha.size(), (best == joinModeHcAlpha.data() ? L'*' : L' '));
+#endif
+        Utility::Printf(L"Join (hc None)                                                %u%c  \n", joinModeHcNone.size(), (best == joinModeHcNone.data() ? L'*' : L' '));
+        if (!joinLinear.empty())
+        {
+            Utility::Printf(L"Join (hc None, linear)                                        %u%c  \n", joinLinear.size(), (best == joinLinear.data() ? L'*' : L' '));
+        }
+        Utility::Printf(L"Join (hc Alpha+Blue)                                          %u%c  \n", joinModeHcAlphaBlue.size(), (best == joinModeHcAlphaBlue.data() ? L'*' : L' '));
+        if (joinRemapTried)
+        {
+            Utility::Printf(L"Join (byte remap %u)                                          %u%c  \n", unsigned(remapMetrics.JoinRemap), joinRemap.size(), (best == joinRemap.data() ? L'*' : L' '));
+        }
     }
     if (bIncludeSplitMode)
     {
@@ -1325,16 +1883,38 @@ HRESULT ShuffleCompress_BC7(
             *destTransformId = GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY;
         }
         else if (best == curvedNoShuffle.data())
-        { 
-            *destTransformId = GACL_SHUFFLE_TRANSFORM_ZSTD_SC;
+        {
+            *destTransformId = GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX;      // curve-only stream (BCNEX_UNSHUFFLED, header transform BC5_116116)
+            if (codedCurved)
+            {
+                Utility::Printf(L"Header coded blocks                                           %u\n", unsigned(codedCurved));
+            }
+        }
+        else if (best == joinLinear.data())
+        {
+            *destTransformId = GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN;
         }
         else if (best == joinMode.data() ||
-            best == joinModeNM.data() ||
-            best == joinModeAlt.data() ||
-            best == joinModeRot16.data() ||
-            best == joinModeRot256.data())
+            best == joinModeHcAlpha.data() ||
+            best == joinModeHcNone.data() ||
+            best == joinModeHcAlphaBlue.data() ||
+            best == joinRemap.data())
         {
-            *destTransformId = encodedStreamIsCurved ? GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN_SC : GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN;
+            const BC7TextureMetrics& bestMetrics =
+                best == joinMode.data() ? metrics :
+                best == joinModeHcAlpha.data() ? hcAlphaMetrics :
+                best == joinModeHcAlphaBlue.data() ? hcAlphaBlueMetrics :
+                best == joinRemap.data() ? remapMetrics : blankMetrics;
+            *destTransformId = BC7_JoinNeedsHeader(bestMetrics, curveWidthTiles) ? GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX : GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN;
+            const size_t bestCoded =
+                best == joinMode.data() ? codedJoin :
+                best == joinModeHcAlpha.data() ? codedHcAlpha :
+                best == joinModeHcAlphaBlue.data() ? codedHcAlphaBlue :
+                best == joinRemap.data() ? codedRemap : codedHcNone;
+            if (bestCoded)
+            {
+                Utility::Printf(L"Header coded blocks                                           %u\n", unsigned(bestCoded));
+            }
         }
         else
         {

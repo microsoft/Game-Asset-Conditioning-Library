@@ -32,7 +32,8 @@ enum GBaseFormat
     BC4,
     BC5,
 #ifdef NEWBC1345
-    CurveOnly,
+    BC7Join,    // BC7 Join streams (headerless GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN, or ..._BC7_EX with a Join header), and
+                // curve-only BC7 streams (..._BC7_EX)
 #endif
     BC7,
 };
@@ -49,14 +50,61 @@ struct GTestParameters
         struct
         {
             uint32_t microShuffleId;
+            bool useHeader;     // the format's EX stream (GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_EX - _BC5_EX: header, duplicate
+                                // removal, curve parameter)
+            uint8_t predictionOff;  // EX: BCNEX_PREDICT_* bits removed from the format's default index prediction
+                                    // (header parameter 2 when nonzero)
+            bool coded;             // EX (BC5): no duplicate blocks, so the stream header must code blocks to make room for itself
+            bool longCoded;         // EX: a header written by the test, coding the costliest block the format's code allows
+                                    // (EncodeBCnExLongCoded); the CPU decode is the expected output
+            bool overrun;           // with longCoded: the header's last bit is the first past its k blocks, in a stream of one
+                                    // decoder thread group (which decodes every body): the decoders reject it, the output stays zero
+            bool manyCoded;         // with longCoded: two removed duplicates sourced above coded blocks, and at least 40 coded
+                                    // blocks (more positions than a 32-lane wave reads at once)
+            bool curveOnly;         // EX: a curve-only stream (header parameter 2 BCNEX_UNSHUFFLED: the curved blocks,
+                                    // unshuffled), making room for its header by removing duplicates or, with coded, coding blocks
+            bool unshuffled;        // EX: BCNEX_UNSHUFFLED added to the index prediction mask (the kept blocks unshuffled,
+                                    // still predicted), which the encoder only writes for curve-only streams
+            bool farDuplicates;     // EX: every block unique but two pairs far apart and far from block 0 (AddFarDuplicates):
+                                    // long codes, which for 8-byte blocks fill a two-block header past FastParseHeader's window
         } BC1345;
 
         struct {
             uint32_t ChunkSize;
             uint8_t endpointOrderStrategy;
             uint32_t patternIndex;
+            bool useIndexPrediction;
+            uint8_t sectionLayout;
         } BC7;
+
+        struct {
+            uint8_t masks;          // 0 = none, 1 = one statics mask for all modes, 2 = per-mode masks, 3 = per-mode with Mode 5 / 6 alpha flags,
+                                    // 4 = per-mode with only the alpha flags of Modes 4-7, 5 = every flag for all modes
+            bool coded;             // every block unique, so the stream header must code blocks to make room for itself
+            uint8_t truncation;     // 0 = none, 1 = the stream loses its last block, 2 = its last byte (the decoders reject it)
+            bool remap;             // the blocks are byte-remapped (header parameter 4)
+            bool mode5;             // most blocks Mode 5 (as in RDO content), for whole waves of Mode 5 blocks after the decoder's mode sort
+            bool spareHeaderBlock;  // the header rewritten into two blocks, removing a second duplicate, though it fits in one: valid
+                                    // (the decoders don't require the fewest header blocks), though not the encoder's choice
+            bool farDuplicate;      // every block unique but one pair far apart and far from block 0: long codes in a one-block
+                                    // header, crossing its 32-bit words
+            bool curveOnly;         // not Join: a curve-only BC7 stream (BC7_EX, the blocks carried as BC5_116116 blocks), with coded as
+                                    // for BC1345 (the other fields unused)
+            uint32_t transformId;   // set by the test: GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN or ..._BC7_EX
+            uint32_t streamSize;    // set by the test: the (possibly truncated) stream size given to the shader
+        } BC7Join;
     };
+
+#ifdef NEWBC1345
+    uint32_t transformOverride; // 0, or an EX stream's id given to the shader in place of its own (and dispatched for, as
+                                // DirectStorage would): another format's EX id, under which the decoders reject a header
+                                // naming the stream's format (the output stays zero), but for BC5_116116 headers of
+                                // parameter 2 exactly BCNEX_UNSHUFFLED (curve-only BC7 streams), which BC5_EX and BC7_EX
+                                // both take. The CPU decoder (BCnEx_Decode) gives the expected output.
+    bool escape;                // an EX stream with its header's escape bit (GACL_STREAMHEADER_ESCAPE) set, as a future
+                                // format extension would set it: the decoders reject it (the output stays zero), as the
+                                // CPU decoder does
+#endif
 };
 
 struct UNSHUFFLE_PER_TEST_STATISTICS
@@ -130,6 +178,9 @@ private:
     void CreateBC7RawFromMetadata(uint32_t widthPixels, uint32_t heightPixels, std::vector<uint8_t>& rawBC7);
     void CreateBCnRawFromMetadata(uint32_t widthPixels, uint32_t heightPixels, uint32_t elementSize, std::vector<uint8_t>& rawBCn);
 
+#ifdef NEWBC1345
+    bool RunBC7JoinTest(GTestParameters const& params);
+#endif
 
     // Device resources.
     std::unique_ptr<DX::DeviceResources>            m_deviceResources;
@@ -144,6 +195,7 @@ private:
     uint32_t                                        m_minHWSupportedWaveSize;
     uint32_t                                        m_maxHWSupportedWaveSize;
     bool                                            m_forceWarp;
+    bool                                            m_useUnifiedShader; // -unified: UnshuffleBCnEx.cso for BC1\3\4\5\7 Join
 
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>    m_uavSrvCbvHeap;
     uint32_t                                        m_DHIncrementSize;
@@ -175,9 +227,10 @@ private:
     Microsoft::WRL::ComPtr<ID3D12Resource>          m_unshufflePassIndirectBuffer;
     Microsoft::WRL::ComPtr<ID3D12Heap>              m_intermediateHeap;
 
-    /*               BC1\3\4\5 unshuffle           */
-    Microsoft::WRL::ComPtr<ID3D12RootSignature>     m_bcnCSRootSignature[5];
-    Microsoft::WRL::ComPtr<ID3D12PipelineState>     m_bcnCSPipelineState[5];
+    /*               BC1\3\4\5 and BC7 Join unshuffle (Game.cpp gShaderInfo: an EX shader per GBaseFormat below BC7, then a
+                     headerless shader per BC1\3\4\5) */
+    Microsoft::WRL::ComPtr<ID3D12RootSignature>     m_bcnCSRootSignature[9];
+    Microsoft::WRL::ComPtr<ID3D12PipelineState>     m_bcnCSPipelineState[9];
 
     // Output resource and its heap
     Microsoft::WRL::ComPtr<ID3D12Resource>          m_outBCnBuffer; 

@@ -23,6 +23,7 @@ constexpr std::tuple<uint32_t, uint32_t, bool, bool> g_testResolutions[] =
     { 1011, 953, false, false },
     { 2048, 2048, true, true },         // Space Curve eligible: BC1, BC3, BC4, BC5, BC7
     //{ 16384,16384, true, true },      // extremely large test case, disabled for now
+    //{ 16384, 128, true, true },       // widest space curve, disabled as it slows testing too much
     { 128, 128, false, true },           // Space Curve eligible: BC3, BC5, BC7
     { 128, 384, false, true },           // Space Curve eligible: BC3, BC5, BC7
     { 128, 400, false, false },
@@ -60,6 +61,22 @@ constexpr uint8_t g_useSpaceCurve[] =
     0,      // Do not use space curve 
     1       // Use space curve
 };
+
+constexpr uint8_t g_useIndexPrediction[] =
+{
+    0,      // Raw BC7 index fields
+    1       // Index fields stored as prediction residuals (BC7 split)
+};
+
+constexpr uint8_t g_sectionLayouts[] =
+{
+    0,      // Block order color, misc and scrap sections
+    1,      // Section layout chosen by encoder trials (BC7 split, with index prediction only)
+    2       // Section layout forced to g_sectionSelectors (BC7 split, with index prediction only)
+};
+
+// per mode: bits 0-1 color unit code, bit 2 color remap, bits 4-5 misc unit code, bit 6 misc remap (codes a section's stride can't use are dropped)
+constexpr uint8_t g_sectionSelectors[8] = { 0x25, 0x52, 0x37, 0x64, 0x71, 0x46, 0x13, 0x65 };
  
 constexpr BC7ModeSplitShufflePattern g_patternSets[][8] =
 {    

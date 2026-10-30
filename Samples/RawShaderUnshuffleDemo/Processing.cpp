@@ -136,11 +136,13 @@ void ProcessTexture(
         BC7_CollectTextureMetrics(src, srcSize, metrics);
 
         // Pack the parameters in a struct that is handed to the GACL lib to shuffle
-        BC7ModeSplitShuffleOptions opt; 
+        BC7ModeSplitShuffleOptions opt = {};
         opt.ModeTransform = shuffleParams.modeTransform;
         opt.EndpointOrderStrategy = shuffleParams.endpointOrderStrategy;
         opt.RotationRegionSize = shuffleParams.ChunkSize;
         opt.SpaceCurveWidthInPixels = curveApplied ? static_cast<uint32_t>(bcTextureWidthInPixels) : 0u;   // recorded in the stream header
+        opt.IndexPrediction = 1;    // recorded in the stream header
+        opt.SectionLayout = 1;      // recorded in the stream header, layouts chosen by zstd trials
         memcpy(opt.Patterns, shuffleParams.Patterns, std::size(opt.Patterns) * sizeof(BC7ModeSplitShufflePattern));
 
         // Call the GACL library to shuffle
@@ -226,6 +228,16 @@ void ProcessTexture(
         GACL_SHUFFLE_TRANSFORM transformId = requestedTransformGroup;
 
         HRESULT const scHr = GACL_ShuffleCompress_BCn(compressed.data(), &transformId, &compressedBytes, params);
+        if (scHr == S_FALSE)
+        {
+            // Incompressible: no transform (zstd alone included) shrank the texture, so the library copied nothing and
+            // reported GACL_SHUFFLE_TRANSFORM_NONE. A content pipeline stores such a texture uncompressed (as gacl.exe
+            // does), so the stream is the texture's blocks as is, with no shuffle to reverse.
+            Utility::Printf(L"\"%ws\" is incompressible: stored uncompressed, with no shuffle to reverse.\n", inputFilePath.c_str());
+            shuffledBuffer.assign(src, src + srcSize);
+            bcnTransformId = GACL_SHUFFLE_TRANSFORM_NONE;
+            return;
+        }
         if (scHr != S_OK || compressedBytes == 0)
         {
             Utility::Printf(L"ERROR: GACL_ShuffleCompress_BCn failed (hr=0x%08X) for \"%ws\".\n", static_cast<unsigned>(scHr), inputFilePath.c_str());

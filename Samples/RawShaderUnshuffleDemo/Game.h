@@ -25,9 +25,11 @@ enum GBaseFormat
     BC3,
     BC4,
     BC5,
-    CurveOnly,
     BC7,
 };
+
+// The most single-pass BC1\3\4\5 unshuffle shaders the sample loads: with -performat, an EX and a headerless build per format
+constexpr uint32_t MAX_BCN_UNSHUFFLE_SHADERS = 8;
 
 enum GPU_TIMER_OPERATIONS 
 {
@@ -143,6 +145,11 @@ private:
     // Transform id selected by GACL_ShuffleCompress_BCn; passed to the BC1\3\4\5 unshuffle shader as a constant.
     GACL_SHUFFLE_TRANSFORM                          m_bcnTransformId;
 
+    // The BC1\3\4\5 shader table entry (and PSO) that reverses the stream, unused for an unshuffled stream (NONE, ZSTD_ONLY),
+    // which is copied as is. -performat selects the per-format shader builds instead of the unified shader.
+    uint32_t                                        m_bcnShaderIndex;
+    bool                                            m_usePerFormatShaders;
+
     uint32_t                                        m_minHWSupportedWaveSize;
     uint32_t                                        m_maxHWSupportedWaveSize;
     bool                                            m_forceWarp;
@@ -178,9 +185,9 @@ private:
     // Output resource and its heap
     Microsoft::WRL::ComPtr<ID3D12Resource>          m_outBCnBuffer; 
 
-    // BC1\3\4\5 single-pass unshuffle
-    Microsoft::WRL::ComPtr<ID3D12RootSignature>     m_bcnCSRootSignature[5];
-    Microsoft::WRL::ComPtr<ID3D12PipelineState>     m_bcnCSPipelineState[5];
+    // BC1\3\4\5 single-pass unshuffle, a root signature and PSO per entry of the shader table in use
+    Microsoft::WRL::ComPtr<ID3D12RootSignature>     m_bcnCSRootSignature[MAX_BCN_UNSHUFFLE_SHADERS];
+    Microsoft::WRL::ComPtr<ID3D12PipelineState>     m_bcnCSPipelineState[MAX_BCN_UNSHUFFLE_SHADERS];
 
     // Shader visible descriptor heap for the BC1\3\4\5 output UAV (descriptor-table binding path)
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>    m_uavSrvCbvHeap;

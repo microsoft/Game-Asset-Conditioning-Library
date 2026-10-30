@@ -14,8 +14,12 @@ set(GACL_LIB_SOURCES
     ../../Lib/shuffle/bc5.cpp
     ../../Lib/shuffle/bc7.cpp
     ../../Lib/shuffle/bc7modejoin.cpp
+    ../../Lib/shuffle/bc7modejoinlayout.cpp
+    ../../Lib/shuffle/bc7modejoinreverse.cpp
     ../../Lib/shuffle/bc7modesplit.cpp
+    ../../Lib/shuffle/bcnex.cpp
     ../../Lib/shuffle/shuffle.cpp
+    ../../Lib/shuffle/streamheader.cpp
 )
 
 if(GACL_ENABLE_CLER)

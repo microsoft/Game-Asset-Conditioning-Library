@@ -9,6 +9,8 @@
 #include "Game.h"
 #include "Processing.h"
 #include "SharedDefinitions.h"
+#include "streamheader.h"
+#include "Utility.h"
 
 extern void ExitGame() noexcept;
 
@@ -33,8 +35,7 @@ static std::wstring s_perModeUnshufflePSONames[9] =
     L"UnshuffleCSMode8.cso"
 };
 
-// Per-shader description for the single-pass BC1\3\4\5 (and CurveOnly) unshuffle shaders. The order matches the
-// GBaseFormat enum so an entry can be indexed directly by base format.
+// Per-shader description for the single-pass BC1\3\4\5 unshuffle shaders.
 struct ShuffleShaderInfo
 {
     std::wstring fileName;
@@ -42,27 +43,53 @@ struct ShuffleShaderInfo
     std::wstring pixName;
     uint32_t blockSizes;      // bytes per BCn block
     uint32_t blocksPerThread; // blocks each thread unshuffles
+    uint32_t threadGroupSize; // threads per thread group
 };
 
 #ifdef NEWBC1345
-// Newer BC1\3\4\5 shaders ("x" suffix). A single shader per format handles multiple transform ids; the specific
-// transform id (as chosen by GACL_ShuffleCompress_BCn) is passed in as a shader constant.
+// By default BC1\3\4\5 use the unified shader, which reverses every BC1\3\4\5 transform id (the EX ids
+// GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_EX - _BC5_EX, curve-only streams included); the transform id (as chosen by
+// GACL_ShuffleCompress_BCn) is passed in as a shader constant. Blocks per thread match the earlier per-format shaders.
+// The order matches the GBaseFormat enum so an entry can be indexed directly by base format.
 static const ShuffleShaderInfo gShaderInfo[] = {
-    {L"UnshuffleBC1x.cso", L"BC1xCSRootSignature", L"BC1x Unshuffle", 8,  2},
-    {L"UnshuffleBC3x.cso", L"BC3xCSRootSignature", L"BC3x Unshuffle", 16, 4},
-    {L"UnshuffleBC4x.cso", L"BC4xCSRootSignature", L"BC4x Unshuffle", 8,  4},
-    {L"UnshuffleBC5x.cso", L"BC5xCSRootSignature", L"BC5x Unshuffle", 16, 4},
-    {L"UnshuffleCurveOnly.cso", L"BCnCurveOnlyRootSignature", L"Uncurve only", 16, 32},
+    {L"UnshuffleBCnEx.cso", L"BCnExCSRootSignature", L"BC1 Unshuffle", 8,  2, 256},
+    {L"UnshuffleBCnEx.cso", L"BCnExCSRootSignature", L"BC3 Unshuffle", 16, 4, 256},
+    {L"UnshuffleBCnEx.cso", L"BCnExCSRootSignature", L"BC4 Unshuffle", 8,  4, 256},
+    {L"UnshuffleBCnEx.cso", L"BCnExCSRootSignature", L"BC5 Unshuffle", 16, 4, 256},
 };
 
-// With the newer shaders we allow the library to consider the experimental (v2) transforms too.
+// With -performat BC1\3\4\5 use the per-format builds of the unified shader instead They take the same root 
+// signature and constants, but each reverses only some ids, with its own blocks per thread and threads per group.
+// These per-format shaders allow higher throughput and lower latency due to skipping additional reads and instruction
+// unnecessary in a single-format shader.  
+// 
+// The EX builds (UnshuffleBC1Ex.hlsl - UnshuffleBC5Ex.hlsl)
+// reverse a format's EX id and sit at its GBaseFormat; the headerless builds (UnshuffleBC1Headerless.hlsl -
+// UnshuffleBC5Headerless.hlsl) reverse its headerless ids and sit at kHeaderlessShaders + GBaseFormat. UnshuffleBC4Ex
+// decodes some large streams 4 blocks per thread (the dispatch's spare groups exit). UnshuffleBC7Ex.hlsl (BC7 Join,
+// BC7_EX) isn't used, as the sample's BC7 path is mode split.
+constexpr uint32_t kHeaderlessShaders = GBaseFormat::BC5 + 1;
+static const ShuffleShaderInfo gPerFormatShaderInfo[] = {
+    {L"UnshuffleBC1Ex.cso",         L"BCnExCSRootSignature", L"BC1 EX Unshuffle",         8,  2, 128},
+    {L"UnshuffleBC3Ex.cso",         L"BCnExCSRootSignature", L"BC3 EX Unshuffle",         16, 4, 256},
+    {L"UnshuffleBC4Ex.cso",         L"BCnExCSRootSignature", L"BC4 EX Unshuffle",         8,  2, 256},
+    {L"UnshuffleBC5Ex.cso",         L"BCnExCSRootSignature", L"BC5 EX Unshuffle",         16, 4, 128},
+    {L"UnshuffleBC1Headerless.cso", L"BCnExCSRootSignature", L"BC1 Headerless Unshuffle", 8,  2, 128},
+    {L"UnshuffleBC3Headerless.cso", L"BCnExCSRootSignature", L"BC3 Headerless Unshuffle", 16, 4, 256},
+    {L"UnshuffleBC4Headerless.cso", L"BCnExCSRootSignature", L"BC4 Headerless Unshuffle", 8,  4, 256},
+    {L"UnshuffleBC5Headerless.cso", L"BCnExCSRootSignature", L"BC5 Headerless Unshuffle", 16, 4, 128},
+};
+static_assert(_countof(gPerFormatShaderInfo) == 2 * kHeaderlessShaders && _countof(gPerFormatShaderInfo) <= MAX_BCN_UNSHUFFLE_SHADERS,
+    "an EX build per BC1\\3\\4\\5 format, then a headerless build per format");
+
+// With the newer shaders we allow the library to consider the experimental transforms (v2, EX) too.
 constexpr GACL_SHUFFLE_TRANSFORM kRequestedTransformGroup = GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL;
 #else // Preview #1 interim shaders
 static const ShuffleShaderInfo gShaderInfo[] = {
-    {L"UnshuffleBC1.cso", L"BC1CSRootSignature", L"BC1 Unshuffle", 8,  2},
-    {L"UnshuffleBC3.cso", L"BC3CSRootSignature", L"BC3 Unshuffle", 16, 4},
-    {L"UnshuffleBC4.cso", L"BC4CSRootSignature", L"BC4 Unshuffle", 8,  4},
-    {L"UnshuffleBC5.cso", L"BC5CSRootSignature", L"BC5 Unshuffle", 16, 4},
+    {L"UnshuffleBC1.cso", L"BC1CSRootSignature", L"BC1 Unshuffle", 8,  2, 256},
+    {L"UnshuffleBC3.cso", L"BC3CSRootSignature", L"BC3 Unshuffle", 16, 4, 256},
+    {L"UnshuffleBC4.cso", L"BC4CSRootSignature", L"BC4 Unshuffle", 8,  4, 256},
+    {L"UnshuffleBC5.cso", L"BC5CSRootSignature", L"BC5 Unshuffle", 16, 4, 256},
 };
 
 // The preview shaders only reverse the currently supported transforms.
@@ -70,37 +97,64 @@ constexpr GACL_SHUFFLE_TRANSFORM kRequestedTransformGroup = GACL_SHUFFLE_TRANSFO
 #endif
 
 // Maps a transform id (as returned by GACL_ShuffleCompress_BCn) to the gShaderInfo entry / GBaseFormat that reverses
-// it. The per-format shaders handle both the base and the space-curve (_SC) variants of their transform.
+// it. Each EX id names its format.
 static GBaseFormat TransformToShaderFormat(GACL_SHUFFLE_TRANSFORM transformId)
 {
     switch (transformId)
     {
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224:
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224_SC:
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44:
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44_SC:
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_EX:
         return GBaseFormat::BC1;
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_116224:
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_116224_SC:
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_664:
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_664_SC:
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_EX:
         return GBaseFormat::BC3;
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116:
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116_SC:
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_EX:
         return GBaseFormat::BC4;
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116:
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116_SC:
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_2266:
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_EX:
         return GBaseFormat::BC5;
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT:
         return GBaseFormat::BC7;
-#ifdef NEWBC1345
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_SC:
-        return GBaseFormat::CurveOnly;
-#endif
     default:
         assert(false && "Unexpected transform id returned by GACL_ShuffleCompress_BCn");
         return GBaseFormat::BC1;
     }
+}
+
+// The BC1\3\4\5 shader table in use, and its entry count: gShaderInfo, or with -performat gPerFormatShaderInfo.
+static std::pair<const ShuffleShaderInfo*, size_t> BCnShaderTable(bool usePerFormatShaders)
+{
+#ifdef NEWBC1345
+    if (usePerFormatShaders)
+    {
+        return { gPerFormatShaderInfo, _countof(gPerFormatShaderInfo) };
+    }
+#else
+    std::ignore = usePerFormatShaders;
+#endif
+    return { gShaderInfo, _countof(gShaderInfo) };
+}
+
+// The entry of the BC1\3\4\5 shader table in use that reverses a transform id: the unified shader's entry for its
+// format or, with -performat, the build DirectStorage dispatches the id with (its format's EX build for the EX id, else
+// its format's headerless build).
+static uint32_t BCnShaderIndex(GACL_SHUFFLE_TRANSFORM transformId, bool usePerFormatShaders)
+{
+    uint32_t const format = TransformToShaderFormat(transformId);
+#ifdef NEWBC1345
+    bool const exId = transformId >= GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_EX && transformId <= GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_EX;
+    if (usePerFormatShaders && !exId)
+    {
+        return kHeaderlessShaders + format;
+    }
+#else
+    std::ignore = usePerFormatShaders;
+#endif
+    return format;
 }
 
 // Human-readable base format name for the on-screen UI.
@@ -112,9 +166,6 @@ static const wchar_t* BaseFormatToString(GBaseFormat baseFormat)
     case GBaseFormat::BC3: return L"BC3";
     case GBaseFormat::BC4: return L"BC4";
     case GBaseFormat::BC5: return L"BC5";
-#ifdef NEWBC1345
-    case GBaseFormat::CurveOnly: return L"CurveOnly";
-#endif
     case GBaseFormat::BC7: return L"BC7";
     default: return L"Unknown";
     }
@@ -127,43 +178,57 @@ static const wchar_t* TransformIdToString(GACL_SHUFFLE_TRANSFORM transformId)
     {
     case GACL_SHUFFLE_TRANSFORM_NONE:             return L"NONE";
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224:     return L"ZSTD_BC1_224";
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224_SC:  return L"ZSTD_BC1_224_SC";
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_116224:  return L"ZSTD_BC3_116224";
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_116224_SC: return L"ZSTD_BC3_116224_SC";
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116:     return L"ZSTD_BC4_116";
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116_SC:  return L"ZSTD_BC4_116_SC";
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116:  return L"ZSTD_BC5_116116";
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116_SC: return L"ZSTD_BC5_116116_SC";
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT:   return L"ZSTD_BC7_SPLIT";
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN:    return L"ZSTD_BC7_JOIN";
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN_SC: return L"ZSTD_BC7_JOIN_SC";
     case GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY:        return L"ZSTD_ONLY";
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_SC:          return L"ZSTD_SC";
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44:      return L"ZSTD_BC1_44";
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44_SC:   return L"ZSTD_BC1_44_SC";
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_664:     return L"ZSTD_BC3_664";
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_664_SC:  return L"ZSTD_BC3_664_SC";
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_2266:    return L"ZSTD_BC5_2266";
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_EX:      return L"ZSTD_BC1_EX";
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_EX:      return L"ZSTD_BC3_EX";
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_EX:      return L"ZSTD_BC4_EX";
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_EX:      return L"ZSTD_BC5_EX";
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX:      return L"ZSTD_BC7_EX";
     default: return L"Unknown";
     }
 }
 
-// Returns true when the transform id's shuffled stream holds space-curved data (the "_SC" variants).
-// BC7 split records any space curve in its stream header instead.
-static bool TransformIsCurved(GACL_SHUFFLE_TRANSFORM transformId)
+// Returns true when the shuffled stream holds space-curved data: an EX stream whose header carries the curve width
+// parameter (as every curve-only stream's does). BC7 split records any space curve in its own stream header instead.
+static bool StreamIsCurved(GACL_SHUFFLE_TRANSFORM transformId, const std::vector<uint8_t>& shuffled)
 {
-    switch (transformId)
+    if (transformId >= GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_EX && transformId <= GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX)
     {
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224_SC:
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_116224_SC:
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116_SC:
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116_SC:
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN_SC:
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_SC:
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44_SC:
-    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_664_SC:
-        return true;
+        // byte 0 bit 3 + (id - 1) flags the presence of parameter id
+        return shuffled.size() >= GACL_STREAMHEADER_FIXED_BYTES &&
+            (shuffled[0] & (8u << (GACL_STREAMHEADER_PARAM_CURVE_WIDTH_TILES - 1))) != 0;
+    }
+    return false;
+}
+
+// Returns true when a BC1\3\4\5 stream holds the texture's blocks as is: GACL_SHUFFLE_TRANSFORM_NONE (an incompressible
+// texture, stored uncompressed) or ZSTD_ONLY (compressed without a shuffle). DirectStorage loads these without an
+// unshuffle pass, so the sample copies them to the output buffer instead.
+static bool StreamIsUnshuffled(GACL_SHUFFLE_TRANSFORM transformId)
+{
+    return transformId == GACL_SHUFFLE_TRANSFORM_NONE || transformId == GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY;
+}
+
+// The base format of a BC1\3\4\5 texture format, for unshuffled streams, whose transform id doesn't imply one.
+static GBaseFormat TextureBaseFormat(DXGI_FORMAT format)
+{
+    switch (Utility::GetBaseFormat(format))
+    {
+    case DXGI_FORMAT_BC1_TYPELESS: return GBaseFormat::BC1;
+    case DXGI_FORMAT_BC3_TYPELESS: return GBaseFormat::BC3;
+    case DXGI_FORMAT_BC4_TYPELESS: return GBaseFormat::BC4;
+    case DXGI_FORMAT_BC5_TYPELESS: return GBaseFormat::BC5;
     default:
-        return false;
+        assert(false && "Unshuffled streams only come from BC1\\3\\4\\5 textures");
+        return GBaseFormat::BC1;
     }
 }
 
@@ -187,6 +252,8 @@ Game::Game() noexcept(false) :
     m_microShuffleId(1),
     m_useSpaceCurveEffective(false),
     m_bcnTransformId(GACL_SHUFFLE_TRANSFORM_NONE),
+    m_bcnShaderIndex(0),
+    m_usePerFormatShaders(false),
     m_minHWSupportedWaveSize(0),
     m_maxHWSupportedWaveSize(0),
     m_forceWarp(false),
@@ -222,6 +289,11 @@ void Game::Initialize(HWND window, LPWSTR lpCmdLine)
         else if (wcscmp(arg, L"/warp") == 0 || wcscmp(arg, L"-warp") == 0)
         {
             m_forceWarp = true;
+            i += 1;
+        }
+        else if (wcscmp(arg, L"/performat") == 0 || wcscmp(arg, L"-performat") == 0)
+        {
+            m_usePerFormatShaders = true;
             i += 1;
         }
         else 
@@ -308,15 +380,15 @@ void Game::LoadImageAndShuffle(const std::wstring& ddsPathWStr)
 
     m_BCnUnshuffledData.resize(m_bcnSizeInBytes);
 
-    // The base format is implied by the transform id ProcessTexture selected. BC7 uses the multi-pass mode-split
-    // unshuffle; BC1\3\4\5 use the single-pass shaders.
-    m_baseFormat = TransformToShaderFormat(m_bcnTransformId);
+    // The base format is implied by the transform id ProcessTexture selected or, for an unshuffled stream, by the
+    // texture format. BC7 uses the multi-pass mode-split unshuffle; BC1\3\4\5 use the single-pass shaders.
+    m_baseFormat = StreamIsUnshuffled(m_bcnTransformId) ? TextureBaseFormat(m_bcTextureFormat) : TransformToShaderFormat(m_bcnTransformId);
 
     // Display only: BC7 split records any space curve in its stream header (start byte bit 7 flags the extension
     // byte, whose low 3 bits hold log2 of the curve width in 128 px tiles, 0 = linear).
     m_useSpaceCurveEffective = (m_baseFormat == GBaseFormat::BC7) ?
         ((shuffledBuffer[0] & 0x80) != 0 && (shuffledBuffer[1] & 0x7) != 0) :
-        TransformIsCurved(m_bcnTransformId);
+        StreamIsCurved(m_bcnTransformId, shuffledBuffer);
 
     if (m_baseFormat == GBaseFormat::BC7)
     {
@@ -324,6 +396,8 @@ void Game::LoadImageAndShuffle(const std::wstring& ddsPathWStr)
     }
     else
     {
+        // An unshuffled stream has no shader to pick: Unshuffle copies it as is.
+        m_bcnShaderIndex = StreamIsUnshuffled(m_bcnTransformId) ? 0u : BCnShaderIndex(m_bcnTransformId, m_usePerFormatShaders);
         m_elementSize = gShaderInfo[m_baseFormat].blockSizes;
         CreateBC1345UnshufflePassD3D12Resources(shuffledBuffer, m_bcnSizeInBytes);
     }
@@ -529,9 +603,33 @@ void Game::Unshuffle()
 
     if (m_baseFormat != GBaseFormat::BC7)
     {
-        // Single-pass BC1\3\4\5 (or CurveOnly) unshuffle. One shader per base format reverses the transform that
-        // GACL_ShuffleCompress_BCn selected; the specific transform id is passed in as a shader constant.
-        const ShuffleShaderInfo& info = gShaderInfo[m_baseFormat];
+        if (StreamIsUnshuffled(m_bcnTransformId))
+        {
+            // No shuffle to reverse: copy the texture's blocks to the output buffer, leaving it in UNORDERED_ACCESS as
+            // the unshuffle shaders do. Not timed, as DirectStorage loads such a stream straight to its destination.
+            PIXBeginEvent(commandList, PIX_COLOR_DEFAULT, L"Copy (no unshuffle)");
+
+            D3D12_RESOURCE_BARRIER barriers[2] =
+            {
+                CD3DX12_RESOURCE_BARRIER::Transition(m_outBCnBuffer.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COPY_DEST),
+                CD3DX12_RESOURCE_BARRIER::Transition(m_shuffledBuffer.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_SOURCE),
+            };
+            commandList->ResourceBarrier(2, barriers);
+
+            commandList->CopyBufferRegion(m_outBCnBuffer.Get(), 0, m_shuffledBuffer.Get(), 0, m_bcnSizeInBytes);
+
+            barriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(m_outBCnBuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            barriers[1] = CD3DX12_RESOURCE_BARRIER::Transition(m_shuffledBuffer.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            commandList->ResourceBarrier(2, barriers);
+
+            PIXEndEvent(commandList);
+            return;
+        }
+
+        // Single-pass BC1\3\4\5 unshuffle. The shader (the unified shader or, with -performat, the per-format build for
+        // the transform id) reverses the transform that GACL_ShuffleCompress_BCn selected, passed in as a shader
+        // constant; blocks per thread and threads per group depend on the shader.
+        const ShuffleShaderInfo& info = BCnShaderTable(m_usePerFormatShaders).first[m_bcnShaderIndex];
 
         PIXBeginEvent(commandList, PIX_COLOR_DEFAULT, info.pixName.data());
         m_GPUTimer->Start(commandList, static_cast<uint32_t>(UNSHUFFLE_FINAL));
@@ -541,9 +639,7 @@ void Game::Unshuffle()
         uint32_t numStragglers = totalBlocks % info.blocksPerThread;
         uint32_t numThreadsRequired = numPairsOrQuads + numStragglers;
 
-        uint32_t numThreadGroupsX = (m_baseFormat == GBaseFormat::CurveOnly) ?
-            (numThreadsRequired + 31u) / 32u :
-            (numThreadsRequired + (TG_THREAD_COUNT - 1)) / TG_THREAD_COUNT;
+        uint32_t numThreadGroupsX = (numThreadsRequired + (info.threadGroupSize - 1)) / info.threadGroupSize;
 
 #ifdef NEWBC1345
         uint32_t shaderConstants[4] = { static_cast<uint32_t>(m_bcnSizeInBytes), 0,
@@ -552,8 +648,8 @@ void Game::Unshuffle()
         uint32_t shaderConstants[2] = { static_cast<uint32_t>(m_bcnSizeInBytes), 0 };
 #endif
 
-        commandList->SetPipelineState(m_bcnCSPipelineState[m_baseFormat].Get());
-        commandList->SetComputeRootSignature(m_bcnCSRootSignature[m_baseFormat].Get());
+        commandList->SetPipelineState(m_bcnCSPipelineState[m_bcnShaderIndex].Get());
+        commandList->SetComputeRootSignature(m_bcnCSRootSignature[m_bcnShaderIndex].Get());
 
         // The render/readback path leaves the output buffer in COPY_SOURCE; transition it back to UAV before writing.
         {
@@ -1085,18 +1181,20 @@ void Game::CreateBC1345UnshufflePassD3D12Resources(std::vector<uint8_t>& shuffle
 {
     auto device = m_deviceResources->GetD3DDevice();
 
-    // Create the per-format root signatures and PSOs once. gShaderInfo is indexed by GBaseFormat.
+    // Create the root signatures and PSOs of the shader table in use once (gShaderInfo, indexed by GBaseFormat, or with
+    // -performat gPerFormatShaderInfo).
     static bool oneTime = true;
     if (oneTime)
     {
         oneTime = false;
 
-        for (size_t i = 0; i < _countof(gShaderInfo); i++)
+        auto const [shaderInfo, shaderCount] = BCnShaderTable(m_usePerFormatShaders);
+        for (size_t i = 0; i < shaderCount; i++)
         {
-            auto csBlob = DX::ReadData(gShaderInfo[i].fileName.data());
+            auto csBlob = DX::ReadData(shaderInfo[i].fileName.data());
             DX::ThrowIfFailed(device->CreateRootSignature(0, csBlob.data(), csBlob.size(),
                 IID_PPV_ARGS(m_bcnCSRootSignature[i].ReleaseAndGetAddressOf())));
-            m_bcnCSRootSignature[i]->SetName(gShaderInfo[i].signatureName.data());
+            m_bcnCSRootSignature[i]->SetName(shaderInfo[i].signatureName.data());
 
             D3D12_COMPUTE_PIPELINE_STATE_DESC computePSODesc = {};
             computePSODesc.CS = { csBlob.data(), csBlob.size() };
@@ -1297,8 +1395,8 @@ void Game::ResetD3D12Resources()
     }
     m_unshufflePassCmdSignature.Reset();
 
-    // Single-pass BC1\3\4\5 (and CurveOnly) unshuffle
-    for (uint32_t i = 0; i < _countof(gShaderInfo); ++i)
+    // Single-pass BC1\3\4\5 unshuffle
+    for (uint32_t i = 0; i < _countof(m_bcnCSPipelineState); ++i)
     {
         m_bcnCSRootSignature[i].Reset();
         m_bcnCSPipelineState[i].Reset();
@@ -1373,6 +1471,15 @@ void Game::RenderUI()
     swprintf_s(info, L"Transform: %s (%u)", TransformIdToString(m_bcnTransformId), static_cast<uint32_t>(m_bcnTransformId));
     m_font->DrawString(m_spriteBatch.get(), info, DirectX::SimpleMath::Vector2(xText, yText));
     yText += 35.0f;
+
+    // The single-pass shader reversing a BC1\3\4\5 stream (BC7 mode split takes the multi-pass shaders).
+    if (m_baseFormat != GBaseFormat::BC7)
+    {
+        swprintf_s(info, L"Shader: %s", StreamIsUnshuffled(m_bcnTransformId) ? L"none (stream not shuffled)" :
+            BCnShaderTable(m_usePerFormatShaders).first[m_bcnShaderIndex].fileName.c_str());
+        m_font->DrawString(m_spriteBatch.get(), info, DirectX::SimpleMath::Vector2(xText, yText));
+        yText += 35.0f;
+    }
 
     if (m_forceWarp) 
     {

@@ -11,6 +11,7 @@
 #include "gacl.h"
 #include "../BCnBlockDefs.h"
 #include "bc7.h"
+#include "bc7anchors.h"
 
 #include <intrin.h>
 #include <immintrin.h>
@@ -19,6 +20,14 @@
 
 #include <algorithm>
 #include <cassert>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <tuple>
+
+#ifndef GACL_SPLITLOG
+#define GACL_SPLITLOG 0  // log Split stream section sizes; off by default because, without an attached debugger, every OutputDebugString call takes a system-wide lock that serializes encoding threads and processes
+#endif
 
 namespace
 {
@@ -2781,7 +2790,9 @@ union ModeSplitExtensionByte
         // Blocks are in 16KB space curve tiles of 32x32 blocks (128x128 pixels), z-ordered across the texture.
         // 0 = linear (a single tile wide texture is an identity curve), else width in pixels = 128 << SpaceCurveWidthInTilesLog2
         uint8_t SpaceCurveWidthInTilesLog2 : 3;
-        uint8_t Reserved : 5;
+        uint8_t IndexPrediction : 1;    // index fields hold prediction residuals (SplitIndexPrediction)
+        uint8_t SectionLayout : 1;      // a section layout block follows (SplitSectionLayout), remap tables after the mode stream, per-mode scrap groups
+        uint8_t Reserved : 3;
     };
 };
 static_assert(sizeof(ModeSplitExtensionByte) == 1, "Split mode extension byte struct must remain byte size");
@@ -2968,33 +2979,24 @@ void ComputeRotationToStableRange7bit(size_t counts[8][128], size_t elements, Co
 void ComputeRotationToLeastSignificantEntropy(size_t counts[8][128], size_t elements, ColorRotation& rotations, uint8_t bitDepth)
 {
     assert(bitDepth < 8);
-    uint8_t fieldValues = uint8_t(1u << bitDepth);
-    //     channel, rotation, bit
-    std::vector<size_t> cbitsvec(8 * 128 * 7);
-    size_t(*cbits)[128][7] = reinterpret_cast<size_t(*)[128][7]>(cbitsvec.data());   //size_t cbits[8][128][7]
+    const unsigned fieldValues = 1u << bitDepth;
 
     for (int e = 0; e < 8; e++)
     {
         // compute ideal entropy shift for each color channel
-        for (uint8_t rot = 0; rot < fieldValues; rot++)
+        //
+        // Say there's 217 instances of value 63....  i.e. counts[e][63] == 217
+        // for rotation 0, that would mean bit counts of (MSB)  0, 217, 217, 217, 217, 217, 217 (LSB)
+        // for rotation 1, that would mean bit counts of (MSB) 217,  0,   0,   0,   0,   0,   0 (LSB)
+        //
+        // Bit b of the rotated value (i + rot) % fieldValues is set for the values i in the circular runs of length 2^b
+        // starting at (v - rot) % fieldValues, v = 2^b, 3 * 2^b, 5 * 2^b, ...  Circular prefix sums of the counts give
+        // each run's total directly, rather than visiting every value for every rotation and bit.
+        size_t prefix[2 * 128 + 1];
+        prefix[0] = 0;
+        for (unsigned k = 0; k < 2 * fieldValues; k++)
         {
-            // loop through the counts of each 128-bit color value
-            for (uint8_t i = 0; i < fieldValues; i++)
-            {
-                for (uint8_t b = 0; b < 7; b++)
-                {
-                    // Say there's 217 instances of value 63....  i.e. counts[e][63] == 217
-                    // for rotation 0, that would mean bit counts of (MSB)  0, 217, 217, 217, 217, 217, 217 (LSB)
-                    // for rotation 1, that would mean bit counts of (MSB) 217,  0,   0,   0,   0,   0,   0 (LSB)
-                    const uint8_t rotatedValue = (i + rot) % fieldValues;
-                    const uint8_t rotatedValueBitB = (rotatedValue >> b) & 1u;
-                    cbits[e][rot][b] += counts[e][i] * rotatedValueBitB;
-
-                    // when rot == 1, and all those 63s become 64s, 
-                    // when i = 63, those bits are found: counts[e][63] * ((64 >> b) & 1)
-                    //                                  =    217 values of 64
-                }
-            }
+            prefix[k + 1] = prefix[k] + counts[e][k & (fieldValues - 1)];
         }
 
         size_t bestEntropy = 0;
@@ -3012,7 +3014,14 @@ void ComputeRotationToLeastSignificantEntropy(size_t counts[8][128], size_t elem
             size_t bitFlips[7] = {};
             for (int b = 0; b < bitDepth; b++)
             {
-                bitFlips[b] = std::min<size_t>(cbits[e][rot][b], elements - cbits[e][rot][b]);
+                const unsigned run = 1u << b;
+                size_t setBits = 0;
+                for (unsigned v = run; v < fieldValues; v += 2 * run)
+                {
+                    const unsigned start = (v + fieldValues - rot) & (fieldValues - 1);
+                    setBits += prefix[start + run] - prefix[start];
+                }
+                bitFlips[b] = std::min<size_t>(setBits, elements - setBits);
             }
             size_t entropy = bitFlipWeights[6] * bitFlips[6] + bitFlipWeights[5] * bitFlips[5] + bitFlipWeights[4] * bitFlips[4] + bitFlipWeights[3] * bitFlips[3] + bitFlipWeights[2] * bitFlips[2] + bitFlipWeights[1] * bitFlips[1] + bitFlipWeights[0] * bitFlips[0];
             if (rot == 0)
@@ -4054,6 +4063,503 @@ void BC7_ModeSplit_Shuffle_Slow(uint8_t mode, const void* src, BC7_ModeSplitBuff
 
 }
 
+// Index prediction (ModeSplitExtensionByte::IndexPrediction): each index field is replaced by residuals against a causal
+// spatial predictor.  Applied after the color rotation by the transform, undone first by the reverse and the GPU unshuffle.
+//  - pixel 0 is stored raw
+//  - row 0 / column 0 pixels extrapolate the previous two pixels a, b of the row / column: clamp(a + k * (a - b) / 8),
+//    k = 8 / 6 / 7 for 2 / 3 / 4-bit indices (pixels 1 and 4 copy pixel 0)
+//  - interior pixels use MED(left, top, top-left)
+//  - partitions are ignored, except that an anchor's prediction is capped at the anchor maximum (bits - 1 bits)
+//  - residuals are folded around the prediction (0, +1, -1, +2, -2, ... then the one-sided remainder)
+// The Mode 4 2-bit and Mode 6 residual fields are then stored bit reversed.
+namespace SplitIndexPrediction
+{
+    inline uint64_t Get(const uint64_t* x, unsigned p, unsigned w)
+    {
+        const uint64_t v = p >= 64 ? x[1] >> (p - 64) : ((x[0] >> p) | (p ? x[1] << (64 - p) : 0));
+        return v & ((1ull << w) - 1);
+    }
+
+    inline void Put(uint64_t* x, unsigned p, unsigned w, uint64_t value)
+    {
+        const uint64_t m = (1ull << w) - 1, v = value & m;
+        if (p >= 64)
+        {
+            x[1] = (x[1] & ~(m << (p - 64))) | (v << (p - 64));
+            return;
+        }
+        x[0] = (x[0] & ~(m << p)) | (v << p);
+        if (p + w > 64)
+        {
+            x[1] = (x[1] & ~(m >> (64 - p))) | (v >> (64 - p));
+        }
+    }
+
+    // Prediction of pixel i > 0 from the already known indices idx[0, i), M = 2^bits - 1
+    inline int Predict(const int* idx, int i, int M)
+    {
+        const int x = i & 3, y = i >> 2;
+        if (!x || !y)
+        {
+            const int s = x ? 1 : 4, a = idx[i - s];
+            if ((x ? x : y) < 2)
+            {
+                return a;
+            }
+            const int k = M == 3 ? 8 : (M == 7 ? 6 : 7);
+            const int e = a + k * (a - idx[i - 2 * s]) / 8;
+            return e < 0 ? 0 : (e > M ? M : e);
+        }
+        const int L = idx[i - 1], T = idx[i - 4], TL = idx[i - 5];
+        const int mx = L > T ? L : T, mn = L < T ? L : T;
+        return TL >= mx ? mn : (TL <= mn ? mx : L + T - TL);
+    }
+
+    inline int Fold(int v, int p, int M)
+    {
+        const int d = v - p, ad = d < 0 ? -d : d, room = p < M - p ? p : M - p;
+        return ad <= room ? (d > 0 ? 2 * d : (d < 0 ? 2 * ad - 1 : 0)) : room + ad;
+    }
+
+    inline int Unfold(int z, int p, int M)
+    {
+        const int room = p < M - p ? p : M - p;
+        if (z <= 2 * room)
+        {
+            const int d = (z + 1) >> 1;
+            return (z & 1) ? p - d : p + d;
+        }
+        return p > M - p ? p - (z - room) : p + (z - room);
+    }
+
+    inline unsigned ReverseBits(unsigned v, unsigned w)
+    {
+        unsigned r = 0;
+        for (unsigned b = 0; b < w; b++)
+        {
+            r |= ((v >> b) & 1u) << (w - 1 - b);
+        }
+        return r;
+    }
+
+    // One index field of 16 indices packed LSB-first from bit fieldPos; anchor pixels (set bits of anchors) have bits - 1 bits.
+    // A reversed field stores the residual bit sequence back to front.
+    inline void Field(uint64_t* x, unsigned fieldPos, unsigned bits, uint32_t anchors, bool reversed, bool inverse)
+    {
+        const int M = (1 << bits) - 1;
+        const unsigned len = 16 * bits - unsigned(__popcnt(anchors));
+        const uint64_t src = Get(x, fieldPos, len);
+        uint64_t dst = 0;
+        int idx[16];
+        for (unsigned i = 0, pos = 0; i < 16; i++)
+        {
+            const bool anchor = (anchors >> i) & 1;
+            const unsigned w = anchor ? bits - 1 : bits;
+            const unsigned stored = reversed ? len - pos - w : pos;
+            const int cap = anchor ? M >> 1 : M;
+            if (inverse)
+            {
+                unsigned z = unsigned(src >> stored) & ((1u << w) - 1);
+                z = reversed ? ReverseBits(z, w) : z;
+                if (i)
+                {
+                    const int p = Predict(idx, int(i), M);
+                    idx[i] = Unfold(int(z), p < cap ? p : cap, cap);
+                }
+                else
+                {
+                    idx[i] = int(z);
+                }
+                dst |= uint64_t(idx[i]) << pos;
+            }
+            else
+            {
+                idx[i] = int(unsigned(src >> pos) & ((1u << w) - 1));
+                unsigned z = unsigned(idx[i]);
+                if (i)
+                {
+                    const int p = Predict(idx, int(i), M);
+                    z = unsigned(Fold(idx[i], p < cap ? p : cap, cap));
+                }
+                dst |= uint64_t(reversed ? ReverseBits(z, w) : z) << stored;
+            }
+            pos += w;
+        }
+        Put(x, fieldPos, len, dst);
+    }
+
+    inline void Block(uint64_t* x, bool inverse)
+    {
+        unsigned long mode;
+        _BitScanForward(&mode, uint8_t(x[0]) | 0x100u);
+        switch (mode)
+        {
+        case 0: Field(x, 83, 3, kBC7Anchor3[Get(x, 1, 4)], false, inverse); break;
+        case 1: Field(x, 82, 3, kBC7Anchor2[Get(x, 2, 6)], false, inverse); break;
+        case 2: Field(x, 99, 2, kBC7Anchor3[Get(x, 3, 6)], false, inverse); break;
+        case 3: Field(x, 98, 2, kBC7Anchor2[Get(x, 4, 6)], false, inverse); break;
+        case 4: Field(x, 50, 2, 1, true, inverse); Field(x, 81, 3, 1, false, inverse); break;
+        case 5: Field(x, 66, 2, 1, false, inverse); Field(x, 97, 2, 1, false, inverse); break;
+        case 6: Field(x, 65, 4, 1, true, inverse); break;
+        case 7: Field(x, 98, 2, kBC7Anchor2[Get(x, 8, 6)], false, inverse); break;
+        default: break;
+        }
+    }
+}
+
+// Section layout (ModeSplitExtensionByte::SectionLayout), a fixed size layout block directly after the extension byte:
+//   uint16  table bytes
+//   uint8   selector[8], modes 0-7: bits 0-1 color unit code (0 none, 1/2/3 = 1/2/4 byte units), bit 2 color remap,
+//                                   bits 4-5 misc unit code, bit 6 misc remap
+//   uint16  table offset[8], modes 0-7, from the start of the tables
+// and the remap tables between the mode stream and the color data (placed there they compress better than in the layout block),
+//   per mode: [color K-1 per byte position][misc K-1 per byte position][color symbols][misc symbols], each part present when remapped
+// The color and misc sections of a mode (n blocks of `stride` bytes, in same-mode rank order) are first rank remapped when flagged (per byte
+// position the K symbols that occur, in descending frequency, are coded as 0..K-1), then transposed into unit planes: byte k of rank r moves to
+// ((k / unit) * n + r) * unit + k % unit.  The scrap bits are grouped per mode: bit j of the rank r block of mode m is at scrapBase[m] + r * bits[m] + j,
+// where scrapBase[m] is the scrap bit total of the modes below m.
+#define ZSTD_STATIC_LINKING_ONLY        // ZSTD_getCParams, ZSTD_CCtx_setCParams
+#include <zstd.h>
+void GACL_ApplyWindowPolicy(ZSTD_compressionParameters& zParams);    // shuffle.cpp
+
+struct BC7ModeSplitTrialCache::Impl
+{
+    struct Result
+    {
+        std::once_flag once;
+        unsigned unit[2] = {};
+        size_t size[2] = {};
+    };
+    std::mutex lock;
+    std::map<std::tuple<uint64_t, size_t, size_t, int>, std::unique_ptr<Result>> results;    // (content hash, n, stride, level)
+};
+
+BC7ModeSplitTrialCache::BC7ModeSplitTrialCache() : m(new Impl) {}
+BC7ModeSplitTrialCache::~BC7ModeSplitTrialCache() { delete m; }
+
+namespace SplitSectionLayout
+{
+    constexpr size_t SelectorOffset = 2;
+    constexpr size_t TableOffsetOffset = 10;
+    constexpr size_t FixedBytes = 26;
+    constexpr uint8_t RemapBit = 0x04;
+    constexpr unsigned MiscShift = 4;
+    constexpr int DefaultTrialLevel = 6;
+
+    inline size_t UnitBytes(unsigned code) { return code ? size_t(1) << (code - 1) : 0; }
+
+    inline bool UnitAllowed(unsigned code, size_t stride)
+    {
+        const size_t unit = UnitBytes(code);
+        return unit && stride % unit == 0 && stride != unit;
+    }
+
+    // block-major (n x stride) <-> unit planes
+    inline void Transpose(uint8_t* p, size_t n, size_t stride, unsigned code, bool inverse)
+    {
+        if (n < 2 || !UnitAllowed(code, stride)) return;
+        const size_t unit = UnitBytes(code), units = stride / unit;
+        const std::vector<uint8_t> t(p, p + n * stride);
+        for (size_t r = 0; r < n; r++)
+        {
+            for (size_t u = 0; u < units; u++)
+            {
+                const size_t aos = r * stride + u * unit, soa = (u * n + r) * unit;
+                memcpy(p + (inverse ? aos : soa), t.data() + (inverse ? soa : aos), unit);
+            }
+        }
+    }
+
+    // per byte position: lens[k] = K - 1, then the K symbols occurring at position k in descending frequency (ties in ascending value)
+    struct RankTables
+    {
+        std::vector<uint8_t> lens, symbols;
+        size_t Bytes() const { return lens.size() + symbols.size(); }
+    };
+
+    inline RankTables BuildRanks(const uint8_t* p, size_t n, size_t stride)
+    {
+        RankTables t;
+        for (size_t k = 0; k < stride; k++)
+        {
+            size_t hist[256] = {};
+            for (size_t r = 0; r < n; r++) hist[p[r * stride + k]]++;
+            uint8_t order[256];
+            for (unsigned s = 0; s < 256; s++) order[s] = uint8_t(s);
+            std::stable_sort(order, order + 256, [&](uint8_t a, uint8_t b) { return hist[a] > hist[b]; });
+            unsigned K = 0;
+            while (K < 256 && hist[order[K]]) K++;
+            t.lens.push_back(uint8_t(K - 1));
+            t.symbols.insert(t.symbols.end(), order, order + K);
+        }
+        return t;
+    }
+
+    inline void Rank(uint8_t* p, size_t n, size_t stride, const RankTables& t)
+    {
+        const uint8_t* symbols = t.symbols.data();
+        for (size_t k = 0; k < stride; k++)
+        {
+            uint8_t map[256] = {};
+            const unsigned K = t.lens[k] + 1u;
+            for (unsigned i = 0; i < K; i++) map[symbols[i]] = uint8_t(i);
+            symbols += K;
+            for (size_t r = 0; r < n; r++) p[r * stride + k] = map[p[r * stride + k]];
+        }
+    }
+
+    inline void Unrank(uint8_t* p, size_t n, size_t stride, const uint8_t* lens, const uint8_t* symbols)
+    {
+        for (size_t k = 0; k < stride; k++)
+        {
+            const unsigned K = lens[k] + 1u;
+            for (size_t r = 0; r < n; r++)
+            {
+                assert(p[r * stride + k] < K);
+                p[r * stride + k] = symbols[p[r * stride + k]];
+            }
+            symbols += K;
+        }
+    }
+
+    inline size_t SymbolCount(const uint8_t* lens, size_t stride)
+    {
+        size_t count = 0;
+        for (size_t k = 0; k < stride; k++) count += lens[k] + 1u;
+        return count;
+    }
+
+    // a color or misc section of one mode, with its trial results without (0) and with (1) the rank remap
+    struct Section
+    {
+        uint8_t* p = nullptr;
+        size_t n = 0, stride = 0;
+        unsigned unit[2] = {};
+        size_t size[2] = { 0, SIZE_MAX };
+        RankTables ranks;
+        bool remap = false;
+
+        bool Active() const { return n >= 2 && stride != 0; }
+    };
+
+    class Trials
+    {
+    public:
+        explicit Trials(int level) : m_cctx(ZSTD_createCCtx()), m_level(level) {}
+        ~Trials() { ZSTD_freeCCtx(m_cctx); }
+        Trials(const Trials&) = delete;
+        Trials& operator=(const Trials&) = delete;
+
+        size_t Compressed(const uint8_t* p, size_t n)
+        {
+            if (!m_cctx) return n;
+            // the level's parameters, capped by GACL's window policy (as zstd_p's level table capped them)
+            ZSTD_compressionParameters cp = ZSTD_getCParams(m_level, n, 0);
+            GACL_ApplyWindowPolicy(cp);
+            m_out.resize(ZSTD_compressBound(n));
+            size_t r = ZSTD_CCtx_reset(m_cctx, ZSTD_reset_session_and_parameters);
+            if (!ZSTD_isError(r)) r = ZSTD_CCtx_setParameter(m_cctx, ZSTD_c_compressionLevel, m_level);
+            if (!ZSTD_isError(r)) r = ZSTD_CCtx_setCParams(m_cctx, cp);
+            if (!ZSTD_isError(r)) r = ZSTD_compress2(m_cctx, m_out.data(), m_out.size(), p, n);
+            return ZSTD_isError(r) ? n : r;
+        }
+
+        // smallest of no transpose and the allowed units, returns the unit code
+        unsigned BestUnit(const uint8_t* p, size_t n, size_t stride, size_t& best)
+        {
+            unsigned code = 0;
+            best = SIZE_MAX;
+            for (unsigned c = 0; c <= 3; c++)
+            {
+                if (c && !UnitAllowed(c, stride)) continue;
+                m_work.assign(p, p + n * stride);
+                Transpose(m_work.data(), n, stride, c, false);
+                const size_t s = Compressed(m_work.data(), m_work.size());
+                if (s < best) { best = s; code = c; }
+            }
+            return code;
+        }
+
+        void Evaluate(Section& s)
+        {
+            if (!s.Active()) return;
+            s.unit[0] = BestUnit(s.p, s.n, s.stride, s.size[0]);
+            s.ranks = BuildRanks(s.p, s.n, s.stride);
+            std::vector<uint8_t> ranked(s.p, s.p + s.n * s.stride);
+            Rank(ranked.data(), s.n, s.stride, s.ranks);
+            s.unit[1] = BestUnit(ranked.data(), s.n, s.stride, s.size[1]);
+            std::vector<uint8_t> table(s.ranks.lens);
+            table.insert(table.end(), s.ranks.symbols.begin(), s.ranks.symbols.end());
+            s.size[1] += Compressed(table.data(), table.size());
+        }
+
+    private:
+        ZSTD_CCtx* m_cctx;
+        int m_level;
+        std::vector<uint8_t> m_out, m_work;
+    };
+
+    inline uint64_t Mix64(uint64_t x)
+    {
+        x ^= x >> 30; x *= 0xBF58476D1CE4E5B9ull;
+        x ^= x >> 27; x *= 0x94D049BB133111EBull;
+        return x ^ (x >> 31);
+    }
+
+    inline uint64_t ContentHash(const uint8_t* p, size_t bytes)
+    {
+        uint64_t h = Mix64(bytes);
+        size_t i = 0;
+        for (; i + 8 <= bytes; i += 8)
+        {
+            uint64_t v;
+            memcpy(&v, p + i, 8);
+            h = Mix64(h ^ v);
+        }
+        uint64_t tail = 0;
+        memcpy(&tail, p + i, bytes - i);
+        return Mix64(h ^ tail ^ (uint64_t(bytes - i) << 56));
+    }
+
+    // Trials::Evaluate through the cache: the first transform to reach a section's content runs the trials (others wait for
+    // them) and the rest reuse the unit choices and sizes.  Rank tables are always built from the section's own bytes, so a
+    // hash collision could only cost compression, never stream validity.
+    inline void EvaluateShared(Trials& trials, Section& s, BC7ModeSplitTrialCache& cache, int level)
+    {
+        if (!s.Active()) return;
+        const auto key = std::make_tuple(ContentHash(s.p, s.n * s.stride), s.n, s.stride, level);
+        BC7ModeSplitTrialCache::Impl::Result* r;
+        {
+            std::lock_guard<std::mutex> guard(cache.m->lock);
+            std::unique_ptr<BC7ModeSplitTrialCache::Impl::Result>& slot = cache.m->results[key];
+            if (!slot) slot = std::make_unique<BC7ModeSplitTrialCache::Impl::Result>();
+            r = slot.get();
+        }
+        bool evaluated = false;
+        std::call_once(r->once, [&]
+        {
+            trials.Evaluate(s);
+            r->unit[0] = s.unit[0]; r->unit[1] = s.unit[1];
+            r->size[0] = s.size[0]; r->size[1] = s.size[1];
+            evaluated = true;
+        });
+        if (!evaluated)
+        {
+            s.unit[0] = r->unit[0]; s.unit[1] = r->unit[1];
+            s.size[0] = r->size[0]; s.size[1] = r->size[1];
+            s.ranks = BuildRanks(s.p, s.n, s.stride);
+        }
+    }
+
+    // sections 0-7 color, 8-15 misc.  Remaps are granted by the largest trial gain while the table bytes fit in `budget`
+    // (the shuffled stream must not exceed the source size).  SectionLayout 2 forces opt.SectionSelectors (testing).
+    inline void Choose(Section (&sections)[16], const BC7ModeSplitShuffleOptions& opt, size_t budget)
+    {
+        std::vector<size_t> order;
+        if (opt.SectionLayout == 2)
+        {
+            for (size_t i = 0; i < 16; i++)
+            {
+                Section& s = sections[i];
+                if (!s.Active()) continue;
+                const unsigned sel = (opt.SectionSelectors[i & 7] >> (i < 8 ? 0 : MiscShift)) & 7u;
+                s.unit[0] = s.unit[1] = UnitAllowed(sel & 3u, s.stride) ? (sel & 3u) : 0u;
+                if (sel & RemapBit)
+                {
+                    s.ranks = BuildRanks(s.p, s.n, s.stride);
+                    order.push_back(i);
+                }
+            }
+        }
+        else
+        {
+            const int level = opt.SectionTrialLevel ? int(opt.SectionTrialLevel) : DefaultTrialLevel;
+            Trials trials(level);
+            for (size_t i = 0; i < 16; i++)
+            {
+                if (opt.TrialCache) EvaluateShared(trials, sections[i], *opt.TrialCache, level);
+                else trials.Evaluate(sections[i]);
+                if (sections[i].size[1] < sections[i].size[0]) order.push_back(i);
+            }
+            std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b)
+                { return sections[a].size[0] - sections[a].size[1] > sections[b].size[0] - sections[b].size[1]; });
+        }
+        for (size_t i : order)
+        {
+            if (sections[i].ranks.Bytes() > budget) continue;
+            budget -= sections[i].ranks.Bytes();
+            sections[i].remap = true;
+        }
+    }
+
+    // lays out the section in place, returns its selector bits (unit code, remap bit)
+    inline uint8_t Apply(Section& s)
+    {
+        if (!s.Active()) return 0;
+        if (s.remap) Rank(s.p, s.n, s.stride, s.ranks);
+        const unsigned unit = s.unit[s.remap ? 1 : 0];
+        Transpose(s.p, s.n, s.stride, unit, false);
+        return uint8_t(unit | (s.remap ? RemapBit : 0u));
+    }
+
+    // builds the layout block and the remap tables
+    inline void Block(const Section (&sections)[16], const uint8_t (&selectors)[8], std::vector<uint8_t>& block, std::vector<uint8_t>& tables)
+    {
+        block.assign(FixedBytes, 0);
+        tables.clear();
+        memcpy(block.data() + SelectorOffset, selectors, sizeof(selectors));
+        for (size_t m = 0; m < 8; m++)
+        {
+            const Section& c = sections[m];
+            const Section& x = sections[8 + m];
+            block[TableOffsetOffset + 2 * m] = uint8_t(tables.size());
+            block[TableOffsetOffset + 2 * m + 1] = uint8_t(tables.size() >> 8);
+            if (c.remap) tables.insert(tables.end(), c.ranks.lens.begin(), c.ranks.lens.end());
+            if (x.remap) tables.insert(tables.end(), x.ranks.lens.begin(), x.ranks.lens.end());
+            if (c.remap) tables.insert(tables.end(), c.ranks.symbols.begin(), c.ranks.symbols.end());
+            if (x.remap) tables.insert(tables.end(), x.ranks.symbols.begin(), x.ranks.symbols.end());
+        }
+        assert(tables.size() <= 0xffff);
+        block[0] = uint8_t(tables.size());
+        block[1] = uint8_t(tables.size() >> 8);
+    }
+
+    inline size_t TableBytes(const uint8_t* block) { return size_t(block[0]) | (size_t(block[1]) << 8); }
+
+    // reverses the color and misc section layouts of mode m in place
+    inline void Restore(const uint8_t* block, const uint8_t* tables, size_t m, uint8_t* color, size_t colorStride, uint8_t* misc, size_t miscStride, size_t n)
+    {
+        const uint8_t sel = block[SelectorOffset + m];
+        if (n < 2 || sel == 0) return;
+        const uint8_t* colorLens = tables + (size_t(block[TableOffsetOffset + 2 * m]) | (size_t(block[TableOffsetOffset + 2 * m + 1]) << 8));
+        const uint8_t* miscLens = colorLens + ((sel & RemapBit) ? colorStride : 0);
+        const uint8_t* colorSymbols = miscLens + (((sel >> MiscShift) & RemapBit) ? miscStride : 0);
+        const uint8_t* miscSymbols = colorSymbols + ((sel & RemapBit) ? SymbolCount(colorLens, colorStride) : 0);
+        Transpose(color, n, colorStride, sel & 3u, true);
+        if (sel & RemapBit) Unrank(color, n, colorStride, colorLens, colorSymbols);
+        Transpose(misc, n, miscStride, (sel >> MiscShift) & 3u, true);
+        if ((sel >> MiscShift) & RemapBit) Unrank(misc, n, miscStride, miscLens, miscSymbols);
+    }
+
+    // block-order scrap bits -> per-mode groups; dst must be zeroed
+    inline void GroupScraps(const uint8_t* srcBits, uint8_t* dstBits, const std::vector<uint8_t>& modes, const size_t (&bits)[9])
+    {
+        size_t counts[9] = {}, base[9] = {}, rank[9] = {};
+        for (uint8_t m : modes) counts[m]++;
+        for (size_t m = 1; m < 9; m++) base[m] = base[m - 1] + counts[m - 1] * bits[m - 1];
+        size_t from = 0;
+        for (uint8_t m : modes)
+        {
+            for (size_t j = 0; j < bits[m]; j++, from++)
+            {
+                const size_t to = base[m] + rank[m] * bits[m] + j;
+                if ((srcBits[from >> 3] >> (from & 7)) & 1) dstBits[to >> 3] |= uint8_t(1u << (to & 7));
+            }
+            rank[m]++;
+        }
+    }
+}
+
 
 void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uint8_t>& destA, std::vector<uint8_t>& destB, BC7ModeSplitShuffleOptions& opt, BC7TextureMetrics& metrics)
 {
@@ -4083,8 +4589,23 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
     // Step #3 - Apply any color rotation
     if (opt.RotationRegionSize)
     {
-        BC7_ModeSplit_RotateColors(nextStageSrc, srcSize, rotated, 0b01110000 /*0b11111111*/, opt.RotationRegionSize, &rotationHeaders[0]);
+        BC7_ModeSplit_RotateColors(nextStageSrc, srcSize, rotated, 0b11111111, opt.RotationRegionSize, &rotationHeaders[0]);
         nextStageSrc = rotated.data();
+    }
+
+    // Step #4 - Apply index prediction
+    std::vector<uint8_t> predicted;
+    if (opt.IndexPrediction)
+    {
+        predicted.resize(srcSize);
+        for (size_t i = 0; i < block_count; i++)
+        {
+            uint64_t x[2];
+            memcpy(x, nextStageSrc + 16 * i, 16);
+            SplitIndexPrediction::Block(x, false);
+            memcpy(predicted.data() + 16 * i, x, 16);
+        }
+        nextStageSrc = predicted.data();
     }
 
     size_t modeCounts[9] = {};
@@ -4173,6 +4694,9 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
     size_t lastModeRun = 0;
     size_t lastModeEncodingOffsetA = 0;
     size_t lastEndpointOrderBit = 0;
+    size_t sectionCounts[9] = {};
+    std::vector<uint8_t> scrapModes;
+    size_t scrapBits[9] = {};
 
     for (size_t i = 0; i < block_count; ++i, nextStageSrc += 16)
     {
@@ -4277,7 +4801,9 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
 
         if (mode < 8 || !mode8Clean)
         {
+            const size_t scrapStart = b.ScrapsBitCount;
             BC7_ModeSplit_Shuffle_Slow((uint8_t)mode, nextStageSrc, b, bitSequences[mode]);
+            sectionCounts[mode]++;
 
             // add endpoint order bits to scraps (when we grow the buffers we always ensure there's at least 4 bits of extra space, no resize needed here)
             if ((endpointOrderModeMask & (1 << mode)) != 0 && opt.EndpointOrderStrategy)
@@ -4292,6 +4818,11 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
                     lastEndpointOrderBit++;
                     b.ScrapsBitCount++;
                 }
+            }
+            if (opt.SectionLayout)
+            {
+                scrapModes.push_back(uint8_t(mode));
+                scrapBits[mode] = b.ScrapsBitCount - scrapStart;
             }
         }
     }
@@ -4316,8 +4847,9 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
     //          0x1 = mode B encoding
     //          0x2 = global statics byte follows
     //          0x4 = global low entropy byte follows
-    //          0x8 = extension byte follows (space curve width)
+    //          0x8 = extension byte follows (space curve width, index prediction, section layout)
     //  [1 byte extension]
+    //  [26 byte section layout block, when flagged in the extension byte (see SplitSectionLayout)]
     //  [1 byte global statics]
     //  [1 byte global low entropy]
     //  N bytes LUT[0....n]
@@ -4327,8 +4859,10 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
     //              0x1 - mode-specific statics byte follows
     //  3 bytes mode stream size  [MODE A ONLY]
     //  <mode stream>
+    //  [section layout remap tables]
     //  <mode0 color> ... <mode7 color>
     //  <mode0 misc> ... <mode7 misc> [mode8 color]
+    //  <scraps>  (grouped per mode with the section layout)
 
     std::vector<uint8_t> header;
 
@@ -4347,6 +4881,8 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
         assert(widthInTiles == (1ull << widthInTilesLog2) && widthInTilesLog2 <= 7);
         extensionByte.SpaceCurveWidthInTilesLog2 = static_cast<uint8_t>(widthInTilesLog2);
     }
+    extensionByte.IndexPrediction = opt.IndexPrediction ? 1u : 0u;
+    extensionByte.SectionLayout = opt.SectionLayout ? 1u : 0u;
 
     ModeSplitStartByte byte1A = {};
     byte1A.ModesUsed = modesUsed;
@@ -4452,9 +4988,58 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
         destB.insert(destB.end(), b.ModeB.begin(), b.ModeB.end());
     }
 
+#if GACL_SPLITLOG
     wchar_t message[256];
     swprintf_s(message, _countof(message), L"mode header size   A:%I64u  B:%I64u\n", destA.size(), destB.size());
     OutputDebugString(message);
+#endif
+
+    if (opt.SectionLayout)
+    {
+        SplitSectionLayout::Section sections[16];
+        size_t projected = (std::max)(destA.size(), destB.size()) + SplitSectionLayout::FixedBytes + (b.ScrapsBitCount + 7) / 8;
+        for (int m = 0; m < 9; m++)
+        {
+            if (m < 8) projected += (b.ColorDataBitCounts[m] + 7) / 8;
+            if (m < 8 || !mode8Clean) projected += (b.MiscDataBitCounts[m] + 7) / 8;
+        }
+        for (int m = 0; m < 8; m++)
+        {
+            if (sectionCounts[m] == 0) continue;
+            sections[m].p = reinterpret_cast<uint8_t*>(b.ColorData64[m].data());
+            sections[m].n = sectionCounts[m];
+            sections[m].stride = b.ColorDataBitCounts[m] / 8 / sectionCounts[m];
+            sections[8 + m].p = reinterpret_cast<uint8_t*>(b.MiscData64[m].data());
+            sections[8 + m].n = sectionCounts[m];
+            sections[8 + m].stride = b.MiscDataBitCounts[m] / 8 / sectionCounts[m];
+        }
+        SplitSectionLayout::Choose(sections, opt, srcSize > projected ? srcSize - projected : 0);
+
+        uint8_t selectors[8] = {};
+        for (int m = 0; m < 8; m++)
+        {
+            const uint8_t colorSelector = SplitSectionLayout::Apply(sections[m]);
+            const uint8_t miscSelector = SplitSectionLayout::Apply(sections[8 + m]);
+            selectors[m] = uint8_t(colorSelector | (miscSelector << SplitSectionLayout::MiscShift));
+        }
+        std::vector<uint8_t> layoutBlock, layoutTables;
+        SplitSectionLayout::Block(sections, selectors, layoutBlock, layoutTables);
+        for (auto out : { &destA, &destB })
+        {
+            if (out->size() == 0) continue;
+            out->insert(out->end(), layoutTables.begin(), layoutTables.end());                        // after the mode stream
+            out->insert(out->begin() + 2, layoutBlock.begin(), layoutBlock.end());                   // after the start and extension bytes
+        }
+
+        if (b.ScrapsBitCount)
+        {
+            const size_t scrapBytes = (b.ScrapsBitCount + 7) / 8;
+            std::vector<uint8_t> grouped(scrapBytes);
+            SplitSectionLayout::GroupScraps(reinterpret_cast<const uint8_t*>(b.Scraps64.data()), grouped.data(), scrapModes, scrapBits);
+            memset(b.Scraps64.data(), 0, b.Scraps64.size() * sizeof(b.Scraps64[0]));
+            memcpy(b.Scraps64.data(), grouped.data(), scrapBytes);
+        }
+    }
 
     for (auto out : { &destA, &destB })
     {
@@ -4463,8 +5048,10 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
         for (int m = 0; m < 8; m++)
             //for (int m : {0, 2, 1, 3, 4, 5, 6, 7, 8 })
         {
+#if GACL_SPLITLOG
             swprintf_s(message, _countof(message), L"color[%d]  %I64u\n", m, out->size());
             OutputDebugString(message);
+#endif
             size_t currentSize = out->size();
             size_t colorDataSize = (b.ColorDataBitCounts[m] + 7) / 8;
 
@@ -4473,8 +5060,10 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
         }
         for (int m = 0; m < (mode8Clean ? 8 : 9); m++)
         {
+#if GACL_SPLITLOG
             swprintf_s(message, _countof(message), L"misc[%d]  %I64u\n", m, out->size());
             OutputDebugString(message);
+#endif
             size_t currentSize = out->size();
             size_t miscDataSize = (b.MiscDataBitCounts[m] + 7) / 8;
 
@@ -4483,8 +5072,10 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
         }
 
         {
+#if GACL_SPLITLOG
             swprintf_s(message, _countof(message), L"scraps  %I64u\n", out->size());
             OutputDebugString(message);
+#endif
             size_t currentSize = out->size();
             size_t scrapDataSize = (b.ScrapsBitCount + 7) / 8;
 
@@ -4514,6 +5105,7 @@ void BC7_ModeSplit_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8
     opt.ModeTransform = (firstByte.ModeEncoding) ? BC7ModeSplitModeTransformB : BC7ModeSplitModeTransformA;
     const uint8_t* pLut = src + 1;
     size_t lutBytes = 0;
+    const uint8_t* sectionLayout = nullptr;
 
     if (firstByte.ExtensionByte)
     {
@@ -4523,7 +5115,14 @@ void BC7_ModeSplit_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8
         {
             opt.SpaceCurveWidthInPixels = static_cast<uint32_t>(ModeSplitCurveTileWidthInPixels << extensionByte.SpaceCurveWidthInTilesLog2);
         }
+        opt.IndexPrediction = extensionByte.IndexPrediction;
         pLut++;
+        if (extensionByte.SectionLayout)
+        {
+            opt.SectionLayout = 1;
+            sectionLayout = pLut;
+            pLut += SplitSectionLayout::FixedBytes;
+        }
     }
     if (firstByte.StaticFields)
     {
@@ -4740,7 +5339,9 @@ void BC7_ModeSplit_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8
     size_t firstMiscByte[8] = {};
     size_t firstScrapByte = 0;
 
-    firstColorByte[0] = (pModeStream - src) + modeStreamSize;
+    // any section layout remap tables sit between the mode stream and the color data
+    const uint8_t* sectionTables = pModeStream + modeStreamSize;
+    firstColorByte[0] = (pModeStream - src) + modeStreamSize + (sectionLayout ? SplitSectionLayout::TableBytes(sectionLayout) : 0);
     size_t totalScrapBits = modeCounts[0] * bitsPerElementScaps[0];
     for (int m = 1; m < 8; m++)
     {
@@ -4757,6 +5358,24 @@ void BC7_ModeSplit_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8
     firstScrapByte = firstMiscByte[7] + (modeCounts[7] * bitsPerElementMisc[7]) / 8;
     firstColorByte[8] = firstScrapByte + (totalScrapBits + 7) / 8;
 
+    // section layout: per-mode scrap groups, and the color\misc sections restored to block-major byte order
+    std::vector<uint8_t> restored;
+    size_t scrapGroupBase[9] = {};
+    if (sectionLayout)
+    {
+        for (int m = 1; m < 9; m++)
+        {
+            scrapGroupBase[m] = scrapGroupBase[m - 1] + modeCounts[m - 1] * bitsPerElementScaps[m - 1];
+        }
+        restored.assign(src, src + srcSize);
+        restored.resize(srcSize + 16);
+        for (size_t m = 0; m < 8; m++)
+        {
+            SplitSectionLayout::Restore(sectionLayout, restored.data() + (sectionTables - src), m, restored.data() + firstColorByte[m], bitsPerElementColor[m] / 8,
+                restored.data() + firstMiscByte[m], bitsPerElementMisc[m] / 8, modeCounts[m]);
+        }
+        src = restored.data();
+    }
 
     for (size_t i = 0; i < blockCount; ++i)
     {
@@ -4779,9 +5398,10 @@ void BC7_ModeSplit_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8
         {
             uint64_t de[2] = { eri.ModeByte };
 
+            const size_t blockFirstScrapBit = sectionLayout ? scrapGroupBase[mode] + eri.ModeElementCount * bitsPerElementScaps[mode] : size_t(eri.FirstScrapBit);
             const size_t colorOffset = firstColorByte[mode] + (eri.ModeElementCount * bitsPerElementColor[mode] / 8);
             const size_t miscOffset = firstMiscByte[mode] + (eri.ModeElementCount * bitsPerElementMisc[mode] / 8);
-            const size_t scrapsOffset = firstScrapByte + (eri.FirstScrapBit / 8);
+            const size_t scrapsOffset = firstScrapByte + (blockFirstScrapBit / 8);
 
             const uint64_t* pColor = reinterpret_cast<const uint64_t*>(src + (colorOffset & ~7ull));
             const size_t firstColorBit = (colorOffset & 7ull) * 8;
@@ -4790,7 +5410,7 @@ void BC7_ModeSplit_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8
             const size_t firstMiscBit = (miscOffset & 7ull) * 8;
 
             const uint64_t* pScraps = reinterpret_cast<const uint64_t*>(src + (scrapsOffset & ~7ull));
-            const size_t firstScrapBit = (scrapsOffset & 7ull) * 8 + eri.FirstScrapBit % 8;
+            const size_t firstScrapBit = (scrapsOffset & 7ull) * 8 + blockFirstScrapBit % 8;
 
             size_t nextDestBit = mode + 1ull;
 
@@ -4868,13 +5488,19 @@ void BC7_ModeSplit_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8
                 nextDestBit += op.CopyBitCount;
             }
 
+            // post-unshuffle stage #0 - index prediction residuals
+            if (opt.IndexPrediction)
+            {
+                SplitIndexPrediction::Block(de, true);
+            }
+
             // post-unshuffle stage #1 - color field rotation
 
             if (rotationHeaders[mode])
             {
                 size_t rotationBitDepth[] =    { 4, 6, 5, 7, 5, 7, 7, 5 };
                 //size_t rotationDepthRoundFixup[] = {7, 1, 3, 0, 0, 0, 0, 3};  // 2^(7-bitdepth) - 1
-                size_t region = 16 * blockCount / rotationRegionSizes[mode];
+                size_t region = 16 * i / rotationRegionSizes[mode];
                 const uint8_t* firstRotation = reinterpret_cast<const uint8_t*>(rotationHeaders[mode]) + 1 + region * rotationBytesPerRegion[mode];
                 uint8_t rotationByte = 0;
                 uint8_t rotations[8] = {};
