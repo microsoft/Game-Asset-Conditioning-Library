@@ -348,6 +348,7 @@ RDO_ErrorCode GACL_RDO_ComponentLevelEntropyReduce(
             // Compute how many chunks (at least 1), last chunk will include any remainder less than half a chunk in size
             const uint32_t numChunks = ((numBlocks * uint32_t(bcElementSize)) / chunkNormalSize) + (remainderRequiresChunk ? 1 : 0);
             
+            // Assumes idealChunkSize is 256 KB
             uint32_t curvedChunkWidth = imageSizeBytes <= options.idealChunkSize ? imageWidth : (bcElementSize == 8 ? 1024 : 512);
             uint32_t curvedChunkHeight = imageSizeBytes <= options.idealChunkSize ? imageHeight : 512;
 
