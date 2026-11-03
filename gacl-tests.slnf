@@ -1,0 +1,14 @@
+{
+  "solution": {
+    "path": "gacl.sln",
+    "projects": [
+      "Api\\gacllib\\gacllib.vcxproj",
+      "Api\\gaclexe\\gaclexe.vcxproj",
+      "Tests\\gacl_lib_tests\\gacl_lib_tests.vcxproj",
+      "Tests\\gacl_exe_tests\\gacl_exe_tests.vcxproj",
+      "Tests\\ml_rdo_tests\\ml_rdo_tests.vcxproj",
+      "Tests\\shader_tests\\shader_tests.vcxproj",
+      "Tools\\gacl_test_runner\\gacl_test_runner.vcxproj"
+    ]
+  }
+}

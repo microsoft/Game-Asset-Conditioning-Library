@@ -50,6 +50,14 @@
     <VcpkgAdditionalInstallOptions Condition="'$(GaclVcpkgBuildtreesRoot)' != ''">$(VcpkgAdditionalInstallOptions) "--x-buildtrees-root=$(GaclVcpkgBuildtreesRoot)"</VcpkgAdditionalInstallOptions>
   </PropertyGroup>
 
+  <!-- Opt in only for gacl-tests.slnf; ordinary builds keep the root manifest.
+       Select the manifest before vcpkg.props discovers its default, and keep
+       test dependencies separate from the SDK-bearing normal install tree. -->
+  <PropertyGroup Condition="'$(GaclTestBuild)' == 'true'">
+    <VcpkgManifestRoot>$(MSBuildThisFileDirectory)build\test-only\</VcpkgManifestRoot>
+    <VcpkgInstalledDir Condition="'$(VcpkgInstalledDir)' == ''">$(MSBuildThisFileDirectory)build\test-only\vcpkg_installed\</VcpkgInstalledDir>
+  </PropertyGroup>
+
   <Import Condition="Exists('$(VcpkgRoot)scripts\buildsystems\msbuild\vcpkg.props')"
           Project="$(VcpkgRoot)scripts\buildsystems\msbuild\vcpkg.props" />
 

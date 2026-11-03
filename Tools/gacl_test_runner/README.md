@@ -4,6 +4,26 @@ A thin native Windows x64 launcher for the four existing GoogleTest executables:
 
 Build the runner and suites from `gacl.sln` in Debug or Release x64. With v143, the executables are in `bin/v143/x64/<configuration>/`. Preserve the suites' existing runtime DLLs, shader `.cso` files, and applicable fixtures/models. The launcher does not build or download dependencies or change graphics settings.
 
+## Test-only build
+
+To build the runner, `gacl.exe`, library and four finite suites without restoring the DirectStorage or Agility SDK ports, use the opt-in solution filter and property together. From a Visual Studio developer shell at the repository root:
+
+```powershell
+.\Tools\scripts\restorePackages.ps1 -TestBuild
+msbuild gacl-tests.slnf /t:Rebuild /m /p:Configuration=Release /p:Platform=x64 /p:GaclTestBuild=true
+if ($LASTEXITCODE -ne 0) { throw "GACL test-only build failed" }
+```
+
+`-TestBuild` uses the same configured NuGet source as the normal restore helper, but selects `gacl-tests.slnf` and forwards `GaclTestBuild=true`. The filter keeps the existing solution directory and project references; it excludes fuzzing and does not add sample projects. Use Debug or Release x64, not Fuzzing, for this lane.
+
+The property selects `build/test-only/vcpkg.json`, with the same registry baseline and dependency settings as the root manifest except for `directx12-agility` and `dstorage`. It retains DirectX headers/math/texture/toolkit, GoogleTest and Zstd. Its default installed tree is `build/test-only/vcpkg_installed/`, separate from the normal SDK-bearing tree; an explicit `VcpkgInstalledDir` build property can choose another location. This is not an offline build: the retained dependencies and ONNX Runtime NuGet package still need restore access or a prepared cache.
+
+Keep the test manifest and its registry baseline in sync with the root manifest when updating dependencies; the intended difference is only the omission of `directx12-agility` and `dstorage`. Normal public CI still builds the root solution, so it does not qualify this opt-in lane.
+
+The test lane uses the platform Windows SDK for D3D12. It does not install graphics drivers, change machine settings, stage ML models, or waive shader failures. Preserve the normal runtime, shader and fixture requirements below; fixed ML regressions still require exported and staged models.
+
+Without `GaclTestBuild=true`, the root manifest and normal `gacl.sln` build are unchanged, including their SDK dependencies. Continue using that normal dependency lane for samples or other SDK consumers. The generic cache-first NuGet helper below remains available to normal builds.
+
 ## Dependency download cache
 
 The Agility SDK, DirectStorage SDK and optional Microsoft-GACL ONNX Runtime overlay use a cache-first NuGet helper. If their original archive is already in vcpkg's download cache under the port's expected filename, its pinned SHA-512 is checked before any NuGet service-index request. A corrupt cached archive fails; a cache miss retains the existing configured-feed/public-download behavior. Package versions and extraction rules are unchanged. Cache provisioning is an external build-environment concern; no internal paths, credentials or feed configuration are required by the helper.

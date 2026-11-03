@@ -1,5 +1,6 @@
 param(
-    [string]$Source = $env:GACL_NUGET_SOURCE
+    [string]$Source = $env:GACL_NUGET_SOURCE,
+    [switch]$TestBuild
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,6 +34,12 @@ else
 
 $repositoryRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $solution = Join-Path $repositoryRoot "gacl.sln"
+$buildOptions = @()
+if ($TestBuild)
+{
+    $solution = Join-Path $repositoryRoot "gacl-tests.slnf"
+    $buildOptions += '/p:GaclTestBuild=true'
+}
 $configPath = Join-Path ([System.IO.Path]::GetTempPath()) "gacl-nuget-$([guid]::NewGuid()).config"
 $escapedRepositoryPath = [System.Security.SecurityElement]::Escape(
     (Join-Path $repositoryRoot "packages"))
@@ -62,7 +69,7 @@ try
         /m `
         /p:RestorePackagesConfig=true `
         "/p:RestoreConfigFile=$configPath" `
-        /verbosity:minimal
+        /verbosity:minimal @buildOptions
 
     if ($LASTEXITCODE -ne 0)
     {

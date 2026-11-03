@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "dependencies": [
+    "directx-headers",
+    "directxmath",
+    {
+      "name": "directxtex",
+      "default-features": false
+    },
+    {
+      "name": "directxtk12",
+      "default-features": false
+    },
+    "gtest",
+    "zstd"
+  ]
+}
