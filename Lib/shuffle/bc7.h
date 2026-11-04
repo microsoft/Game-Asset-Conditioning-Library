@@ -166,6 +166,30 @@ public:
     Impl* const m;
 };
 
+// BC7 split stream features, each on by default.  Define one as 0 to stop the encoder writing it (e.g. if a regression is found),
+// whatever the options ask.  The shaders have the same switches (Shaders\Shuffle\SharedDefinitions.hlsli), and reject streams that use
+// a feature compiled out of them; BC7_ModeSplit_Reverse always decodes every feature.
+//  GACL_SPLIT_INDEX_PREDICTION     index fields stored as prediction residuals (IndexPrediction, extension byte bit 3)
+//  GACL_SPLIT_SECTION_LAYOUT       the section layout (SectionLayout, extension byte bit 4): per-mode scrap groups, and these two section transforms:
+//  GACL_SPLIT_SECTION_REMAP        per byte position rank remap tables
+//  GACL_SPLIT_SECTION_TRANSPOSE    unit plane transposition
+//  GACL_SPLIT_ROTATE_ALL_MODES     color rotation of modes 0-7, else of modes 4-6 alone (encoder only: decoders undo it in any mode)
+#ifndef GACL_SPLIT_INDEX_PREDICTION
+#define GACL_SPLIT_INDEX_PREDICTION     1
+#endif
+#ifndef GACL_SPLIT_SECTION_LAYOUT
+#define GACL_SPLIT_SECTION_LAYOUT       1
+#endif
+#ifndef GACL_SPLIT_SECTION_REMAP
+#define GACL_SPLIT_SECTION_REMAP        1
+#endif
+#ifndef GACL_SPLIT_SECTION_TRANSPOSE
+#define GACL_SPLIT_SECTION_TRANSPOSE    1
+#endif
+#ifndef GACL_SPLIT_ROTATE_ALL_MODES
+#define GACL_SPLIT_ROTATE_ALL_MODES     1
+#endif
+
 struct BC7ModeSplitShuffleOptions
 {
     BC7ModeSplitModeTransform ModeTransform;

@@ -1221,6 +1221,296 @@ void Game::LoadTextureFromDisk(uint32_t& widthPixels, uint32_t& heightPixels, DX
 
 
 
+// The byte the BC7 tests fill the destination with before the passes, so that a block the shaders don't write fails (mode 8 blocks are
+// zero), and a stream they reject leaves it
+static constexpr uint8_t kBC7DestinationFill = 0xA5u;
+
+// The header of a BC7 split stream (mode transform B), as the prepass reads it
+struct SplitStreamLayout
+{
+    uint32_t modesUsed;
+    uint32_t extension;         // the extension byte, 0 if none
+    size_t lutAt[9];            // LUT entry i's byte
+    uint32_t lutMode[9];        // LUT entry i's mode
+    size_t entryAt[9];          // by mode: its LUT entry's byte, 0 if none
+    uint32_t pattern[9];        // by mode: its pattern
+    size_t extensionsAt[9];     // by mode: its additional extensions byte, 0 if none
+    size_t rotationAt[9];       // by mode: its rotation header byte, 0 if none
+    size_t modeStreamAt;        // the mode stream, after the header
+};
+
+// Color section bytes per block of mode 0-7 with its pattern, as GetModeSpecificLayout (SharedDefinitions.hlsli); the misc section has
+// the rest of the block's 15 bytes
+static uint32_t SplitColorBytes(uint32_t mode, uint32_t pattern)
+{
+    switch (mode)
+    {
+    case 0: return 9;
+    case 1: return pattern == EndpointQuadSignificantBitInderleaved ? 9u : 10u;
+    case 2: return pattern == EndpointPairSignificantBitInderleaved ? 12u : 9u;
+    case 3: return pattern == EndpointQuadSignificantBitInderleaved ? 11u : 12u;
+    case 4: return 5;
+    case 7: return pattern == EndpointQuadSignificantBitInderleavedAlt ? 10u : 11u;
+    default: return 7;
+    }
+}
+
+static bool ParseSplitStream(std::vector<uint8_t> const& s, size_t blockCount, SplitStreamLayout& layout)
+{
+    layout = {};
+    if (s.size() < 2)
+    {
+        return false;
+    }
+
+    // Start byte: modes used (bits 0-3), global statics and low entropy bytes (bits 5, 6), extension byte (bit 7), whose bit 4 is the
+    // 26 byte section layout block
+    const uint32_t extensionFlag = s[0] >> 7;
+    layout.modesUsed = s[0] & 0xFu;
+    layout.extension = extensionFlag ? s[1] : 0u;
+    size_t pos = 1u + extensionFlag + ((layout.extension & 0x10u) ? 26u : 0u) + ((s[0] >> 5) & 1u) + ((s[0] >> 6) & 1u);
+    for (uint32_t i = 0; i < layout.modesUsed; ++i)
+    {
+        if (i >= 9 || pos >= s.size() || (s[pos] & 0xFu) > 8)
+        {
+            return false;
+        }
+
+        // LUT byte: mode (bits 0-3), pattern (bits 4-6), additional extensions (bit 7): a byte flagging statics, low entropy, 0-2
+        // endpoint order bytes and a rotation header, which they follow
+        const uint32_t lut = s[pos];
+        const uint32_t mode = lut & 0xFu;
+        layout.lutAt[i] = pos;
+        layout.lutMode[i] = mode;
+        layout.entryAt[mode] = pos;
+        layout.pattern[mode] = (lut >> 4) & 0x7u;
+        size_t entryBytes = 1;
+        if (mode != 8 && (lut & 0x80u))
+        {
+            if (pos + 1 >= s.size())
+            {
+                return false;
+            }
+            const uint32_t extensions = s[pos + 1];
+            layout.extensionsAt[mode] = pos + 1;
+            entryBytes = 2u + (extensions & 1u) + ((extensions >> 1) & 1u) + ((extensions >> 2) & 3u);
+            if (extensions & 0x10u)
+            {
+                if (pos + entryBytes >= s.size())
+                {
+                    return false;
+                }
+
+                // Rotation header: the rotated channels (bits 0-3), 2 bytes each per region, and the region size (bits 4-7)
+                const uint32_t header = s[pos + entryBytes];
+                const size_t regionBytes = size_t(1) << ((header >> 4) + 12);
+                const size_t regions = (blockCount * 16 + regionBytes - 1) / regionBytes;
+                layout.rotationAt[mode] = pos + entryBytes;
+                entryBytes += 1 + 2 * size_t(__popcnt(header & 0xFu)) * regions;
+            }
+        }
+        pos += entryBytes;
+    }
+    layout.modeStreamAt = pos;
+    return pos <= s.size();
+}
+
+// The section layout block's 16 bit fields: mode m's (0-7) remap table offset, and the table size (m = 8)
+static size_t SplitTableFieldAt(uint32_t m)
+{
+    return m < 8 ? 12u + 2u * m : 2u;
+}
+
+static uint32_t ReadU16(std::vector<uint8_t> const& s, size_t at)
+{
+    return s[at] | (uint32_t(s[at + 1]) << 8);
+}
+
+static void WriteU16(std::vector<uint8_t>& s, size_t at, uint32_t value)
+{
+    s[at] = uint8_t(value & 0xFFu);
+    s[at + 1] = uint8_t((value >> 8) & 0xFFu);
+}
+
+// Bytes per block of mode m's sections that its section selector (stream byte 4 + m) remaps
+static uint32_t SplitRemappedBytes(std::vector<uint8_t> const& s, SplitStreamLayout const& layout, uint32_t m)
+{
+    const uint32_t selector = s[4 + m];
+    const uint32_t color = SplitColorBytes(m, layout.pattern[m]);
+    return ((selector & 0x04u) ? color : 0u) + ((selector & 0x40u) ? 15u - color : 0u);
+}
+
+// Sets the field a SplitReject case (TestParameters.h) names out of its range.  False if the stream doesn't have the field
+static bool CorruptSplitStream(std::vector<uint8_t>& s, size_t blockCount, uint8_t reject, uint8_t arg)
+{
+    SplitStreamLayout layout;
+    if (!ParseSplitStream(s, blockCount, layout))
+    {
+        return false;
+    }
+    const bool sectionLayout = (layout.extension & 0x10u) != 0;
+
+    // The first additional extensions byte, and the modes with rotation headers, in LUT order
+    size_t extensionsAt = 0;
+    std::vector<uint32_t> rotated;
+    for (uint32_t i = 0; i < layout.modesUsed; ++i)
+    {
+        const uint32_t m = layout.lutMode[i];
+        extensionsAt = extensionsAt ? extensionsAt : layout.extensionsAt[m];
+        if (layout.rotationAt[m])
+        {
+            rotated.push_back(m);
+        }
+    }
+
+    switch (reject)
+    {
+    case SplitRejectModesUsed:
+        s[0] = uint8_t((s[0] & 0xF0u) | arg);
+        return true;
+    case SplitRejectModeEncodingA:
+        s[0] = uint8_t(s[0] & ~0x10u);
+        return true;
+    case SplitRejectExtensionReserved:
+        if (!(s[0] & 0x80u))
+        {
+            return false;
+        }
+        s[1] = uint8_t(s[1] | (1u << arg));
+        return true;
+    case SplitRejectLutMode:
+        s[layout.lutAt[0]] = uint8_t((s[layout.lutAt[0]] & 0xF0u) | arg);
+        return true;
+    case SplitRejectLutDuplicate:
+        // Entry arg takes entry 0's mode and pattern, keeping its own additional extensions bit, so the entries after it parse
+        if (layout.modesUsed <= arg)
+        {
+            return false;
+        }
+        s[layout.lutAt[arg]] = uint8_t((s[layout.lutAt[arg]] & 0x80u) | (s[layout.lutAt[0]] & 0x7Fu));
+        return true;
+    case SplitRejectLutPattern:
+    {
+        const size_t at = layout.entryAt[arg >> 3];
+        if (!at)
+        {
+            return false;
+        }
+        s[at] = uint8_t((s[at] & 0x8Fu) | ((arg & 7u) << 4));
+        return true;
+    }
+    case SplitRejectMode8Extensions:
+        if (!layout.entryAt[8])
+        {
+            return false;
+        }
+        s[layout.entryAt[8]] = uint8_t(s[layout.entryAt[8]] | 0x80u);
+        return true;
+    case SplitRejectExtensionsReserved:
+    case SplitRejectEndpointOrder3:
+        if (!extensionsAt)
+        {
+            return false;
+        }
+        s[extensionsAt] = uint8_t(s[extensionsAt] | (reject == SplitRejectEndpointOrder3 ? 0x0Cu : (1u << arg)));
+        return true;
+    case SplitRejectRotationChannels:
+        for (uint32_t m : rotated)
+        {
+            if ((m < 4) == (arg != 2))
+            {
+                static constexpr uint8_t kChannels[4] = { 0x3u, 0xFu, 0x7u, 0xBu };
+                const size_t at = layout.rotationAt[m];
+                s[at] = uint8_t((s[at] & 0xF0u) | kChannels[arg & 3u]);
+                return true;
+            }
+        }
+        return false;
+    case SplitRejectRotationFrequency:
+        if (rotated.size() < 2)
+        {
+            return false;
+        }
+        s[layout.rotationAt[rotated[1]]] = uint8_t(s[layout.rotationAt[rotated[1]]] ^ 0x10u);
+        return true;
+    case SplitRejectSelectorReserved:
+        if (!sectionLayout)
+        {
+            return false;
+        }
+        s[4] = uint8_t(s[4] | (1u << arg));
+        return true;
+    case SplitRejectSelectorUnit:
+        if (!sectionLayout || !layout.entryAt[arg ? 7 : 0] || (arg && SplitColorBytes(7, layout.pattern[7]) != 11))
+        {
+            return false;
+        }
+        if (arg == 0)
+        {
+            s[4] = uint8_t((s[4] & 0xFCu) | 0x2u);
+        }
+        else
+        {
+            s[11] = uint8_t((s[11] & 0xCFu) | 0x30u);
+        }
+        return true;
+    case SplitRejectTableOffset:
+        if (!sectionLayout)
+        {
+            return false;
+        }
+        WriteU16(s, SplitTableFieldAt(0), 1);
+        return true;
+    case SplitRejectTableShort:
+    case SplitRejectTableLong:
+    {
+        // The next mode's offset, or the table size after mode 7, from the mode's own offset
+        const uint32_t m = (reject == SplitRejectTableShort) ? arg : 7u;
+        const uint32_t remapped = (sectionLayout && layout.entryAt[m]) ? SplitRemappedBytes(s, layout, m) : 0u;
+        const uint32_t end = ReadU16(s, SplitTableFieldAt(m)) + ((reject == SplitRejectTableShort) ? 2 * remapped - 1 : 257 * remapped + 1);
+        if (!remapped || end > 0xFFFFu)
+        {
+            return false;
+        }
+        WriteU16(s, SplitTableFieldAt(m + 1), end);
+        return true;
+    }
+    case SplitRejectTableUnremapped:
+    {
+        // A byte of mode 7's tables given to mode 6 (mode 7 keeps a length byte and a symbol per position)
+        if (!sectionLayout || !layout.entryAt[6] || (s[10] & 0x44u) || !layout.entryAt[7] ||
+            ReadU16(s, SplitTableFieldAt(8)) - ReadU16(s, SplitTableFieldAt(7)) <= 2 * SplitRemappedBytes(s, layout, 7))
+        {
+            return false;
+        }
+        WriteU16(s, SplitTableFieldAt(7), ReadU16(s, SplitTableFieldAt(7)) + 1);
+        return true;
+    }
+    case SplitRejectSelectorFewBlocks:
+    case SplitRejectSelectorUnusedMode:
+    {
+        // Mode 1 with 1 block, or mode 7 with none: no section selector, given 1 byte color units
+        const uint32_t m = (reject == SplitRejectSelectorFewBlocks) ? 1u : 7u;
+        if (!sectionLayout || s[4 + m] != 0 || (layout.entryAt[m] != 0) != (m == 1))
+        {
+            return false;
+        }
+        s[4 + m] = 0x01u;
+        return true;
+    }
+    case SplitRejectBlockIndex:
+        // Block 0's 4 bit index, with 9 modes
+        if (layout.modesUsed != 9 || layout.modeStreamAt >= s.size())
+        {
+            return false;
+        }
+        s[layout.modeStreamAt] = uint8_t((s[layout.modeStreamAt] & 0xF0u) | arg);
+        return true;
+    default:
+        return false;
+    }
+}
+
 bool Game::RunTestWithParams(GTestParameters const& params)
 {
 #ifdef NEWBC1345
@@ -1238,6 +1528,21 @@ bool Game::RunTestWithParams(GTestParameters const& params)
         // The color contents of the texture do not matter. All that matter is that each block is constructed conforming to the bc7 specification.
         std::vector<uint8_t> bc7TextureRaw;
         CreateBC7RawFromMetadata(params.width, params.height, bc7TextureRaw);
+        if (params.BC7.content == SplitContentMode8Only)
+        {
+            std::fill(bc7TextureRaw.begin(), bc7TextureRaw.end(), uint8_t(0));
+        }
+        else if (params.BC7.content == SplitContentNoMode7)
+        {
+            for (size_t i = 0; i < bc7TextureRaw.size(); i += BC7_BYTES_PER_BLOCK)
+            {
+                // A mode 7 block's first byte is 0x80 (mode bit 7 alone), a mode 6 block's has bit 6 set and bits 0-5 clear
+                if (bc7TextureRaw[i] == 0x80u)
+                {
+                    bc7TextureRaw[i] = 0xC0u;
+                }
+            }
+        }
 
         BC7ModeSplitShufflePattern Patterns[8];
         memcpy(Patterns, &g_patternSets[params.BC7.patternIndex][0], sizeof(Patterns));
@@ -1269,8 +1574,25 @@ bool Game::RunTestWithParams(GTestParameters const& params)
         std::ofstream(dumpFileName.str(), std::ios::binary).write(reinterpret_cast<const char*>(shuffledBuffer.data()), shuffledBuffer.size());
 #endif
 
+        // A stream made invalid is rejected, so the expected output is the destination's fill (the texture isn't needed after shuffling)
+        if (params.BC7.reject != SplitRejectNone)
+        {
+            if (!CorruptSplitStream(shuffledBuffer, bc7SizeInBytes / BC7_BYTES_PER_BLOCK, params.BC7.reject, params.BC7.rejectArg))
+            {
+                std::cout << "The BC7 split stream doesn't have the field to make invalid: case " << uint32_t(params.BC7.reject) <<
+                    ", argument " << uint32_t(params.BC7.rejectArg) << ". Stream bytes 0-27:";
+                for (size_t i = 0; i < 28 && i < shuffledBuffer.size(); ++i)
+                {
+                    std::cout << ' ' << uint32_t(shuffledBuffer[i]);
+                }
+                std::cout << std::endl;
+                return false;
+            }
+            std::fill(bc7TextureRaw.begin(), bc7TextureRaw.end(), kBC7DestinationFill);
+        }
+
         // Create all d3d12 resources for this test
-        CreateBC7UnshufflePassD3D12Resources(shuffledBuffer, bc7SizeInBytes);
+        CreateBC7UnshufflePassD3D12Resources(shuffledBuffer, bc7SizeInBytes, kBC7DestinationFill);
 
         UNSHUFFLE_PER_TEST_STATISTICS testStats = {};
         testStats.testName = params.testName;
@@ -1853,7 +2175,7 @@ void Game::CreateBC1345UnshufflePassD3D12Resources(std::vector<uint8_t>& shuffle
     }
 }
 
-void Game::CreateBC7UnshufflePassD3D12Resources(std::vector<uint8_t>& shuffledBuffer, size_t bc7SizeInBytes)
+void Game::CreateBC7UnshufflePassD3D12Resources(std::vector<uint8_t>& shuffledBuffer, size_t bc7SizeInBytes, uint8_t destinationFill)
 {
     auto device = m_deviceResources->GetD3DDevice();
 
@@ -2151,6 +2473,35 @@ void Game::CreateBC7UnshufflePassD3D12Resources(std::vector<uint8_t>& shuffledBu
             commandList->ResourceBarrier(1, barriers);
         }
 
+        // Fill the output buffer, from an upload buffer kept until the copy completes
+        ComPtr<ID3D12Resource> fillUpload;
+        if (destinationFill != 0)
+        {
+            D3D12_HEAP_PROPERTIES uploadHeapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+            D3D12_RESOURCE_DESC fillDesc = CD3DX12_RESOURCE_DESC::Buffer(bc7SizeInBytes);
+            DX::ThrowIfFailed(device->CreateCommittedResource(
+                &uploadHeapProps,
+                D3D12_HEAP_FLAG_NONE,
+                &fillDesc,
+                D3D12_RESOURCE_STATE_GENERIC_READ,
+                nullptr,
+                IID_PPV_ARGS(fillUpload.ReleaseAndGetAddressOf())));
+
+            uint8_t* fill = nullptr;
+            DX::ThrowIfFailed(fillUpload->Map(0, nullptr, reinterpret_cast<void**>(&fill)));
+            memset(fill, destinationFill, bc7SizeInBytes);
+            fillUpload->Unmap(0, nullptr);
+
+            D3D12_RESOURCE_BARRIER barriers[1] = {};
+            barriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(m_outBCnBuffer.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
+            commandList->ResourceBarrier(1, barriers);
+
+            commandList->CopyBufferRegion(m_outBCnBuffer.Get(), m_uavHeapOffsetInBytes, fillUpload.Get(), 0, bc7SizeInBytes);
+
+            barriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(m_outBCnBuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON);
+            commandList->ResourceBarrier(1, barriers);
+        }
+
         commandList->Close();
         ID3D12CommandList* cmdLists[] = { commandList };
         auto commandQueue = m_deviceResources->GetCommandQueue();
@@ -2160,7 +2511,7 @@ void Game::CreateBC7UnshufflePassD3D12Resources(std::vector<uint8_t>& shuffledBu
     }
 }
 
-void Game::CompareAgainstOriginalBC7Data(std::vector<uint8_t> const& BC7OriginalData, 
+void Game::CompareAgainstOriginalBC7Data(std::vector<uint8_t> const& BC7OriginalData,
     std::vector<uint8_t> const& BC7UnshuffledData, UNSHUFFLE_PER_TEST_STATISTICS& stats)
 {
     // Compare m_OriginalBC7Buffer vs m_BC7UnshuffledData block per block. Gather stats and log at the end

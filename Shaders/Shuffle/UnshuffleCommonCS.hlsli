@@ -89,22 +89,27 @@ uint4 StagePlain(uint address, uint count, uint stride, in ByteAddressBuffer buf
 uint4 StageSection(SectionInfo section, uint count, uint rank, uint n, in ByteAddressBuffer buffer)
 {
     uint4 s = 0;
+    #if GACL_SPLIT_SECTION_TRANSPOSE
     const uint unitCode = section.selector & 0x3u;
     const uint unitLog2 = unitCode - 1u;
     const uint sectionStart = section.address - rank * section.stride;
+    #endif
     [unroll]
     for (uint k = 0u; k < count; ++k)
     {
         // a helper may read past a short section (an unused byte), so read inside the section
         const uint kc = min(k, section.stride - 1u);
         uint address = section.address + kc;
+        #if GACL_SPLIT_SECTION_TRANSPOSE
         if (unitCode != 0u)
         {
             // byte k of rank r is at ((k / unit) * n + r) * unit + k % unit from the section start
             address = sectionStart + ((((kc >> unitLog2) * n) + rank) << unitLog2) + (kc & ((1u << unitLog2) - 1u));
         }
+        #endif
         StageSet(s, k, fetchNextByte(address, buffer));
     }
+    #if GACL_SPLIT_SECTION_REMAP
     if ((section.selector & 0x4u) != 0u)
     {
         // the symbols of byte position k follow those of the positions below it (a byte past the section reads the last position's)
@@ -119,6 +124,7 @@ uint4 StageSection(SectionInfo section, uint count, uint rank, uint n, in ByteAd
             }
         }
     }
+    #endif
     return s;
 }
 
@@ -310,7 +316,11 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gid : SV_GroupID)
     // Read from the stream rather than scratch, so the host's CommonHeader layout is unchanged.
     // Start byte bit 7 flags the extension byte (stream byte 1), whose bit 3 is index prediction.
     uint streamStartBytes = shuffledBuffer.Load(0u);
+    #if GACL_SPLIT_INDEX_PREDICTION
     uint indexPrediction = ((streamStartBytes & 0x80u) != 0u) ? ((streamStartBytes >> 11u) & 0x1u) : 0u;
+    #else
+    uint indexPrediction = 0u;  // compiled out: the prepass rejects streams that use it
+    #endif
     
     #if BIN_MODE < 8
     // Extension byte bit 4 = section layout: the layout block (stream byte 2) holds the table bytes, mode selectors (+2) and table offsets (+10),
@@ -319,6 +329,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gid : SV_GroupID)
     const uint miscStride = scratchBuffer.Load(16u + (32 * mode) + 24u);
     g_stageColor = StagePlain(colorBaseAddress, kStageColorBytes[mode], colorStride, shuffledBuffer);
     g_stageMisc = StagePlain(miscBaseAddress, kStageMiscBytes[mode], miscStride, shuffledBuffer);
+    #if GACL_SPLIT_SECTION_LAYOUT && (GACL_SPLIT_SECTION_REMAP || GACL_SPLIT_SECTION_TRANSPOSE)
     const uint selector = ((streamStartBytes & 0x80u) != 0u && (streamStartBytes & 0x1000u) != 0u) ? fetchNextByte(SECTION_LAYOUT_BLOCK_ADDRESS + 2u + mode, shuffledBuffer) : 0u;
     if (selector != 0u)
     {
@@ -331,6 +342,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gid : SV_GroupID)
         miscSection.address = miscBaseAddress;
         miscSection.stride = miscStride;
         miscSection.selector = (selector >> 4u) & 0x7u;
+        #if GACL_SPLIT_SECTION_REMAP
         const bool colorRemap = (colorSection.selector & 0x4u) != 0u;
         const bool miscRemap = (miscSection.selector & 0x4u) != 0u;
         if (colorRemap || miscRemap)
@@ -362,9 +374,11 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gid : SV_GroupID)
             }
             miscSection.symbols = colorSection.symbols + colorSymbolCount;
         }
+        #endif
         g_stageColor = StageSection(colorSection, kStageColorBytes[mode], DTid.x, sectionCount, shuffledBuffer);
         g_stageMisc = StageSection(miscSection, kStageMiscBytes[mode], DTid.x, sectionCount, shuffledBuffer);
     }
+    #endif
     #endif
     unshuffleBlock(SECTION_TAG_COLOR, SECTION_TAG_MISC, scrapData, extraScrap, modePattern, modeStatics, lowEntropy, endpointOrderBytes, indexPrediction,
         modeRotationByteAddress, chunkIndex, rawOut);

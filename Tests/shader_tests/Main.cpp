@@ -468,6 +468,9 @@ std::vector<GTestParameters> GetUnshufflingTestParameters()
                             params.BC7.patternIndex = patternSetIndex;
                             params.BC7.useIndexPrediction = static_cast<bool>(g_useIndexPrediction[ipIndex]);
                             params.BC7.sectionLayout = g_sectionLayouts[slIndex];
+                            params.BC7.content = SplitContentModes;
+                            params.BC7.reject = SplitRejectNone;
+                            params.BC7.rejectArg = 0;
 
                             std::stringstream testName;
                             testName << "BC7_Res" << params.width << "x" << params.height << 
@@ -486,6 +489,98 @@ std::vector<GTestParameters> GetUnshufflingTestParameters()
                 }
             }
         }
+    }
+
+    // BC7 split streams with a header field set out of its range (TestParameters.h SplitReject), which the shaders must reject, leaving
+    // the destination's fill.  A 64x64 texture of every mode (Strat 1, PatternSet 0, 4KB rotation regions, index prediction, forced
+    // section layouts), so the stream has each field, but 512x512 for mode 7's remap tables (the encoder grants remaps in mode order
+    // while their tables fit the stream in the texture's size); and valid streams of each content and size, the controls
+    {
+        auto addSplit = [&testParams](std::string const& name, uint8_t content, uint8_t reject, uint8_t rejectArg,
+            uint32_t width = 64, uint32_t height = 64)
+        {
+            GTestParameters params = { GBaseFormat::BC7 };
+            params.testName = name;
+            params.width = width;
+            params.height = height;
+            params.useSpaceCurve = false;
+            params.BC7.ChunkSize = 4 * 1024;
+            params.BC7.endpointOrderStrategy = 1;
+            params.BC7.patternIndex = 0;
+            params.BC7.useIndexPrediction = true;
+            params.BC7.sectionLayout = 2;
+            params.BC7.content = content;
+            params.BC7.reject = reject;
+            params.BC7.rejectArg = rejectArg;
+            testParams.push_back(params);
+        };
+
+        addSplit("BC7_Valid_Res64x64", SplitContentModes, SplitRejectNone, 0);
+        addSplit("BC7_Valid_Res64x64_Mode8Only", SplitContentMode8Only, SplitRejectNone, 0);
+        addSplit("BC7_Valid_Res64x64_NoMode7", SplitContentNoMode7, SplitRejectNone, 0);
+        addSplit("BC7_Valid_Res40x4", SplitContentModes, SplitRejectNone, 0, 40, 4);
+        addSplit("BC7_Valid_Res512x512", SplitContentModes, SplitRejectNone, 0, 512, 512);
+
+        for (int n : { 0, 10, 15 })
+        {
+            addSplit("BC7_Reject_ModesUsed" + std::to_string(n), SplitContentModes, SplitRejectModesUsed, uint8_t(n));
+        }
+        addSplit("BC7_Reject_ModeEncodingA", SplitContentModes, SplitRejectModeEncodingA, 0);
+        for (int bit : { 5, 6, 7 })
+        {
+            addSplit("BC7_Reject_ExtensionReservedBit" + std::to_string(bit), SplitContentModes, SplitRejectExtensionReserved, uint8_t(bit));
+        }
+        for (int mode : { 9, 15 })
+        {
+            addSplit("BC7_Reject_LutMode" + std::to_string(mode), SplitContentModes, SplitRejectLutMode, uint8_t(mode));
+        }
+        addSplit("BC7_Reject_LutDuplicateEntry1", SplitContentModes, SplitRejectLutDuplicate, 1);
+        addSplit("BC7_Reject_LutDuplicateEntry8", SplitContentModes, SplitRejectLutDuplicate, 8);
+        for (int mode = 0; mode < 9; ++mode)
+        {
+            for (int pattern = 0; pattern < 8; ++pattern)
+            {
+                if (!((g_splitValidPatterns[mode] >> pattern) & 1))
+                {
+                    addSplit("BC7_Reject_LutPatternMode" + std::to_string(mode) + "Pattern" + std::to_string(pattern), SplitContentModes,
+                        SplitRejectLutPattern, uint8_t(mode * 8 + pattern));
+                }
+            }
+        }
+        addSplit("BC7_Reject_Mode8Extensions", SplitContentModes, SplitRejectMode8Extensions, 0);
+        for (int bit : { 5, 6, 7 })
+        {
+            addSplit("BC7_Reject_ExtensionsReservedBit" + std::to_string(bit), SplitContentModes, SplitRejectExtensionsReserved, uint8_t(bit));
+        }
+        addSplit("BC7_Reject_EndpointOrder3", SplitContentModes, SplitRejectEndpointOrder3, 0);
+        addSplit("BC7_Reject_RotationChannelsMode0To3RG", SplitContentModes, SplitRejectRotationChannels, 0);
+        addSplit("BC7_Reject_RotationChannelsMode0To3RGBA", SplitContentModes, SplitRejectRotationChannels, 1);
+        addSplit("BC7_Reject_RotationChannelsMode4To7RGB", SplitContentModes, SplitRejectRotationChannels, 2);
+        addSplit("BC7_Reject_RotationChannelsMode0To3RGA", SplitContentModes, SplitRejectRotationChannels, 3);
+        addSplit("BC7_Reject_RotationFrequency", SplitContentModes, SplitRejectRotationFrequency, 0);
+        for (int bit : { 3, 7 })
+        {
+            addSplit("BC7_Reject_SelectorReservedBit" + std::to_string(bit), SplitContentModes, SplitRejectSelectorReserved, uint8_t(bit));
+        }
+        addSplit("BC7_Reject_SelectorUnitMode0Color2Bytes", SplitContentModes, SplitRejectSelectorUnit, 0);
+        addSplit("BC7_Reject_SelectorUnitMode7Misc4Bytes", SplitContentModes, SplitRejectSelectorUnit, 1);
+        addSplit("BC7_Reject_TableOffset", SplitContentModes, SplitRejectTableOffset, 0);
+        addSplit("BC7_Reject_TableShortMode0", SplitContentModes, SplitRejectTableShort, 0);
+        addSplit("BC7_Reject_TableShortMode7", SplitContentModes, SplitRejectTableShort, 7, 512, 512);
+        addSplit("BC7_Reject_TableLongMode7", SplitContentModes, SplitRejectTableLong, 0, 512, 512);
+        addSplit("BC7_Reject_TableUnremappedMode6", SplitContentModes, SplitRejectTableUnremapped, 0, 512, 512);
+        addSplit("BC7_Reject_SelectorFewBlocks", SplitContentModes, SplitRejectSelectorFewBlocks, 0, 40, 4);
+        addSplit("BC7_Reject_SelectorUnusedMode", SplitContentNoMode7, SplitRejectSelectorUnusedMode, 0);
+        for (int index : { 9, 15 })
+        {
+            addSplit("BC7_Reject_BlockIndex" + std::to_string(index), SplitContentModes, SplitRejectBlockIndex, uint8_t(index));
+        }
+        for (int pattern : { 1, 7 })
+        {
+            addSplit("BC7_Reject_Mode8OnlyPattern" + std::to_string(pattern), SplitContentMode8Only, SplitRejectLutPattern,
+                uint8_t(8 * 8 + pattern));
+        }
+        addSplit("BC7_Reject_Mode8OnlyExtensions", SplitContentMode8Only, SplitRejectMode8Extensions, 0);
     }
 
     return testParams;

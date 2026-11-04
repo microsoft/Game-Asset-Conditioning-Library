@@ -21,6 +21,26 @@
 #define DWORD_BYTES                 4
 #define BINNED_BUFFER_STRIDE        4
 
+// BC7 split stream features, each on by default.  Define one as 0 to compile it out of the shaders (e.g. if a regression is found):
+// the prepass then rejects streams that use it, and the destination is left untouched.  Turn the matching encoder switch off too
+// (Lib\shuffle\bc7.h), so that it doesn't write such streams.
+//  GACL_SPLIT_INDEX_PREDICTION     index fields hold prediction residuals (extension byte bit 3)
+//  GACL_SPLIT_SECTION_LAYOUT       the section layout (extension byte bit 4): per-mode scrap groups, and these two section transforms:
+//  GACL_SPLIT_SECTION_REMAP        per byte position rank remap tables (section selector bits 2 and 6)
+//  GACL_SPLIT_SECTION_TRANSPOSE    unit plane transposition (section selector bits 0-1 and 4-5)
+#ifndef GACL_SPLIT_INDEX_PREDICTION
+#define GACL_SPLIT_INDEX_PREDICTION     1
+#endif
+#ifndef GACL_SPLIT_SECTION_LAYOUT
+#define GACL_SPLIT_SECTION_LAYOUT       1
+#endif
+#ifndef GACL_SPLIT_SECTION_REMAP
+#define GACL_SPLIT_SECTION_REMAP        1
+#endif
+#ifndef GACL_SPLIT_SECTION_TRANSPOSE
+#define GACL_SPLIT_SECTION_TRANSPOSE    1
+#endif
+
 /// Root Signatures
 #define PrepassCS_RS " \
     RootConstants(num32BitConstants = 2, b0),\
@@ -86,7 +106,7 @@ struct CommonHeader
     
     PerModeData perModeData[BC7_MODES_COUNT];
     
-    uint spaceCurveWidthInPixels;   // from the stream header, 0 = linear
+    uint spaceCurveWidthInPixels;   // bits 0-15: from the stream header, 0 = linear; prepass: 16-23 modes with section selectors, 31 reject
 };
 
 struct ModeCountsStruct
@@ -106,6 +126,7 @@ static uint ModeTransformBCountToModeBits[] =
     3, //  7
     3, //  8
     4, //  9 - only exists in pre-swizzled textures, which fill blank space with mode 8
+    0, 0, 0, 0, 0, 0, // 10-15 - invalid (the prepass rejects them), as the start byte's 4 bits are looked up before they're checked
 };
 
 #define EndpointPair4bit                            0

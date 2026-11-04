@@ -75,6 +75,11 @@ struct GTestParameters
             uint32_t patternIndex;
             bool useIndexPrediction;
             uint8_t sectionLayout;
+            uint8_t content;        // SplitContent (TestParameters.h): the texture's blocks
+            uint8_t reject;         // 0, or a SplitReject case (TestParameters.h): a field the shaders check set out of its range, so
+                                    // they reject the stream, and the destination keeps its fill (0xA5 bytes, for every BC7 test, so
+                                    // that a block the shaders don't write fails)
+            uint8_t rejectArg;      // the SplitReject case's argument
         } BC7;
 
         struct {
@@ -166,7 +171,8 @@ private:
     void Clear();
 
     void CreateBC1345UnshufflePassD3D12Resources(std::vector<uint8_t>& shuffledBuffer, size_t bcSizeInBytes);
-    void CreateBC7UnshufflePassD3D12Resources(std::vector<uint8_t>& shuffledBuffer, size_t bcSizeInBytes);
+    // destinationFill: the byte the output buffer is filled with before the passes (0: left zero)
+    void CreateBC7UnshufflePassD3D12Resources(std::vector<uint8_t>& shuffledBuffer, size_t bcSizeInBytes, uint8_t destinationFill = 0);
 
     void CompareAgainstOriginalBC7Data(std::vector<uint8_t> const& BC7OriginalData,
         std::vector<uint8_t> const& BC7UnshuffledData, UNSHUFFLE_PER_TEST_STATISTICS& stats);

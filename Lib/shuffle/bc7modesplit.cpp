@@ -4246,6 +4246,10 @@ namespace SplitSectionLayout
     constexpr unsigned MiscShift = 4;
     constexpr int DefaultTrialLevel = 6;
 
+    // the unit codes and remaps the encoder may choose (bc7.h switches); decoding supports them all
+    constexpr unsigned MaxUnitCode = GACL_SPLIT_SECTION_TRANSPOSE ? 3u : 0u;
+    constexpr bool RemapEnabled = GACL_SPLIT_SECTION_REMAP != 0;
+
     inline size_t UnitBytes(unsigned code) { return code ? size_t(1) << (code - 1) : 0; }
 
     inline bool UnitAllowed(unsigned code, size_t stride)
@@ -4369,7 +4373,7 @@ namespace SplitSectionLayout
         {
             unsigned code = 0;
             best = SIZE_MAX;
-            for (unsigned c = 0; c <= 3; c++)
+            for (unsigned c = 0; c <= MaxUnitCode; c++)
             {
                 if (c && !UnitAllowed(c, stride)) continue;
                 m_work.assign(p, p + n * stride);
@@ -4384,6 +4388,7 @@ namespace SplitSectionLayout
         {
             if (!s.Active()) return;
             s.unit[0] = BestUnit(s.p, s.n, s.stride, s.size[0]);
+            if (!RemapEnabled) return;  // size[1] stays SIZE_MAX, so no remap is granted
             s.ranks = BuildRanks(s.p, s.n, s.stride);
             std::vector<uint8_t> ranked(s.p, s.p + s.n * s.stride);
             Rank(ranked.data(), s.n, s.stride, s.ranks);
@@ -4447,7 +4452,7 @@ namespace SplitSectionLayout
         {
             s.unit[0] = r->unit[0]; s.unit[1] = r->unit[1];
             s.size[0] = r->size[0]; s.size[1] = r->size[1];
-            s.ranks = BuildRanks(s.p, s.n, s.stride);
+            if (RemapEnabled) s.ranks = BuildRanks(s.p, s.n, s.stride);
         }
     }
 
@@ -4463,8 +4468,9 @@ namespace SplitSectionLayout
                 Section& s = sections[i];
                 if (!s.Active()) continue;
                 const unsigned sel = (opt.SectionSelectors[i & 7] >> (i < 8 ? 0 : MiscShift)) & 7u;
-                s.unit[0] = s.unit[1] = UnitAllowed(sel & 3u, s.stride) ? (sel & 3u) : 0u;
-                if (sel & RemapBit)
+                const unsigned unit = sel & 3u;
+                s.unit[0] = s.unit[1] = (unit <= MaxUnitCode && UnitAllowed(unit, s.stride)) ? unit : 0u;
+                if ((sel & RemapBit) && RemapEnabled)
                 {
                     s.ranks = BuildRanks(s.p, s.n, s.stride);
                     order.push_back(i);
@@ -4566,6 +4572,10 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
     const size_t block_count = srcSize / 16;
     const uint8_t* nextStageSrc = src;
 
+    // the features compiled out of the encoder (bc7.h) are off whatever the options ask
+    const bool indexPrediction = opt.IndexPrediction && GACL_SPLIT_INDEX_PREDICTION;
+    const bool sectionLayout = opt.SectionLayout && GACL_SPLIT_SECTION_LAYOUT;
+
     // Step #1 - reorder color fields for mode 4\5
     std::vector<uint8_t> reordered45, epOrdered, rotated;
     std::vector<uint8_t> rotationHeaders[8];
@@ -4589,13 +4599,18 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
     // Step #3 - Apply any color rotation
     if (opt.RotationRegionSize)
     {
-        BC7_ModeSplit_RotateColors(nextStageSrc, srcSize, rotated, 0b11111111, opt.RotationRegionSize, &rotationHeaders[0]);
+#if GACL_SPLIT_ROTATE_ALL_MODES
+        constexpr uint8_t rotatedModes = 0b11111111;
+#else
+        constexpr uint8_t rotatedModes = 0b01110000;    // modes 4-6
+#endif
+        BC7_ModeSplit_RotateColors(nextStageSrc, srcSize, rotated, rotatedModes, opt.RotationRegionSize, &rotationHeaders[0]);
         nextStageSrc = rotated.data();
     }
 
     // Step #4 - Apply index prediction
     std::vector<uint8_t> predicted;
-    if (opt.IndexPrediction)
+    if (indexPrediction)
     {
         predicted.resize(srcSize);
         for (size_t i = 0; i < block_count; i++)
@@ -4819,7 +4834,7 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
                     b.ScrapsBitCount++;
                 }
             }
-            if (opt.SectionLayout)
+            if (sectionLayout)
             {
                 scrapModes.push_back(uint8_t(mode));
                 scrapBits[mode] = b.ScrapsBitCount - scrapStart;
@@ -4881,8 +4896,8 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
         assert(widthInTiles == (1ull << widthInTilesLog2) && widthInTilesLog2 <= 7);
         extensionByte.SpaceCurveWidthInTilesLog2 = static_cast<uint8_t>(widthInTilesLog2);
     }
-    extensionByte.IndexPrediction = opt.IndexPrediction ? 1u : 0u;
-    extensionByte.SectionLayout = opt.SectionLayout ? 1u : 0u;
+    extensionByte.IndexPrediction = indexPrediction ? 1u : 0u;
+    extensionByte.SectionLayout = sectionLayout ? 1u : 0u;
 
     ModeSplitStartByte byte1A = {};
     byte1A.ModesUsed = modesUsed;
@@ -4994,7 +5009,7 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
     OutputDebugString(message);
 #endif
 
-    if (opt.SectionLayout)
+    if (sectionLayout)
     {
         SplitSectionLayout::Section sections[16];
         size_t projected = (std::max)(destA.size(), destB.size()) + SplitSectionLayout::FixedBytes + (b.ScrapsBitCount + 7) / 8;
