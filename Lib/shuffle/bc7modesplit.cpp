@@ -4456,8 +4456,9 @@ namespace SplitSectionLayout
         }
     }
 
-    // sections 0-7 color, 8-15 misc.  Remaps are granted by the largest trial gain while the table bytes fit in `budget`
-    // (the shuffled stream must not exceed the source size).  SectionLayout 2 forces opt.SectionSelectors (testing).
+    // sections 0-7 color, 8-15 misc.  Remaps whose trial gain is at least opt.SectionRemapMargin per mille of the section's trial size
+    // are granted by the largest gain while the table bytes fit in `budget` (the shuffled stream must not exceed the source size).
+    // SectionLayout 2 forces opt.SectionSelectors (testing).
     inline void Choose(Section (&sections)[16], const BC7ModeSplitShuffleOptions& opt, size_t budget)
     {
         std::vector<size_t> order;
@@ -4485,7 +4486,9 @@ namespace SplitSectionLayout
             {
                 if (opt.TrialCache) EvaluateShared(trials, sections[i], *opt.TrialCache, level);
                 else trials.Evaluate(sections[i]);
-                if (sections[i].size[1] < sections[i].size[0]) order.push_back(i);
+                const Section& s = sections[i];
+                if (s.size[1] < s.size[0] && uint64_t(s.size[0] - s.size[1]) * 1000 >= uint64_t(opt.SectionRemapMargin) * s.size[0])
+                    order.push_back(i);
             }
             std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b)
                 { return sections[a].size[0] - sections[a].size[1] > sections[b].size[0] - sections[b].size[1]; });

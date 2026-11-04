@@ -1546,6 +1546,9 @@ HRESULT ShuffleCompress_BC7(
     // level capped at 18: on whole textures that saves about 0.16% of their size, for about 1.65x their BC7 CPU
     const int sectionTrialLevel = (srcSize > 512 * 1024 && requestedZstdLevel > defaultZstdLevel) ? (std::min)(requestedZstdLevel, 18) :
         (requestedZstdLevel > 0 ? (std::min)(requestedZstdLevel, 6) : 6);
+    // the trials overrate small remap gains on streams up to 512 KB: there a remap must save 0.5% of its section's trial size, which made
+    // RDO VT tile groups 0.015% and 64 KB tiles 0.007% smaller.  Larger streams take any saving: the margin cost Insects textures 0.09%
+    const uint8_t sectionRemapMargin = (srcSize <= 512 * 1024 && sectionTrialLevel < finalZstdLevel) ? 5 : 0;
     // the strategies share section trial results: a mode's sections recur across strategies with the same pattern, ordering and rotation
     BC7ModeSplitTrialCache splitTrialCache;
     StreamOutputCache splitOutputCache;
@@ -1559,6 +1562,7 @@ HRESULT ShuffleCompress_BC7(
         ss->Options.IndexPrediction = 1;
         ss->Options.SectionLayout = 1;
         ss->Options.SectionTrialLevel = static_cast<uint8_t>(sectionTrialLevel);
+        ss->Options.SectionRemapMargin = sectionRemapMargin;
         ss->Options.TrialCache = &splitTrialCache;
     }
 

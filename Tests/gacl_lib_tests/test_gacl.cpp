@@ -1294,6 +1294,18 @@ TEST(ShuffleCompress, BC7_ContentGate) {
     }
 }
 
+// BC7 Split section layout: a stream of at most 512 KB runs its section trials at level 6, below the final level, and grants a remap
+// only if it saves 0.5% of its section's trial size.  On this prefix the margin declines a small trial gain: the Split stream is
+// 5,334 bytes, against 5,385 with every saving granted.
+TEST(ShuffleCompress, BC7_SectionRemapMargin) {
+    const filesystem::path file = GetAssetsDirectory() / "BC7mip0" / L"LetterBlock_LetterA_albedo.DDS";
+    vector<uint8_t> sc;
+    GACL_SHUFFLE_TRANSFORM tid = GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT;
+    EXPECT_EQ(ValidateRoundTripShuffleCompress(file, tid, true, sc, 19, 256 * 1024), S_OK);
+    EXPECT_EQ(tid, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT);
+    EXPECT_EQ(sc.size(), 5334u);
+}
+
 // Curved-space input (CurvedTransforms.TextureData) may differ from TextureData, as RDO applied in curved space does, or be the
 // only input: a null TextureData disallows the uncurved transforms. Each stream must decode to the input it was built from, and
 // the round trip checks of Debug and GACL_EXCHK builds must pass.
