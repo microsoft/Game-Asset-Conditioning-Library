@@ -1151,6 +1151,65 @@ TEST(CompressBuffer, ReportsRandomDataAsSFalse) {
     ExpectNotSmaller(MakeRandomBuffer(256 * 1024));
 }
 
+// A failing compression routine fails GACL_ShuffleCompress_BCn with its HRESULT and no output, as does an init routine
+// that succeeds without a context
+TEST(ShuffleCompress, BCn_CompressionRoutineFailure) {
+    struct RestoreRoutines
+    {
+        PGACL_COMPRESSION_INITROUTINE init = GACL_Compression_InitRoutine;
+        PGACL_COMPRESSION_COMPRESSROUTINE compress = GACL_Compression_CompressRoutine;
+        PGACL_COMPRESSION_CLEANUPROUTINE cleanup = GACL_Compression_CleanupRoutine;
+        ~RestoreRoutines()
+        {
+            GACL_Compression_InitRoutine = init;
+            GACL_Compression_CompressRoutine = compress;
+            GACL_Compression_CleanupRoutine = cleanup;
+        }
+    } restore;
+
+    static int context;
+    const PGACL_COMPRESSION_INITROUTINE init = [](void** cc, size_t* destBytesRequired, const SHUFFLE_COMPRESS_PARAMETERS* params) -> HRESULT
+        { *cc = &context; *destBytesRequired = params->SizeInBytes; return S_OK; };
+    const PGACL_COMPRESSION_COMPRESSROUTINE compress = [](void*, void* dest, size_t* destBytes, const void*, size_t) -> HRESULT
+        { *static_cast<uint8_t*>(dest) = 0; *destBytes = 1; return S_OK; };
+    const PGACL_COMPRESSION_CLEANUPROUTINE cleanup = [](void*) -> HRESULT { return S_OK; };
+
+    const struct
+    {
+        const char* name;
+        PGACL_COMPRESSION_INITROUTINE init;
+        PGACL_COMPRESSION_COMPRESSROUTINE compress;
+        PGACL_COMPRESSION_CLEANUPROUTINE cleanup;
+        HRESULT expected;
+    } cases[] = {
+        { "init fails", [](void** cc, size_t*, const SHUFFLE_COMPRESS_PARAMETERS*) -> HRESULT { *cc = nullptr; return E_OUTOFMEMORY; },
+            compress, cleanup, E_OUTOFMEMORY },
+        { "init has no context", [](void** cc, size_t* destBytesRequired, const SHUFFLE_COMPRESS_PARAMETERS*) -> HRESULT
+            { *cc = nullptr; *destBytesRequired = 0; return S_OK; }, compress, cleanup, E_FAIL },
+        { "compress fails", init, [](void*, void*, size_t*, const void*, size_t) -> HRESULT { return E_ABORT; }, cleanup, E_ABORT },
+        { "cleanup fails", init, compress, [](void*) -> HRESULT { return E_UNEXPECTED; }, E_UNEXPECTED },
+    };
+    const DXGI_FORMAT formats[] = { DXGI_FORMAT_BC1_UNORM, DXGI_FORMAT_BC3_UNORM, DXGI_FORMAT_BC4_UNORM, DXGI_FORMAT_BC5_UNORM };
+
+    const vector<uint8_t> src = MakePatternedBuffer(64 * 1024);
+    for (const auto& c : cases)
+    {
+        GACL_Compression_InitRoutine = c.init;
+        GACL_Compression_CompressRoutine = c.compress;
+        GACL_Compression_CleanupRoutine = c.cleanup;
+        for (DXGI_FORMAT format : formats)
+        {
+            SHUFFLE_COMPRESS_PARAMETERS params = { src.size(), format, src.data() };
+            vector<uint8_t> dest(src.size());
+            GACL_SHUFFLE_TRANSFORM tid = GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY;
+            size_t destBytes = 1;
+            EXPECT_EQ(GACL_ShuffleCompress_BCn(dest.data(), &tid, &destBytes, params), c.expected) << c.name << ", format " << format;
+            EXPECT_EQ(tid, GACL_SHUFFLE_TRANSFORM_NONE) << c.name << ", format " << format;
+            EXPECT_EQ(destBytes, 0u) << c.name << ", format " << format;
+        }
+    }
+}
+
 // A BC7_EX request also tries the curve-only stream (the curved blocks unshuffled, parameter 2 BCNEX_UNSHUFFLED), which
 // beats Join on these two masks
 TEST(ShuffleCompress, LargeBC7_ShuffleCompress_CurveOnly) {

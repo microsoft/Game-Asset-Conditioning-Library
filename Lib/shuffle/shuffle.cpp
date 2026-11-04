@@ -698,7 +698,8 @@ HRESULT GACL_ShuffleCompress_BCn(
             }
             else
             {
-                lastError = hr;
+                // an init that succeeds without a context fails, as in GACL_Compression_CompressBuffer
+                lastError = FAILED(hr) ? hr : E_FAIL;
             }
         };
 
@@ -886,7 +887,7 @@ HRESULT GACL_ShuffleCompress_BCn(
         {
             Utility::Printf(GACL_Logging_Priority_High, L"Compression fault.\n");
             *destTransformId = GACL_SHUFFLE_TRANSFORM_NONE;
-            return status;
+            return FAILED(status) ? status : lastError.load();
         }
     }
     else
