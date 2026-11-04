@@ -1631,6 +1631,130 @@ TEST(ShuffleCompress, BC7_Mode8Blocks) {
     }
 }
 
+// Custom compression routines: GACL can't know a replaced handler's compressor, nor what its CompressSettings hold (a union, which can
+// carry Ptr or Inline data rather than a zstd level), so it makes every level-dependent choice as at the default zstd level.  The
+// choices it makes above that level (the BC7 Join byte remap, BC7 Split level-18 section trials, ungated BC1 coded blocks) stay off.
+// These routines compress at zstd level 19 whatever the settings, so no stream may depend on them: settings that read as levels 0, 3
+// and 19, or hold a pointer, must give one stream, which decodes to its source and has no byte remap.
+namespace FixedLevelRoutines
+{
+    HRESULT Init(void** cc, size_t* destBytesRequired, const SHUFFLE_COMPRESS_PARAMETERS* params)
+    {
+        SHUFFLE_COMPRESS_PARAMETERS fixed = *params;
+        fixed.CompressSettings.Default = { 19, 0 };
+        return GACL_Compression_DefaultInitRoutine(cc, destBytesRequired, &fixed);
+    }
+    HRESULT Compress(void* cc, void* dest, size_t* destBytes, const void* src, size_t srcBytes)
+    {
+        return GACL_Compression_DefaultCompressRoutine(cc, dest, destBytes, src, srcBytes);
+    }
+    HRESULT Cleanup(void* cc)
+    {
+        return GACL_Compression_DefaultCleanupRoutine(cc);
+    }
+}
+
+TEST(ShuffleCompress, CustomRoutines_DefaultLevelChoices) {
+    struct CustomCase
+    {
+        const char* folder;
+        const wchar_t* file;
+        size_t prefixBytes;     // whole tile rows from the top of the image
+        GACL_SHUFFLE_TRANSFORM request;
+        bool remap;             // GACL's routines at level 19 try the Join byte remap
+    };
+    const CustomCase cases[] = {
+        { "BC7mip0", L"BlackboardEraser_albedo.DDS", 256 * 1024, GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL, true },
+        { "BC7mip0", L"LetterBlock_LetterA_albedo.DDS", 256 * 1024, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT, false },     // section trial level and remap margin
+        { "BC1mip0", L"BlackboardEraser_albedo.DDS", 64 * 1024, GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL, false }, // coded-block gate
+    };
+    // CompressSettings as a custom handler might fill them: reading as levels 0, 3 and 19, and a pointer (whose low half reads as a
+    // negative level)
+    const uint64_t settings[] = { 0, 3, 19, 0x000001d29abcdef0ull };
+
+    struct Restore
+    {
+        ~Restore()
+        {
+            GACL_Compression_InitRoutine = &GACL_Compression_DefaultInitRoutine;
+            GACL_Compression_CompressRoutine = &GACL_Compression_DefaultCompressRoutine;
+            GACL_Compression_CleanupRoutine = &GACL_Compression_DefaultCleanupRoutine;
+            GACL_Logging_SetCallback(&Utility::DefaultLoggingRoutine);
+        }
+    } restore;
+    GACL_Logging_SetCallback(&CaptureLog);
+    auto remapTried = []
+        {
+            lock_guard<mutex> lock(s_capturedLogMutex);
+            return any_of(s_capturedLog.begin(), s_capturedLog.end(), [](const wstring& line) { return line.find(L"byte remap") != wstring::npos; });
+        };
+
+    for (const CustomCase& c : cases)
+    {
+        const filesystem::path file = GetAssetsDirectory() / c.folder / c.file;
+        ScratchImage si;
+        TexMetadata siMeta;
+        ASSERT_EQ(LoadFromDDSFile(file.c_str(), DDS_FLAGS::DDS_FLAGS_NONE, &siMeta, si), S_OK) << file;
+        const Image* img = si.GetImage(0, 0, 0);
+        const size_t srcBytes = TileRowPrefixBytes(*img, si.GetPixelsSize(), c.prefixBytes);
+        ASSERT_EQ(srcBytes, c.prefixBytes) << file;
+
+        auto encode = [&](uint64_t s, GACL_SHUFFLE_TRANSFORM& tid, vector<uint8_t>& sc)
+            {
+                {
+                    lock_guard<mutex> lock(s_capturedLogMutex);
+                    s_capturedLog.clear();
+                }
+                SHUFFLE_COMPRESS_PARAMETERS params = { srcBytes, siMeta.format, img->pixels, {}, {img->width, img->pixels} };
+                params.CompressSettings.Inline = s;
+                tid = c.request;
+                sc.resize(srcBytes);
+                size_t scBytes = 0;
+                const HRESULT hr = GACL_ShuffleCompress_BCn(sc.data(), &tid, &scBytes, params);
+                sc.resize(scBytes);
+                return hr;
+            };
+
+        GACL_SHUFFLE_TRANSFORM tid;
+        vector<uint8_t> sc;
+        if (c.remap && BC7_ModeJoin_RemapSets() > 0)    // GACL's routines at level 19 reach the byte remap
+        {
+            ASSERT_EQ(encode(19, tid, sc), S_OK) << file;
+            EXPECT_TRUE(remapTried()) << file;
+        }
+
+        GACL_Compression_InitRoutine = &FixedLevelRoutines::Init;
+        GACL_Compression_CompressRoutine = &FixedLevelRoutines::Compress;
+        GACL_Compression_CleanupRoutine = &FixedLevelRoutines::Cleanup;
+        GACL_SHUFFLE_TRANSFORM firstTid = GACL_SHUFFLE_TRANSFORM_NONE;
+        vector<uint8_t> first;
+        for (uint64_t s : settings)
+        {
+            const string at = file.parent_path().filename().string() + "/" + file.filename().string() + ", settings " + to_string(s);
+            ASSERT_EQ(encode(s, tid, sc), S_OK) << at;
+            EXPECT_FALSE(remapTried()) << at;
+            if (s == settings[0])
+            {
+                vector<uint8_t> back;
+                uint8_t curveTiles = 0;
+                ASSERT_TRUE(DecodeShuffleCompressed(sc, tid, srcBytes, back, curveTiles)) << at << ", transform " << unsigned(tid);
+                EXPECT_TRUE(back.size() == srcBytes && memcmp(back.data(), img->pixels, srcBytes) == 0) << at << ", transform " << unsigned(tid);
+                firstTid = tid;
+                first = sc;
+            }
+            else
+            {
+                EXPECT_EQ(tid, firstTid) << at;
+                EXPECT_EQ(sc.size(), first.size()) << at;
+                EXPECT_TRUE(sc == first) << at;
+            }
+        }
+        GACL_Compression_InitRoutine = &GACL_Compression_DefaultInitRoutine;
+        GACL_Compression_CompressRoutine = &GACL_Compression_DefaultCompressRoutine;
+        GACL_Compression_CleanupRoutine = &GACL_Compression_DefaultCleanupRoutine;
+    }
+}
+
 // The BC7 Join GPU decoder (Shaders/Shuffle/BC7JoinDecode.hlsli) embeds tables derived from the library's Join transform as
 // BC7JoinTables.hlsli, which this test checks and generates: when they differ it fails and writes the regenerated file to test_output.
 #include <random>

@@ -1258,6 +1258,8 @@ static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplit
 #define ADDTASK(func, ...) tasks.push_back(thread(func, __VA_ARGS__))
 #endif
 
+bool GACL_Compression_DefaultRoutinesInstalled();    // shuffle.cpp
+
 HRESULT ShuffleCompress_BC7(
     _Out_writes_all_(params.SizeInBytes) uint8_t* dest,
     _Inout_ GACL_SHUFFLE_TRANSFORM* destTransformId,
@@ -1353,6 +1355,14 @@ HRESULT ShuffleCompress_BC7(
         Utility::Printf(GACL_Logging_Priority_Medium, L"BC7 Split not tried: %zu mode 8 (reserved) blocks carry data, which Split streams don't store.\n", metrics.Mode8DataBlocks);
     }
 
+    // with custom compression routines the requested level reads as 0, and every level-dependent choice below is made as at the
+    // default level (GACL_Compression_DefaultRoutinesInstalled).  Above the default level the encoder trades speed for size.
+    const bool defaultRoutines = GACL_Compression_DefaultRoutinesInstalled();
+    const int requestedZstdLevel = defaultRoutines ? int(params.CompressSettings.Default.ZstdCompressionLevel) : 0;
+    const int defaultZstdLevel = srcSize <= 16 * 1024 ? 12 : (srcSize <= 256 * 1024 ? 14 : 18);     // as GACL_Compression_DefaultInitRoutine
+    const int finalZstdLevel = requestedZstdLevel != 0 ? requestedZstdLevel : defaultZstdLevel;
+    const bool aboveDefaultLevel = requestedZstdLevel > defaultZstdLevel;      // only with GACL's default routines
+
     // BC7 content gate.  Where Split runs on a stream of up to 512 KB, with GACL's default zstd routines and a final level above 6 up
     // to the size default, zstd level 6 first compresses the unshuffled stream.  If that leaves under a quarter of it (typical of RDO
     // content), the fast path compresses the candidates at level 6 to rank them, and only the 6 smallest distinct ones again at the
@@ -1360,13 +1370,6 @@ HRESULT ShuffleCompress_BC7(
     // candidate at the final level, and tries 7 Split strategies.  On BC7 VT tile groups the gate costs about 0.002% of their size
     // for about 0.7x their CPU.  Larger streams keep the full search: the gate was measured on streams of 64 to 320 KB, and level 6
     // trials misjudge large textures.
-    const bool defaultRoutines =
-        GACL_Compression_InitRoutine == &GACL_Compression_DefaultInitRoutine &&
-        GACL_Compression_CompressRoutine == &GACL_Compression_DefaultCompressRoutine &&
-        GACL_Compression_CleanupRoutine == &GACL_Compression_DefaultCleanupRoutine;
-    const int requestedZstdLevel = int(params.CompressSettings.Default.ZstdCompressionLevel);
-    const int defaultZstdLevel = srcSize <= 16 * 1024 ? 12 : (srcSize <= 256 * 1024 ? 14 : 18);     // as GACL_Compression_DefaultInitRoutine
-    const int finalZstdLevel = requestedZstdLevel != 0 ? requestedZstdLevel : defaultZstdLevel;
     constexpr int gateRankLevel = 6;
     constexpr size_t gateFinalists = 6;
     enum class ContentGate { Off, Fast, Safe } gate = ContentGate::Off;
@@ -1541,10 +1544,10 @@ HRESULT ShuffleCompress_BC7(
 
 
     // mode-split streams record any space curve, index prediction and section layout in the stream header.  The section layout trials
-    // run at the requested zstd level capped at 6 (6 if none is requested): on samples of BC7 VT tile groups, higher trial levels cost
-    // much more and chose no better layouts.  Streams above 512 KB, requested above the size default level, run them at the requested
-    // level capped at 18: on whole textures that saves about 0.16% of their size, for about 1.65x their BC7 CPU
-    const int sectionTrialLevel = (srcSize > 512 * 1024 && requestedZstdLevel > defaultZstdLevel) ? (std::min)(requestedZstdLevel, 18) :
+    // run at the requested zstd level capped at 6 (6 if none is requested, as with custom routines): on samples of BC7 VT tile groups,
+    // higher trial levels cost much more and chose no better layouts.  Streams above 512 KB, requested above the size default level,
+    // run them at the requested level capped at 18: on whole textures that saves about 0.16% of their size, for about 1.65x their BC7 CPU
+    const int sectionTrialLevel = (srcSize > 512 * 1024 && aboveDefaultLevel) ? (std::min)(requestedZstdLevel, 18) :
         (requestedZstdLevel > 0 ? (std::min)(requestedZstdLevel, 6) : 6);
     // the trials overrate small remap gains on streams up to 512 KB: there a remap must save 0.5% of its section's trial size, which made
     // RDO VT tile groups 0.015% and 64 KB tiles 0.007% smaller.  Larger streams take any saving: the margin cost Insects textures 0.09%
@@ -1683,12 +1686,13 @@ HRESULT ShuffleCompress_BC7(
 #endif
 
     // Byte remap (bc7joinremap.h): about 0.5% smaller Join streams, but the GPU Join decode loses about a fifth of its
-    // throughput undoing it, so it is only tried above the default zstd level (where the encoder trades speed for size).
-    // It needs the stream header (parameter 4), so it redoes the best header-capable Join trial, with each set.
+    // throughput undoing it, so it is only tried above the default zstd level (where the encoder trades speed for size), which
+    // needs GACL's default routines.  It needs the stream header (parameter 4), so it redoes the best header-capable Join trial,
+    // with each set.
     vector<uint8_t> joinRemap;
     BC7TextureMetrics remapMetrics = {};
     size_t codedRemap = 0;
-    const bool joinRemapTried = bIncludeJoinMode && curveTiles <= 255 && requestedZstdLevel > defaultZstdLevel && BC7_ModeJoin_RemapSets() > 0;
+    const bool joinRemapTried = bIncludeJoinMode && curveTiles <= 255 && aboveDefaultLevel && BC7_ModeJoin_RemapSets() > 0;
     if (joinRemapTried)
     {
         const vector<uint8_t>* bj = nullptr;

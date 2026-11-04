@@ -359,6 +359,21 @@ PGACL_COMPRESSION_COMPRESSROUTINE GACL_Compression_CompressRoutine = &GACL_Compr
 PGACL_COMPRESSION_CLEANUPROUTINE GACL_Compression_CleanupRoutine = &GACL_Compression_DefaultCleanupRoutine;
 
 
+/*  Whether GACL's default routines are installed, which each encode checks as it sets up its compression.  Only they are known
+    to compress with zstd at CompressSettings.Default.ZstdCompressionLevel: a replaced handler's compressor is unknown, and it may
+    use the CompressSettings union for other data.  So with custom routines the encoders read the requested level as 0 (GACL's
+    default), and make every level-dependent choice as at the default level: the choices made only above it (the BC7 Join byte
+    remap, BC7 Split level-18 section trials, ungated BC1 coded blocks) stay off, as do the searches that rank candidates at a
+    lower level by rewriting it in the handler's settings.  */
+
+bool GACL_Compression_DefaultRoutinesInstalled()
+{
+    return GACL_Compression_InitRoutine == &GACL_Compression_DefaultInitRoutine &&
+        GACL_Compression_CompressRoutine == &GACL_Compression_DefaultCompressRoutine &&
+        GACL_Compression_CleanupRoutine == &GACL_Compression_DefaultCleanupRoutine;
+}
+
+
 /*  Compress arbitrary data with GACL's constrained zstd settings, no shuffle transform applied  */
 
 _Success_(return == S_OK)
@@ -625,10 +640,10 @@ HRESULT GACL_ShuffleCompress_BCn(
         candidates.push_back(c);
     }
 
-    const bool defaultCompression = GACL_Compression_InitRoutine == &GACL_Compression_DefaultInitRoutine &&
-        GACL_Compression_CompressRoutine == &GACL_Compression_DefaultCompressRoutine &&
-        GACL_Compression_CleanupRoutine == &GACL_Compression_DefaultCleanupRoutine;
-    const int requestedZstdLevel = int(params.CompressSettings.Default.ZstdCompressionLevel);
+    // with custom compression routines the requested level reads as 0, and every level-dependent choice below is made as at the
+    // default level (GACL_Compression_DefaultRoutinesInstalled)
+    const bool defaultCompression = GACL_Compression_DefaultRoutinesInstalled();
+    const int requestedZstdLevel = defaultCompression ? int(params.CompressSettings.Default.ZstdCompressionLevel) : 0;
     const int defaultZstdLevel = params.SizeInBytes <= 16 * 1024 ? 12 : (params.SizeInBytes <= 256 * 1024 ? 14 : 18);     // as GACL_Compression_DefaultInitRoutine
     const int finalZstdLevel = requestedZstdLevel != 0 ? requestedZstdLevel : defaultZstdLevel;
 

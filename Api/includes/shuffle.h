@@ -169,6 +169,9 @@ typedef HRESULT(*PGACL_COMPRESSION_INITROUTINE) (_Out_ void** ccContext, _Out_ s
 typedef HRESULT(*PGACL_COMPRESSION_COMPRESSROUTINE) (_In_ void* context, _Out_writes_(*destBytes) void* dest, _Inout_ size_t* destBytes, _In_reads_(srcBytes) const void* src, size_t srcBytes);
 typedef HRESULT(*PGACL_COMPRESSION_CLEANUPROUTINE) (_In_ void* pContext);
 
+// Replaceable compression routines, GACL's zstd routines by default.  GACL only knows the zstd level (CompressSettings.Default)
+// while all three defaults are installed: with any of them replaced, it makes its level-dependent encoder choices as at the default
+// level, so the transforms and searches it only tries above that level (which trade decode or encode speed for size) stay off.
 GACL_API extern PGACL_COMPRESSION_INITROUTINE GACL_Compression_InitRoutine;
 GACL_API extern PGACL_COMPRESSION_COMPRESSROUTINE GACL_Compression_CompressRoutine;
 GACL_API extern PGACL_COMPRESSION_CLEANUPROUTINE GACL_Compression_CleanupRoutine;

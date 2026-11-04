@@ -227,6 +227,10 @@ extern PGACL_COMPRESSION_COMPRESSROUTINE GACL_Compression_CompressRoutine;
 extern PGACL_COMPRESSION_CLEANUPROUTINE GACL_Compression_CleanupRoutine;
 ```
 
+GACL only knows the zstd level (`CompressSettings.Default`) while all three default routines are installed.  With any of them replaced, it
+makes its level-dependent encoder choices as at the default level: the transforms and searches it only tries above that level, which trade
+decode or encode speed for size, stay off.
+
 ## Space Curves and transforms
 
 Texture data typically exists in linear (row-major) form until it is uploaded to GPU memory.  This means locations within a 2D texture that
