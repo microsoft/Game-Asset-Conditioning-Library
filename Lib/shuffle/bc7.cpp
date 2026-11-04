@@ -367,6 +367,10 @@ void BC7_CollectTextureMetrics(const uint8_t* src, size_t srcSize, BC7TextureMet
 
             Collect(endpoints, 2, 4, 5);
         }
+        else if (mode == 8 && (reinterpret_cast<uint64_t*>(be)[0] | reinterpret_cast<uint64_t*>(be)[1]) != 0)
+        {
+            m.Mode8DataBlocks++;
+        }
 
         // raw measure of bit entropy across each mode's stream of blocks
         // f = first block data for a given mode
@@ -1285,7 +1289,7 @@ HRESULT ShuffleCompress_BC7(
     }
 #endif
 
-    const bool bIncludeSplitMode =
+    const bool bSplitModeRequested =
         *destTransformId == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT ||
         //destTransformId == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED ||                  // Experimental transform, temporarily removed from supported list
         *destTransformId == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL;
@@ -1337,6 +1341,17 @@ HRESULT ShuffleCompress_BC7(
 #endif
     }
 
+    BC7TextureMetrics metrics = {}; // , metrics16K, metrics256K;
+    BC7_CollectTextureMetrics((srcForCurvedTransforms ? srcForCurvedTransforms : srcforUncurvedTransforms), srcSize, metrics);
+
+    // Split streams store only the mode of mode 8 (reserved) blocks, which decoders write as zeros: a texture whose mode 8 blocks carry
+    // data isn't split, so a Split request falls back to plain zstd
+    const bool bIncludeSplitMode = bSplitModeRequested && metrics.Mode8DataBlocks == 0;
+    if (bSplitModeRequested && !bIncludeSplitMode)
+    {
+        Utility::Printf(GACL_Logging_Priority_Medium, L"BC7 Split not tried: %zu mode 8 (reserved) blocks carry data, which Split streams don't store.\n", metrics.Mode8DataBlocks);
+    }
+
     // BC7 content gate.  Where Split runs on a stream of up to 512 KB, with GACL's default zstd routines and a final level above 6 up
     // to the size default, zstd level 6 first compresses the unshuffled stream.  If that leaves under a quarter of it (typical of RDO
     // content), the fast path compresses the candidates at level 6 to rank them, and only the 6 smallest distinct ones again at the
@@ -1367,8 +1382,6 @@ HRESULT ShuffleCompress_BC7(
     // the parameters every candidate is first compressed with
     SHUFFLE_COMPRESS_PARAMETERS* const candParams = gate == ContentGate::Fast ? &rankParams : &params;
 
-    BC7TextureMetrics metrics = {}; // , metrics16K, metrics256K;
-    BC7_CollectTextureMetrics((srcForCurvedTransforms ? srcForCurvedTransforms : srcforUncurvedTransforms), srcSize, metrics);
     ADDTASK(strat_BC7_NoShuffle, srcforUncurvedTransforms, srcSize, candParams, &noShuffle, &hr);
 
     // curved streams record the texture width in 16KB micro-tiles (32 BC7 blocks each) in the stream header

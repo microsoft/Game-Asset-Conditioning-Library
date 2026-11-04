@@ -1401,6 +1401,7 @@ static bool DecodeShuffleCompressed(const vector<uint8_t>& sc, GACL_SHUFFLE_TRAN
         break;
 
     case GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT:     // reverse undoes any space curve recorded in the stream header
+        out.resize(size);       // reverse writes the blocks in place
         BC7_ModeSplit_Reverse(stream.data(), stream.size(), out, size, nullptr);
         break;
 
@@ -1486,6 +1487,105 @@ TEST(ShuffleCompress, CurvedOnlyInput) {
                 ExpectCurvedInputRoundTrip(f, request, nullptr, tex, dataIsCurved);
             }
         }
+    }
+}
+
+// BC7 mode 8 (reserved) blocks: Split streams store them as their mode alone, which decoders write as 16 zero bytes, so the encoder
+// doesn't try Split on a texture whose mode 8 blocks carry data (a Split request falls back to plain zstd).  Every stream must decode
+// to its source exactly.
+TEST(ShuffleCompress, BC7_Mode8Blocks) {
+    struct RestoreLogging
+    {
+        ~RestoreLogging() { GACL_Logging_SetCallback(&Utility::DefaultLoggingRoutine); }
+    } restoreLogging;
+    GACL_Logging_SetCallback(&CaptureLog);
+
+    const filesystem::path file = GetAssetsDirectory() / "BC7mip0" / L"BlackboardEraser_albedo.DDS";
+    ScratchImage si;
+    TexMetadata siMeta;
+    ASSERT_EQ(LoadFromDDSFile(file.c_str(), DDS_FLAGS::DDS_FLAGS_NONE, &siMeta, si), S_OK);
+    const Image* img = si.GetImage(0, 0, 0);
+    const size_t srcBytes = TileRowPrefixBytes(*img, si.GetPixelsSize(), 256 * 1024);
+    ASSERT_EQ(srcBytes, 256u * 1024);
+
+    // every 16th block zeroed (mode 8), then two of those given a non-zero byte
+    vector<uint8_t> zeroed(img->pixels, img->pixels + srcBytes);
+    for (size_t i = 0; i < srcBytes; i += 16 * 16)
+    {
+        memset(zeroed.data() + i, 0, 16);
+    }
+    vector<uint8_t> withData = zeroed;
+    withData[16 * 16 * 3 + 1] = 0x01;
+    withData[16 * 16 * 7 + 15] = 0x80;
+
+    const size_t mode8Blocks = srcBytes / (16 * 16);
+    BC7TextureMetrics metrics = {};
+    BC7_CollectTextureMetrics(zeroed.data(), zeroed.size(), metrics);
+    EXPECT_EQ(metrics.ModeCounts[8], mode8Blocks);
+    EXPECT_EQ(metrics.Mode8DataBlocks, 0u);
+    metrics = {};
+    BC7_CollectTextureMetrics(withData.data(), withData.size(), metrics);
+    EXPECT_EQ(metrics.ModeCounts[8], mode8Blocks);
+    EXPECT_EQ(metrics.Mode8DataBlocks, 2u);
+
+    struct Mode8Case
+    {
+        bool data;      // two mode 8 blocks carry data
+        bool curved;
+        GACL_SHUFFLE_TRANSFORM request;
+    };
+    const Mode8Case cases[] = {
+        { false, false, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT },
+        { false, true, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT },
+        { false, true, GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL },
+        { true, false, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT },
+        { true, true, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT },
+        { true, true, GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL },
+        { true, false, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN },
+        { true, true, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX },
+    };
+    for (const Mode8Case& c : cases)
+    {
+        vector<uint8_t>& src = c.data ? withData : zeroed;
+        const string at = string(c.data ? "data" : "zeroed") + (c.curved ? ", curved" : "") + ", request " + to_string(unsigned(c.request));
+
+        {
+            lock_guard<mutex> lock(s_capturedLogMutex);
+            s_capturedLog.clear();
+        }
+        GACL_SHUFFLE_TRANSFORM tid = c.request;
+        vector<uint8_t> sc(srcBytes);
+        size_t scBytes = 0;
+        SHUFFLE_COMPRESS_PARAMETERS params = { srcBytes, siMeta.format, src.data(), {0}, {img->width, c.curved ? src.data() : nullptr} };
+        ASSERT_EQ(GACL_ShuffleCompress_BCn(sc.data(), &tid, &scBytes, params), S_OK) << at;
+        sc.resize(scBytes);
+
+        size_t checkFailures = 0, splitSkipped = 0;
+        {
+            lock_guard<mutex> lock(s_capturedLogMutex);
+            for (const wstring& line : s_capturedLog)
+            {
+                checkFailures += line.find(L"round trip failed") != wstring::npos ? 1 : 0;
+                splitSkipped += line.find(L"Split not tried") != wstring::npos ? 1 : 0;
+            }
+        }
+        EXPECT_EQ(checkFailures, 0u) << at;
+        const bool splitRequested = c.request == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT || c.request == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL;
+        EXPECT_EQ(splitSkipped, c.data && splitRequested ? 1u : 0u) << at;
+
+        if (c.request == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT)
+        {
+            EXPECT_EQ(tid, c.data ? GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY : GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT) << at;
+        }
+        else if (c.data)
+        {
+            EXPECT_NE(tid, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT) << at;
+        }
+
+        vector<uint8_t> back;
+        uint8_t curveTiles = 0;
+        ASSERT_TRUE(DecodeShuffleCompressed(sc, tid, srcBytes, back, curveTiles)) << at << ", transform " << unsigned(tid);
+        EXPECT_TRUE(back == src) << at << ", transform " << unsigned(tid);
     }
 }
 

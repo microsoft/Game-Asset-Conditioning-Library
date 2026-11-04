@@ -4623,14 +4623,26 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
         nextStageSrc = predicted.data();
     }
 
+    // mode 8 (reserved) blocks are stored as their mode alone, which decoders write as 16 zero bytes, so callers mustn't split textures
+    // whose mode 8 blocks carry data (BC7TextureMetrics::Mode8DataBlocks), as ShuffleCompress_BC7 doesn't
+#if _DEBUG
+    for (size_t i = 0; i < block_count; ++i)
+    {
+        uint64_t q[2];
+        memcpy(q, src + 16 * i, 16);
+        assert((q[0] & 0xff) != 0 || (q[0] | q[1]) == 0);
+    }
+#endif
+
     size_t modeCounts[9] = {};
-    bool mode8Clean = true;
+    size_t metricsBlockCount = 0;
+    for (size_t m = 0; m < 9; ++m)
+    {
+        metricsBlockCount += metrics.ModeCounts[m];
+    }
 
     /*  Prepass if necessary for mode counts, needed for mode transforms  */
-    if (metrics.ModeCounts[0] + metrics.ModeCounts[1] + 
-        metrics.ModeCounts[2] + metrics.ModeCounts[3] + 
-        metrics.ModeCounts[4] + metrics.ModeCounts[4] + 
-        metrics.ModeCounts[6] + metrics.ModeCounts[7] + metrics.ModeCounts[8])
+    if (metricsBlockCount == block_count)
     {
         memcpy(modeCounts, metrics.ModeCounts, sizeof(modeCounts));
     }
@@ -4643,12 +4655,6 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
             unsigned long mode;
             _BitScanForward(&mode, *modeByte | 0x100u);
             modeCounts[mode]++;
-
-            // flag if there is "extra" data in mode 8 blocks that needs to be preserved, or if such blocks are empty\clean, and we can just encode the mode
-            if (mode == 8)
-            {
-                mode8Clean &= (reinterpret_cast<const uint64_t*>(modeByte)[0] == 0x100ull && reinterpret_cast<const uint64_t*>(modeByte)[1] == 0);
-            }
         }
     }
 
@@ -4814,7 +4820,7 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
             }
         }
 
-        if (mode < 8 || !mode8Clean)
+        if (mode < 8)       // mode 8 blocks are stored as their mode alone
         {
             const size_t scrapStart = b.ScrapsBitCount;
             BC7_ModeSplit_Shuffle_Slow((uint8_t)mode, nextStageSrc, b, bitSequences[mode]);
@@ -4848,7 +4854,7 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
     b.ModeA.resize((b.ModeABitCount + 7) / 8);
     b.ModeB.resize((b.ModeBBitCount + 7) / 8);
     const size_t bulkDataVectorUnitBits = 8 * sizeof(b.ColorData64[0][0]);
-    for (int m = 0; m < (mode8Clean ? 8 : 9); m++)
+    for (int m = 0; m < 8; m++)
     {
         b.ColorData64[m].resize((b.ColorDataBitCounts[m] + bulkDataVectorUnitBits - 1) / bulkDataVectorUnitBits);
         b.MiscData64[m].resize((b.MiscDataBitCounts[m] + bulkDataVectorUnitBits - 1) / bulkDataVectorUnitBits);
@@ -4876,8 +4882,10 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
     //  <mode stream>
     //  [section layout remap tables]
     //  <mode0 color> ... <mode7 color>
-    //  <mode0 misc> ... <mode7 misc> [mode8 color]
+    //  <mode0 misc> ... <mode7 misc>
     //  <scraps>  (grouped per mode with the section layout)
+    //
+    //  Mode 8 (reserved) blocks are stored as their mode alone (LUT pattern 0): decoders write them as 16 zero bytes.
 
     std::vector<uint8_t> header;
 
@@ -4927,7 +4935,7 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
         {
             ModeSplitLutByte1 lutByte = {};
             lutByte.Mode = mode;
-            lutByte.ModePattern = mode8Clean ? 0 : 1;
+            lutByte.ModePattern = 0;        // the mode alone, the only mode 8 pattern decoders accept
             header.push_back(lutByte.Raw);
         }
         else
@@ -5013,10 +5021,9 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
     {
         SplitSectionLayout::Section sections[16];
         size_t projected = (std::max)(destA.size(), destB.size()) + SplitSectionLayout::FixedBytes + (b.ScrapsBitCount + 7) / 8;
-        for (int m = 0; m < 9; m++)
+        for (int m = 0; m < 8; m++)
         {
-            if (m < 8) projected += (b.ColorDataBitCounts[m] + 7) / 8;
-            if (m < 8 || !mode8Clean) projected += (b.MiscDataBitCounts[m] + 7) / 8;
+            projected += (b.ColorDataBitCounts[m] + 7) / 8 + (b.MiscDataBitCounts[m] + 7) / 8;
         }
         for (int m = 0; m < 8; m++)
         {
@@ -5073,7 +5080,7 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
             out->resize(currentSize + colorDataSize);
             memcpy_s(out->data() + currentSize, colorDataSize, b.ColorData64[m].data(), colorDataSize);
         }
-        for (int m = 0; m < (mode8Clean ? 8 : 9); m++)
+        for (int m = 0; m < 8; m++)
         {
 #if GACL_SPLITLOG
             swprintf_s(message, _countof(message), L"misc[%d]  %I64u\n", m, out->size());
@@ -5150,8 +5157,6 @@ void BC7_ModeSplit_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8
         pLut++;
     }
 
-    bool mode8Clean = true;
-
     for (size_t m = 0; m < modesUsed; m++)
     {
         ModeSplitLutByte1 lutByte = *reinterpret_cast<const ModeSplitLutByte1*>(pLut + lutBytes);
@@ -5161,7 +5166,8 @@ void BC7_ModeSplit_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8
         modeUsed[modesOrderedByCount[m]] = true;
         if (modesOrderedByCount[m] == 8)
         {
-            mode8Clean = lutByte.ModePattern == 0;
+            // mode 8 blocks are stored as their mode alone (pattern 0, no extensions), the only mode 8 LUT byte GPU decoders accept
+            assert(lutByte.Raw == 0x08);
         }
         else
         {
@@ -5233,7 +5239,7 @@ void BC7_ModeSplit_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8
     size_t bitsPerElementColor[9] = {};
     size_t bitsPerElementMisc[9] = {};
     size_t bitsPerElementScaps[9] = {};
-    for (int m = 0; m < (mode8Clean ? 8 : 9); m++)
+    for (int m = 0; m < 8; m++)
     {
         if (!modeUsed[m]) continue;
 
@@ -5350,18 +5356,16 @@ void BC7_ModeSplit_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8
     }
 
 
-    size_t firstColorByte[9] = {};
+    size_t firstColorByte[8] = {};
     size_t firstMiscByte[8] = {};
     size_t firstScrapByte = 0;
 
     // any section layout remap tables sit between the mode stream and the color data
     const uint8_t* sectionTables = pModeStream + modeStreamSize;
     firstColorByte[0] = (pModeStream - src) + modeStreamSize + (sectionLayout ? SplitSectionLayout::TableBytes(sectionLayout) : 0);
-    size_t totalScrapBits = modeCounts[0] * bitsPerElementScaps[0];
     for (int m = 1; m < 8; m++)
     {
         firstColorByte[m] = firstColorByte[m - 1] + (modeCounts[m - 1] * bitsPerElementColor[m - 1]) / 8;
-        totalScrapBits += modeCounts[m] * bitsPerElementScaps[m];
     }
 
     firstMiscByte[0] = firstColorByte[7] + (modeCounts[7] * bitsPerElementColor[7]) / 8;
@@ -5371,7 +5375,6 @@ void BC7_ModeSplit_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8
     }
 
     firstScrapByte = firstMiscByte[7] + (modeCounts[7] * bitsPerElementMisc[7]) / 8;
-    firstColorByte[8] = firstScrapByte + (totalScrapBits + 7) / 8;
 
     // section layout: per-mode scrap groups, and the color\misc sections restored to block-major byte order
     std::vector<uint8_t> restored;
@@ -5401,13 +5404,8 @@ void BC7_ModeSplit_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8
 
         if (mode == 8)
         {
-            if (firstColorByte[8] < srcSize)
-            {
-                for (int b = 1; b < 16; b++)
-                {
-                    dest[i * 16 + b] = *(src + firstColorByte[8] + i * 16 + b);
-                }
-            }
+            // stored as the mode alone: 16 zero bytes, as the GPU unshuffle writes them (and GPUs decode mode 8 blocks as zeros)
+            memset(dest.data() + i * 16, 0, 16);
         }
         else
         {

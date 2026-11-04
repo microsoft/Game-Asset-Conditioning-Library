@@ -30,6 +30,8 @@ enum GACL_SHUFFLE_TRANSFORM
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116       = 0x04,  // 6 streams (1:1:6:1:1:6)    red_0, red_1, red index stream, green_0, green_1, green index stream (DSTORAGE_GACL_SHUFFLE_TRANSFORM_BC5)
 
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT        = 0x05,  // mode-specific streams and transforms, control bytes within compressed stream	(better compression, slower reverse transform, experimental))
+                                                          // stores mode 8 (reserved) blocks as their mode alone (decoded as zeros), so the encoder doesn't use it for
+                                                          // textures whose mode 8 blocks carry data: a Split request then falls back to ZSTD_ONLY
 
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN         = 0x06,  // mode-specific transforms, no statics/low-entropy handling, no stream header (Fast unshuffle, less compression for large streams, experimental)
 

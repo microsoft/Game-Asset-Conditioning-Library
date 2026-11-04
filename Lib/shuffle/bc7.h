@@ -67,6 +67,10 @@ struct BC7TextureMetrics
 {
     size_t ModeCounts[9];
 
+    // Mode 8 (reserved, byte 0 is 0) blocks with data in bytes 1-15. GPUs decode mode 8 blocks as zeros, and Split streams store only
+    // their mode (decoders write zeros), so the BC7 shuffle doesn't try Split on a texture with any.
+    size_t Mode8DataBlocks;
+
     struct {
         uint8_t Statics;
         uint8_t LowEntropy;
