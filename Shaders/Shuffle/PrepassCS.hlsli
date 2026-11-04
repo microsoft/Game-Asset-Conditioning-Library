@@ -113,11 +113,13 @@ uint VerdictWord(uint dword0, uint2 selectors, bool bad)
 [RootSignature(PrepassCS_RS)]
 void main(uint3 DTid : SV_DispatchThreadID, uint3 gId : SV_GroupID, uint gindex : SV_GroupIndex)
 {
-    // Only process up to number of blocks (wave might have more lanes)
-    if (DTid.x >= constants.blockCount)
+    // A group past the blocks returns whole.  In the last group, the threads past the blocks stay for the barriers, which every thread
+    // of the group must reach, but read no mode
+    if (DTid.x - gindex >= constants.blockCount)
     {
         return;
     }
+    const bool inRange = DTid.x < constants.blockCount;
 
     uint chunkCount = 0;
 
@@ -335,16 +337,19 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gId : SV_GroupID, uint gindex 
     
     GroupMemoryBarrierWithGroupSync(); // ----------------------
     
-    // Based on how many bits we use to store mode, we get which byte we need to fetch from
-    uint bitStartPos = (gs_currentByteIndex * 8u) + DTid.x * bitsPerMode;
-    
-    uint parsedMode = ParseBitsFromBuffer(bitStartPos, bitsPerMode, shuffledBuffer);
-    uint threadMode = gs_modeLUT[min(parsedMode, 8u)];
+    if (inRange)
+    {
+        // Based on how many bits we use to store mode, we get which byte we need to fetch from
+        uint bitStartPos = (gs_currentByteIndex * 8u) + DTid.x * bitsPerMode;
 
-    // keeps track of number of blocks per wave.  Only a block whose index names a LUT entry counts, so for a stream with a block that
-    // names no entry, the counts fall short of the block count, and the binning pass dispatches no unshuffle groups
-    uint previousModeCount;
-    InterlockedAdd(gs_modeCountsInThreadGroup[threadMode], (parsedMode < gs_modesUsedCount) ? 1u : 0u, previousModeCount);
+        uint parsedMode = ParseBitsFromBuffer(bitStartPos, bitsPerMode, shuffledBuffer);
+        uint threadMode = gs_modeLUT[min(parsedMode, 8u)];
+
+        // keeps track of number of blocks per wave.  Only a block whose index names a LUT entry counts, so for a stream with a block
+        // that names no entry, the counts fall short of the block count, and the binning pass dispatches no unshuffle groups
+        uint previousModeCount;
+        InterlockedAdd(gs_modeCountsInThreadGroup[threadMode], (parsedMode < gs_modesUsedCount) ? 1u : 0u, previousModeCount);
+    }
     
     GroupMemoryBarrierWithGroupSync(); // ----------------------
     

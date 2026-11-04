@@ -380,16 +380,18 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gid : SV_GroupID, uint gindex 
         }
     }
 
-    // Only process up to number of blocks (wave might have more lanes)
-    if (DTid.x >= constants.blockCount)
-    {
-        return;
-    }
+    // Threads past the blocks (in the last group) stay until the second barrier, which every thread of the group must reach, but read
+    // no mode and add nothing to the wave sums
+    const bool inRange = DTid.x < constants.blockCount;
 
     // Each thread reads its mode before the barrier, overlapping the group's tables
     const uint headerSizeBytes = scratchBuffer.Load(0u);
     const uint bitsPerMode = ModeTransformBCountToModeBits[scratchBuffer.Load(4u) & 0xfu];
-    uint parsedMode = ParseBitsFromBuffer((headerSizeBytes * 8) + DTid.x * bitsPerMode, bitsPerMode, shuffledBuffer);
+    uint parsedMode = 0u;
+    if (inRange)
+    {
+        parsedMode = ParseBitsFromBuffer((headerSizeBytes * 8) + DTid.x * bitsPerMode, bitsPerMode, shuffledBuffer);
+    }
     
     GroupMemoryBarrierWithGroupSync();
 
@@ -408,10 +410,11 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gid : SV_GroupID, uint gindex 
     // Wave index within the threadgroup
     uint waveIndexForThisThread = gindex / waveLaneCount;
     
-    // Per wave mode counts, a byte per mode (waves have at most 128 lanes)
-    uint modeMask_0_3 = (mode < 4) ? 1u << (8u * (mode - 0u)) : 0u;
-    uint modeMask_4_7 = (mode >= 4 && mode < 8) ? 1u << (8u * (mode - 4u)) : 0u;
-    uint modeMask_8 = (mode == 8) ? 1u : 0u;
+    // Per wave mode counts, a byte per mode (waves have at most 128 lanes); a thread past the blocks counts as no mode
+    const uint countedMode = inRange ? mode : BC7_MODES_COUNT;
+    uint modeMask_0_3 = (countedMode < 4) ? 1u << (8u * (countedMode - 0u)) : 0u;
+    uint modeMask_4_7 = (countedMode >= 4 && countedMode < 8) ? 1u << (8u * (countedMode - 4u)) : 0u;
+    uint modeMask_8 = (countedMode == 8) ? 1u : 0u;
     
     uint waveMode03Sum = WaveActiveSum(modeMask_0_3);
     uint waveMode47Sum = WaveActiveSum(modeMask_4_7);
@@ -421,7 +424,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gid : SV_GroupID, uint gindex 
     uint waveScrapSizeBits = 0u;
     if (!sectionLayout)
     {
-        waveScrapSizeBits = WaveActiveSum(threadScrapSizeBits);
+        waveScrapSizeBits = WaveActiveSum(inRange ? threadScrapSizeBits : 0u);
     }
     if (WaveIsFirstLane())
     {
@@ -429,6 +432,11 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gid : SV_GroupID, uint gindex 
     }
     
     GroupMemoryBarrierWithGroupSync();
+
+    if (!inRange)
+    {
+        return;
+    }
     
     // The block's rank among this group's blocks of its mode: those in earlier waves,
     uint offsetIntoModeAccum = (mode < 4) ? 2u : (mode < 8) ? 1u : 0u;
