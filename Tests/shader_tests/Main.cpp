@@ -518,6 +518,7 @@ std::vector<GTestParameters> GetUnshufflingTestParameters()
         addSplit("BC7_Valid_Res64x64", SplitContentModes, SplitRejectNone, 0);
         addSplit("BC7_Valid_Res64x64_Mode8Only", SplitContentMode8Only, SplitRejectNone, 0);
         addSplit("BC7_Valid_Res64x64_NoMode7", SplitContentNoMode7, SplitRejectNone, 0);
+        addSplit("BC7_Valid_Res64x64_FewModes", SplitContentFewModes, SplitRejectNone, 0);
         addSplit("BC7_Valid_Res40x4", SplitContentModes, SplitRejectNone, 0, 40, 4);
         addSplit("BC7_Valid_Res512x512", SplitContentModes, SplitRejectNone, 0, 512, 512);
 
@@ -581,6 +582,10 @@ std::vector<GTestParameters> GetUnshufflingTestParameters()
                 uint8_t(8 * 8 + pattern));
         }
         addSplit("BC7_Reject_Mode8OnlyExtensions", SplitContentMode8Only, SplitRejectMode8Extensions, 0);
+
+        // Mode 0's color remap lengths inflated past its tables, with a stream its symbol reads would run past
+        addSplit("BC7_RemapOverread_Res64x64_FewModes", SplitContentFewModes, SplitRejectNone, 0);
+        testParams.back().BC7.remapOverread = true;
     }
 
     return testParams;

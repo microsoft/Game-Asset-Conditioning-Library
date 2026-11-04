@@ -80,6 +80,9 @@ struct GTestParameters
                                     // they reject the stream, and the destination keeps its fill (0xA5 bytes, for every BC7 test, so
                                     // that a block the shaders don't write fails)
             uint8_t rejectArg;      // the SplitReject case's argument
+            bool remapOverread;     // mode 0's color remap length bytes set to 255, which the shaders don't check, so that its symbol
+                                    // reads would run past the stream: decoded twice, the stream followed by 0x00 then 0xFF bytes,
+                                    // the decodes must match (the shaders keep symbol reads in the remap tables)
         } BC7;
 
         struct {

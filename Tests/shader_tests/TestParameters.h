@@ -118,6 +118,8 @@ enum SplitContent : uint8_t
     SplitContentModes,          // blocks cycling through modes 0-8 (Game::CreateBC7RawFromMetadata)
     SplitContentMode8Only,      // every block mode 8 (zero): a one-entry LUT, which the prepass reads apart
     SplitContentNoMode7,        // as SplitContentModes, with the mode 7 blocks made mode 6 blocks
+    SplitContentFewModes,       // as SplitContentModes for the first 36 blocks (4 of each mode), the rest mode 8: a stream small enough
+                                // that the encoder grants mode 0's color remap, and shorter than its symbol reads could reach
 };
  
 constexpr BC7ModeSplitShufflePattern g_patternSets[][8] =

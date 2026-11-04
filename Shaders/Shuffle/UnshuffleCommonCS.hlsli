@@ -25,6 +25,7 @@ struct SectionInfo
     uint selector;  // bits 0-1 unit code (1/2/3 = 1/2/4 byte units), bit 2 rank remap
     uint lens;      // per byte position symbol count - 1
     uint symbols;   // per byte position symbols, in rank order
+    uint tablesLast;    // the remap tables' last byte, past which no symbol is read (the length bytes aren't checked against the tables)
 };
 
 // The helpers of each mode read bytes 0 to count - 1 of the block's color / misc bytes (at constant offsets)
@@ -112,12 +113,13 @@ uint4 StageSection(SectionInfo section, uint count, uint rank, uint n, in ByteAd
     #if GACL_SPLIT_SECTION_REMAP
     if ((section.selector & 0x4u) != 0u)
     {
-        // the symbols of byte position k follow those of the positions below it (a byte past the section reads the last position's)
+        // the symbols of byte position k follow those of the positions below it (a byte past the section reads the last position's),
+        // read inside the tables
         uint symbols = section.symbols;
         [loop]
         for (uint k = 0u; k < count; ++k)
         {
-            StageSet(s, k, fetchNextByte(symbols + StageGet(s, k), buffer));
+            StageSet(s, k, fetchNextByte(min(symbols + StageGet(s, k), section.tablesLast), buffer));
             if (k + 1u < section.stride)
             {
                 symbols += fetchNextByte(section.lens + k, buffer) + 1u;
@@ -359,8 +361,10 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 gid : SV_GroupID)
             }
             const uint tableAddress = colorStreamAddress - (streamStartBytes >> 16u) + tableOffset;
             
-            // tables: [color lens][misc lens][color symbols][misc symbols], each present when that section is remapped
+            // tables: [color lens][misc lens][color symbols][misc symbols], each present when that section is remapped; all the modes'
+            // tables end at the color stream
             colorSection.lens = tableAddress;
+            colorSection.tablesLast = miscSection.tablesLast = colorStreamAddress - 1u;
             miscSection.lens = colorSection.lens + (colorRemap ? colorStride : 0u);
             colorSection.symbols = miscSection.lens + (miscRemap ? miscStride : 0u);
             uint colorSymbolCount = 0u;

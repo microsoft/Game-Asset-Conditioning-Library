@@ -1511,6 +1511,26 @@ static bool CorruptSplitStream(std::vector<uint8_t>& s, size_t blockCount, uint8
     }
 }
 
+// Sets mode 0's color remap length bytes (the first table bytes, after the 4 bit mode stream of 9 modes) to 255, the most a byte
+// position has, so that its symbol reads span 2KB past them.  False if mode 0's color section isn't remapped
+static bool InflateSplitRemapLengths(std::vector<uint8_t>& s, size_t blockCount)
+{
+    SplitStreamLayout layout;
+    if (!ParseSplitStream(s, blockCount, layout) || !(layout.extension & 0x10u) || layout.modesUsed != 9 || !layout.entryAt[0] ||
+        !(s[4] & 0x04u) || ReadU16(s, SplitTableFieldAt(0)) != 0)
+    {
+        return false;
+    }
+    const size_t lensAt = layout.modeStreamAt + (blockCount * 4 + 7) / 8;
+    const size_t colorBytes = SplitColorBytes(0, layout.pattern[0]);
+    if (lensAt + colorBytes > s.size())
+    {
+        return false;
+    }
+    std::fill_n(s.begin() + lensAt, colorBytes, uint8_t(0xFFu));
+    return true;
+}
+
 bool Game::RunTestWithParams(GTestParameters const& params)
 {
 #ifdef NEWBC1345
@@ -1542,6 +1562,11 @@ bool Game::RunTestWithParams(GTestParameters const& params)
                     bc7TextureRaw[i] = 0xC0u;
                 }
             }
+        }
+        else if (params.BC7.content == SplitContentFewModes)
+        {
+            std::fill(bc7TextureRaw.begin() + std::min<size_t>(bc7TextureRaw.size(), 36 * BC7_BYTES_PER_BLOCK), bc7TextureRaw.end(),
+                uint8_t(0));
         }
 
         BC7ModeSplitShufflePattern Patterns[8];
@@ -1589,6 +1614,33 @@ bool Game::RunTestWithParams(GTestParameters const& params)
                 return false;
             }
             std::fill(bc7TextureRaw.begin(), bc7TextureRaw.end(), kBC7DestinationFill);
+        }
+
+        // Symbol reads that leave the remap tables reach the bytes past the stream, so the decodes would differ
+        if (params.BC7.remapOverread)
+        {
+            if (!InflateSplitRemapLengths(shuffledBuffer, bc7SizeInBytes / BC7_BYTES_PER_BLOCK))
+            {
+                std::cout << "The BC7 split stream has no mode 0 color remap. Stream bytes 0-27:";
+                for (size_t i = 0; i < 28 && i < shuffledBuffer.size(); ++i)
+                {
+                    std::cout << ' ' << uint32_t(shuffledBuffer[i]);
+                }
+                std::cout << std::endl;
+                return false;
+            }
+            std::vector<uint8_t> decoded[2];
+            for (uint32_t i = 0; i < 2; ++i)
+            {
+                std::vector<uint8_t> padded(shuffledBuffer);
+                padded.resize(padded.size() + 4096, i ? uint8_t(0xFFu) : uint8_t(0u));
+                CreateBC7UnshufflePassD3D12Resources(padded, bc7SizeInBytes, kBC7DestinationFill);
+                Unshuffle(params, bc7SizeInBytes);
+                decoded[i].resize(bc7SizeInBytes);
+                UnshuffleCPUReadback(decoded[i], bc7SizeInBytes);
+                ResetD3D12Resources();
+            }
+            return decoded[0] == decoded[1];
         }
 
         // Create all d3d12 resources for this test
