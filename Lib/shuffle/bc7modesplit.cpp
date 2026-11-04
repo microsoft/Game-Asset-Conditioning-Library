@@ -3009,7 +3009,7 @@ void ComputeRotationToLeastSignificantEntropy(size_t counts[8][128], size_t elem
         //size_t bitFlipWeights[] = { 1, 1ull << 2, 1ull << 4, 1ull << 6, 1ull << 8, 1ull << 10, 1ull << 12, 1u << 14 };
         //size_t bitFlipWeights[] = { 1, 1ull << 3, 1ull << 6, 1ull << 9, 1ull << 12, 1ull << 15, 1ull << 18 };
 
-        for (uint8_t rot = 0; rot < fieldValues; rot++)
+        for (unsigned rot = 0; rot < fieldValues; rot++)
         {
             size_t bitFlips[7] = {};
             for (int b = 0; b < bitDepth; b++)
@@ -3031,7 +3031,7 @@ void ComputeRotationToLeastSignificantEntropy(size_t counts[8][128], size_t elem
             else if (entropy < bestEntropy)
             {
                 bestEntropy = entropy;
-                bestShift = rot;
+                bestShift = static_cast<uint8_t>(rot);
             }
         }
         rotations.E[e] = bestShift;
@@ -5137,7 +5137,7 @@ void BC7_ModeSplit_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8
 
     bool mode8Clean = true;
 
-    for (uint8_t m = 0; m < modesUsed; m++)
+    for (size_t m = 0; m < modesUsed; m++)
     {
         ModeSplitLutByte1 lutByte = *reinterpret_cast<const ModeSplitLutByte1*>(pLut + lutBytes);
         lutBytes++;
