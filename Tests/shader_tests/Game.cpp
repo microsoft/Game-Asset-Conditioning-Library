@@ -123,7 +123,7 @@ static uint32_t DispatchShader(uint32_t transformId)
         return GBaseFormat::BC7Join;    // GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN, _BC7_EX
     }
 }
-#else // Preview #1 interim shaders
+#else // Legacy shaders (UnshuffleBC1\3\4\5.hlsl)
 static const ShuffleShaderInfo gShaderInfo[] = {
     {L"UnshuffleBC1.cso", L"BC1CSRootSignature", L"BC1 Unshuffle", 8,  2},
     {L"UnshuffleBC3.cso", L"BC3CSRootSignature", L"BC3 Unshuffle", 16, 4},

@@ -29,7 +29,8 @@ enum GACL_SHUFFLE_TRANSFORM
 
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116       = 0x04,  // 6 streams (1:1:6:1:1:6)    red_0, red_1, red index stream, green_0, green_1, green index stream (DSTORAGE_GACL_SHUFFLE_TRANSFORM_BC5)
 
-    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT        = 0x05,  // mode-specific streams and transforms, control bytes within compressed stream	(better compression, slower reverse transform, experimental))
+    GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT        = 0x05,  // mode-specific streams and transforms, control bytes within compressed stream	(better compression, slower reverse transform,
+                                                          // supported from the DirectStorage 1.4 GA release)
                                                           // stores mode 8 (reserved) blocks as their mode alone (decoded as zeros), so the encoder doesn't use it for
                                                           // textures whose mode 8 blocks carry data: a Split request then falls back to ZSTD_ONLY
 
@@ -60,7 +61,10 @@ enum GACL_SHUFFLE_TRANSFORM
     GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX           = 0x0F,  // B 16, G 1
 
     // masks for API callers
-    GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED    = 0x8004,    // This define will change value over time
+    // The transforms a DirectStorage release reverses, for callers that target that release:
+    GACL_SHUFFLE_TRANSFORM_GROUP_DS_1_4_PREVIEW   = 0x8004,    // BC1\3\4\5 (0x01-0x04): DirectStorage 1.4 preview
+    GACL_SHUFFLE_TRANSFORM_GROUP_DS_1_4_GA        = 0x8005,    // adds BC7 Split (0x05): DirectStorage 1.4 GA release
+    GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED    = GACL_SHUFFLE_TRANSFORM_GROUP_DS_1_4_GA,  // The latest release: this define will change value over time
     GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL = 0xff00,    // Allow experimental transforms that were not compiled out at build time
 };
 
@@ -289,7 +293,9 @@ GACL_API HRESULT GACL_Compression_CompressBuffer(
 /// the caller, along with the transform ID that is used to reverse the operation at load\runtime.
 ///
 /// Transforms for which there is no current GPU-based reverse transform within DirectStorage are considered
-/// experimental or proposed for future support.
+/// experimental or proposed for future support.  GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED requests the transforms of the
+/// latest DirectStorage release: the BC1\3\4\5 shuffles, and BC7 Split from the DirectStorage 1.4 GA release.  Callers that
+/// target an earlier release request its group instead, e.g. GACL_SHUFFLE_TRANSFORM_GROUP_DS_1_4_PREVIEW (no BC7 shuffle).
 ///
 /// Default compression is zstd, with some specific setting intended to balance compression ratio and
 /// throughput on anticipated future cpu offload implementations of zstd decompression.

@@ -63,8 +63,8 @@ void ProcessTexture(
     HRESULT hr = S_OK;
 
     // The transform id parameter is in/out: on entry the caller provides the requested transform group
-    // (GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED for the preview shaders, or ..._GROUP_ANY_EXPERIMENTAL when the
-    // newer "x" shaders are built). On exit it holds the specific transform GACL_ShuffleCompress_BCn selected.
+    // (GACL_SHUFFLE_TRANSFORM_GROUP_DS_1_4_PREVIEW for the legacy shaders, or ..._GROUP_ANY_EXPERIMENTAL when the
+    // newer shaders are built). On exit it holds the specific transform GACL_ShuffleCompress_BCn selected.
     GACL_SHUFFLE_TRANSFORM const requestedTransformGroup = bcnTransformId;
     bcnTransformId = GACL_SHUFFLE_TRANSFORM_NONE;
 

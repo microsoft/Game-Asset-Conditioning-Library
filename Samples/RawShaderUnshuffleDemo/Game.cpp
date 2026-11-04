@@ -84,7 +84,7 @@ static_assert(_countof(gPerFormatShaderInfo) == 2 * kHeaderlessShaders && _count
 
 // With the newer shaders we allow the library to consider the experimental transforms (v2, EX) too.
 constexpr GACL_SHUFFLE_TRANSFORM kRequestedTransformGroup = GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL;
-#else // Preview #1 interim shaders
+#else // Legacy shaders (UnshuffleBC1\3\4\5.hlsl)
 static const ShuffleShaderInfo gShaderInfo[] = {
     {L"UnshuffleBC1.cso", L"BC1CSRootSignature", L"BC1 Unshuffle", 8,  2, 256},
     {L"UnshuffleBC3.cso", L"BC3CSRootSignature", L"BC3 Unshuffle", 16, 4, 256},
@@ -92,8 +92,8 @@ static const ShuffleShaderInfo gShaderInfo[] = {
     {L"UnshuffleBC5.cso", L"BC5CSRootSignature", L"BC5 Unshuffle", 16, 4, 256},
 };
 
-// The preview shaders only reverse the currently supported transforms.
-constexpr GACL_SHUFFLE_TRANSFORM kRequestedTransformGroup = GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED;
+// The legacy shaders only reverse the BC1\3\4\5 transforms of the DirectStorage 1.4 preview (0x01-0x04).
+constexpr GACL_SHUFFLE_TRANSFORM kRequestedTransformGroup = GACL_SHUFFLE_TRANSFORM_GROUP_DS_1_4_PREVIEW;
 #endif
 
 // Maps a transform id (as returned by GACL_ShuffleCompress_BCn) to the gShaderInfo entry / GBaseFormat that reverses

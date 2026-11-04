@@ -77,7 +77,7 @@ static std::filesystem::path GetBinResultDir()
     return i.outFilePath;
 }
 
-/* Should we add these to the public APIs after preview? */
+/* Should we add these to the public APIs? */
 
 static void UnshuffleBC1v1(uint8_t* dest, uint8_t* src, size_t size)
 {
@@ -412,6 +412,17 @@ TEST(ShuffleCompress, LargeBC4_ShuffleCompress) {
     EXPECT_EQ(hr, S_OK);
     EXPECT_EQ(tid, GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116);
     EXPECT_EQ(sc.size(), 69768);    // known size for this asset shuffle compressed in this way
+}
+
+// The BC1\3\4\5 shuffles are in every supported group, the DirectStorage 1.4 preview's included
+TEST(ShuffleCompress, LargeBC4_ShuffleCompress_DS14Preview) {
+    vector<uint8_t> sc;
+    GACL_SHUFFLE_TRANSFORM tid = GACL_SHUFFLE_TRANSFORM_GROUP_DS_1_4_PREVIEW;
+    HRESULT hr = ValidateRoundTripShuffleCompress(Ladybug_fresnel_2k_2k_BC4, tid, false, sc);
+
+    EXPECT_EQ(hr, S_OK);
+    EXPECT_EQ(tid, GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116);
+    EXPECT_EQ(sc.size(), 69768);    // as GROUP_ANY_SUPPORTED (LargeBC4_ShuffleCompress)
 }
 
 // BC4_116 wins this asset under ANY_EXPERIMENTAL (always-on EX index prediction costs ~8% here), so cover the predicted,
@@ -986,6 +997,22 @@ TEST_P(SC_BC7_Test, LargeBC7_ShuffleCompress) {
     EXPECT_EQ(sc.size(), p.size);    // known size for this asset shuffle compressed in this way
 }
 
+// BC7 Split is supported from the DirectStorage 1.4 GA release: GROUP_ANY_SUPPORTED tries it, and it wins as under
+// GROUP_ANY_EXPERIMENTAL (LargeBC7_ShuffleCompress).  The DirectStorage 1.4 preview group compresses BC7 with zstd alone.
+TEST(ShuffleCompress, LargeBC7_ShuffleCompress_Supported) {
+    const filesystem::path filepath = GetAssetsDirectory() / "BC7mip0" / L"BlackboardEraser_albedo.DDS";
+
+    vector<uint8_t> sc;
+    GACL_SHUFFLE_TRANSFORM tid = GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED;
+    EXPECT_EQ(ValidateRoundTripShuffleCompress(filepath, tid, true, sc), S_OK);
+    EXPECT_EQ(tid, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT);
+    EXPECT_EQ(sc.size(), 501855);    // as GROUP_ANY_EXPERIMENTAL
+
+    tid = GACL_SHUFFLE_TRANSFORM_GROUP_DS_1_4_PREVIEW;
+    EXPECT_EQ(ValidateRoundTripShuffleCompress(filepath, tid, true, sc), S_OK);
+    EXPECT_EQ(tid, GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY);
+}
+
 // Split wins every file above, so cover the BC7 Join round trip by requesting Join explicitly (a BC7_EX request also
 // tries the curve-only stream, which wins on two of them: LargeBC7_ShuffleCompress_CurveOnly)
 TEST_P(SC_BC7_Test, LargeBC7_ShuffleCompress_Join) {
@@ -1538,9 +1565,11 @@ TEST(ShuffleCompress, BC7_Mode8Blocks) {
         { false, false, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT },
         { false, true, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT },
         { false, true, GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL },
+        { false, true, GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED },
         { true, false, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT },
         { true, true, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT },
         { true, true, GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL },
+        { true, true, GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED },
         { true, false, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN },
         { true, true, GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX },
     };
@@ -1570,10 +1599,11 @@ TEST(ShuffleCompress, BC7_Mode8Blocks) {
             }
         }
         EXPECT_EQ(checkFailures, 0u) << at;
-        const bool splitRequested = c.request == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT || c.request == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL;
+        const bool splitRequested = c.request == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT || c.request >= GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED;
         EXPECT_EQ(splitSkipped, c.data && splitRequested ? 1u : 0u) << at;
 
-        if (c.request == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT)
+        // a supported group tries Split and plain zstd alone, as a Split request does
+        if (c.request == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT || c.request == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED)
         {
             EXPECT_EQ(tid, c.data ? GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY : GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT) << at;
         }

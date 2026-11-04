@@ -15,8 +15,8 @@
 // for Root descriptor versus heap descriptor...
 #include "../../Shaders/Shuffle/Shared.hlsli"
 
-// Selects the newer BC1\3\4\5 shaders (with the "x" suffix) added for this release over the
-// original preview shaders. The legacy preview shaders are still built, but the default is the new set.
+// Selects the newer BC1\3\4\5 shaders (UnshuffleBCnEx.hlsl and its per-format builds) over the legacy shaders
+// (UnshuffleBC1\3\4\5.hlsl). The legacy shaders are still built, but the default is the new set.
 #define NEWBC1345
 
 enum GBaseFormat

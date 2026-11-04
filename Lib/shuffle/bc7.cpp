@@ -1289,10 +1289,11 @@ HRESULT ShuffleCompress_BC7(
     }
 #endif
 
+    // BC7 Split is supported from the DirectStorage 1.4 GA release: every group from GROUP_DS_1_4_GA up includes it
+    // (GROUP_ANY_SUPPORTED, GROUP_ANY_EXPERIMENTAL)
     const bool bSplitModeRequested =
         *destTransformId == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT ||
-        //destTransformId == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED ||                  // Experimental transform, temporarily removed from supported list
-        *destTransformId == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL;
+        *destTransformId >= GACL_SHUFFLE_TRANSFORM_GROUP_DS_1_4_GA;
 
     const bool bIncludeJoinMode =
         *destTransformId == GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN ||

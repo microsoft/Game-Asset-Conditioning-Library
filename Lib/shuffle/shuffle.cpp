@@ -552,7 +552,7 @@ HRESULT GACL_ShuffleCompress_BCn(
     }
 
     const GACL_SHUFFLE_TRANSFORM requested = *destTransformId;
-    const bool anySupported = requested >= GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED;
+    const bool anySupported = requested >= GACL_SHUFFLE_TRANSFORM_GROUP_DS_1_4_PREVIEW;     // the BC1\3\4\5 shuffles are in every supported group
     const bool anyExperimental = requested >= GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL;
     const GACL_SHUFFLE_TRANSFORM ex = GACL_SHUFFLE_TRANSFORM(BCnEx_TransformId(uint8_t(tid1)));     // the format's EX id
     const bool includeEx = anyExperimental || requested == ex;
@@ -595,7 +595,7 @@ HRESULT GACL_ShuffleCompress_BCn(
         { L"Compressed",                  GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY, GACL_SHUFFLE_TRANSFORM_NONE, 0, linear, 0, linear && (anySupported || requested == GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY) },
         { L"Compressed EX SC",            ex, GACL_SHUFFLE_TRANSFORM_NONE, 0, curved, exTiles, exTiles && includeEx },
         { L"Shuffle compressed",          tid1, tid1, 1, linear, 0, linear && (anySupported || requested == tid1) },
-        // [experimental - preview does not include v2 shuffle]
+        // [experimental - no DirectStorage release reverses the v2 shuffles yet]
         { L"Shuffle compressed v2",       tid2, tid2, 2, linear, 0, v2 && linear && (anyExperimental || requested == tid2) },
         { L"Shuffle compressed EX",       ex, tid1, 1, linear, 0, linear && includeEx && (BCnEx_Predicted(uint8_t(tid1)) || requested == ex) },
         { L"Shuffle compressed EX v2",    ex, tid2, 2, linear, 0, v2 && linear && includeEx && (BCnEx_Predicted(uint8_t(tid2)) || requested == ex) },

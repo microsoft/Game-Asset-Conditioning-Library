@@ -162,14 +162,14 @@ static void PrintHelp(void)
     printf("\n");
     printf("  **  Space curves move screen-adjacent data to memory-adjacent.                              ** \n");
     printf("  **  Shuffle+compress includes a forward space curve to improve compression.                 ** \n");
-    printf("  **  Space curve transforms were made experimental in Preview #1 and so the below behavior   ** \n");
-    printf("  **  is off by default, only enabled when the -sce or -rdosc are specified. It does represent** \n");
-    printf("  **  the final non-preview behaviors of RDO+shuffle+compress interaction though.             ** \n");
+    printf("  **  Space curve transforms are experimental (BC7 Split streams excepted), so the below      ** \n");
+    printf("  **  behavior is off by default, only enabled when the -sce or -rdosc are specified. It does ** \n");
+    printf("  **  represent the intended behaviors of RDO+shuffle+compress interaction though.            ** \n");
     printf("  **                                                                                          ** \n");
     printf("  **  If a texture is having entropy reduction applied, the forward space curve is applied    ** \n");
     printf("  **  before bler\\cler, allowing those algorithms to work on screen-adjacent data.  If a     ** \n");
     printf("  **  texture is having Entrory Reduction applied, without Shuffle+Compress, entropy reduction** \n");
-    printf("  **  still occurs in the space curved context, as below (with the exception of Preview):     ** \n");
+    printf("  **  still occurs in the space curved context, as below (with -rdosc):                       ** \n");
     printf("  **     Input -> Forward Space Curve -> Entropy Reduction -> Reverse Space Curve -> Export   ** \n");
     printf("\n");
     printf("  -fsc, -forwardspacecurve  Forward space curve, no other transforms will be applied.\n");
@@ -182,22 +182,24 @@ static void PrintHelp(void)
     printf("                            will not use shuffle+compress. Textures that will not have a load-\n");
     printf("                            time unshuffle applied to them cannot have a space curve applied.\n");
     printf("\n");
-    printf("                            Space curves are experimental in Preview 1, and -dsc only\n");
-    printf("                            has effect if experimental shuffle compress is enabled.\n");
+    printf("                            Outside BC7 Split, space curves are experimental, and -dsc only\n");
+    printf("                            has effect on BC7 Split, or if experimental shuffle compress is enabled.\n");
     printf("\n");
-    printf("  -rdosc                    [preview #2] Enables curved RDO as it will work in later releases.\n");
+    printf("  -rdosc                    [experimental] Enables curved RDO as it will work in later releases.\n");
     printf("\n");
     printf("\n");
-    printf("Options, data shuffle related (supported for BC1\\3\\4\\5):\n");
+    printf("Options, data shuffle related (supported for BC1\\3\\4\\5\\7):\n");
     printf("\n");
     printf("  -sc, --shufflecompress    Apply Shuffle + zstd compress after any other transform\n");
     printf("                            Note: output will no longer be a valid DDS, and if the input file contains\n");
     printf("                            multiple mips or slices, each will be processed individually.\n");
     printf("                            If an output file name is specififed, it will be used as a base name.\n");
+    printf("                            BC7 Split (transform 0x05) is supported from the DirectStorage 1.4 GA\n");
+    printf("                            release; BC7 Join and the _EX transforms remain experimental (-sce).\n");
     printf("\n");
     printf("  -sce, --shufflecompressexperimental \n");
     printf("                            As \"shufflecompress\", but enabling experimental shuffle patterns, for\n");
-    printf("                            which there is not current DirectStorage transform support, including BC7.\n");
+    printf("                            which there is not current DirectStorage transform support, including BC7 Join.\n");
     printf("\n");
     printf("  -sco, --compressonly \n");
     printf("                            As \"shufflecompress\", but disabling all shuffle patterns, effectively\n");
@@ -556,7 +558,10 @@ int wmain(size_t argc, const wchar_t* argv[])
     }
     else if (blockBC7Split)
     {
-        shuffleOptions.Transform = GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN;
+        // Split is the only supported BC7 shuffle (DirectStorage 1.4 GA release), so without -sce request the DirectStorage 1.4
+        // preview group: the BC1\3\4\5 shuffles, and BC7 compressed with zstd alone
+        shuffleOptions.Transform = shuffleOptions.Transform == GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED ?
+            GACL_SHUFFLE_TRANSFORM_GROUP_DS_1_4_PREVIEW : GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN;
     }
 
 #if GACL_INCLUDE_CLER
