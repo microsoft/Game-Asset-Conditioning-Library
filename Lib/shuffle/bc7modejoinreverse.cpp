@@ -450,8 +450,8 @@ bool BC7_ModeJoin_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8_
 }
 
 // Coded blocks are always coded in the domain of remap set 1 (the GPU's kBC7JoinInvRemap), which kBC7JoinBlockCode was
-// trained on: the blocks of a stream without the remap (no parameter 4) are remapped for coding. (With GACL_JBRT off
-// the remap, and so this map, is the identity.)
+// trained on: the blocks of a stream without the remap (no parameter 4) are remapped for coding. This holds with
+// GACL_JBRT off too, which only keeps streams from using the remap.
 static void JoinCodedBlockMap(uint8_t* block, bool inverse, const std::vector<StreamHeaderParam>& params)
 {
     for (const StreamHeaderParam& p : params)

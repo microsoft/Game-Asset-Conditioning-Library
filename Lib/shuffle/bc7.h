@@ -127,7 +127,7 @@ uint64_t BC7_ModeJoin_IndexFieldPerm(unsigned mode);    // index field permutati
 void BC7_ModeJoin_IndexFieldPermute(uint64_t* x, unsigned mode, uint64_t v, bool inverse);
 const uint8_t* BC7_ModeJoin_IndexFieldScan(uint64_t v);    // texel scan (16 raster texel indices) selected by a JFP setting
 void BC7_ModeJoin_IndexFieldPermuteScan(uint64_t* x, unsigned mode, uint64_t v, bool inverse, const uint8_t* scan);   // explicit texel scan
-void BC7_ModeJoin_ByteRemap(uint8_t* block, bool inverse, const BC7TextureMetrics& metrics);  // fixed per mode/byte remap of a finished Join block with set metrics.JoinRemap - 1; no-op for JoinRemap 0 or JBRT off
+void BC7_ModeJoin_ByteRemap(uint8_t* block, bool inverse, const BC7TextureMetrics& metrics);  // fixed per mode/byte remap of a finished Join block with set metrics.JoinRemap - 1; no-op for JoinRemap 0. Compiled in with JBRT off too (header-coded blocks use set 1)
 unsigned BC7_ModeJoin_RemapSets();          // number of byte-remap table sets, the largest valid JoinRemap: 1 (base table), 0 with JBRT off
 size_t BC7_ModeJoin_ReverseSelfTest();      // random-block round trip; returns the failure count
 void BC7_ModeJoin_LayoutShuffle(unsigned mode, const void* src, void* dest, const BC7TextureMetrics& metrics);  // layout only (no field transforms)

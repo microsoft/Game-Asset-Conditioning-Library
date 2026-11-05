@@ -2253,15 +2253,13 @@ uint64_t BC7_ModeJoin_IndexFieldPerm(unsigned mode)
 #ifndef GACL_JBRT
 #define GACL_JBRT 1     // fixed per mode / byte position remap of each finished Join block (bc7joinremap.h), for streams that signal it (metrics.JoinRemap)
 #endif
-#if GACL_JBRT
+// The table is compiled in even with GACL_JBRT off: header-coded blocks are always coded remapped (BC7_JoinBlockCode).
 #include "bc7joinremap.h"
-#endif
 
 // The mode byte (byte 15) keeps its mode bit (only the data bits above it are remapped), so the decoder finds the mode before
 // undoing the remap. Streams with metrics.JoinRemap 0 aren't remapped.
 void BC7_ModeJoin_ByteRemap(uint8_t* block, bool inverse, const BC7TextureMetrics& metrics)
 {
-#if GACL_JBRT
     if (metrics.JoinRemap == 0)
     {
         return;
@@ -2288,11 +2286,6 @@ void BC7_ModeJoin_ByteRemap(uint8_t* block, bool inverse, const BC7TextureMetric
     {
         block[p] = (inverse ? kInv.T[m][p] : kBC7JoinRemap[m][p])[block[p]];
     }
-#else
-    UNREFERENCED_PARAMETER(block);
-    UNREFERENCED_PARAMETER(inverse);
-    UNREFERENCED_PARAMETER(metrics);
-#endif
 }
 
 unsigned BC7_ModeJoin_RemapSets()
