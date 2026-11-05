@@ -70,7 +70,7 @@ struct CommonHeader
 
     PerModeData perModeData[BC7_MODES_COUNT];
 
-    uint32_t spaceCurveWidthInPixels;   // from the stream header, 0 = linear
+    uint32_t spaceCurveWidthInPixels;   // bits 0-15: from the stream header, 0 = linear; prepass: 16-23 modes with section selectors, 31 reject
 };
 
 // The shaders address the scratch header by the BC7ScratchLayout.hlsli byte offsets

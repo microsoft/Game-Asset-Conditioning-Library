@@ -3,6 +3,8 @@
 This demo shows how to use the Game Asset Conditioning Library (GACL) along with the raw shaders that implement reverse shuffle transforms on GPU.
 The sample can load a BC1\3\4\5\7 texture, which will be shuffle+compressed through GACL.  The shuffle transform will be reversed on GPU by loading
 and running the appropriate shaders for the content, based on the transform ID returned from the GACL library.
+Textures that don't compress (GACL_ShuffleCompress_BCn returns S_FALSE and transform ID NONE; a content pipeline stores them
+uncompressed) and ZSTD_ONLY streams have no shuffle to reverse, so the sample copies them to the output buffer as is.
 
 # Build
 
@@ -20,7 +22,7 @@ You need to build GACL first before building the demo.
 
 ```
 
-RawShaderUnshuffleDemo.exe -path <src file> [-warp] 
+RawShaderUnshuffleDemo.exe -path <src file> [-warp] [-performat]
 
 ```
 
@@ -33,6 +35,9 @@ RawShaderUnshuffleDemo.exe -path <src file> [-warp]
 -path <src file> = Path to a BCn encoded dds file
 
 -warp            = Force the sample to use WARP software rendering
+
+-performat       = Unshuffle BC1\3\4\5 with the per-format shader builds (UnshuffleBC<n>Headerless / UnshuffleBC<n>Ex,
+                   picked by transform ID) instead of the unified UnshuffleBCnEx shader
 
 ```
 

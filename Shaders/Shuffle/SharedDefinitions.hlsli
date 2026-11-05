@@ -21,6 +21,26 @@
 #define DWORD_BYTES                 4
 #define BINNED_BUFFER_STRIDE        4
 
+// BC7 split stream features, each on by default.  Define one as 0 to compile it out of the shaders (e.g. if a regression is found):
+// the prepass then rejects streams that use it, and the destination is left untouched.  Turn the matching encoder switch off too
+// (Lib\shuffle\bc7.h), so that it doesn't write such streams.
+//  GACL_SPLIT_INDEX_PREDICTION     index fields hold prediction residuals (extension byte bit 3)
+//  GACL_SPLIT_SECTION_LAYOUT       the section layout (extension byte bit 4): per-mode scrap groups, and these two section transforms:
+//  GACL_SPLIT_SECTION_REMAP        per byte position rank remap tables (section selector bits 2 and 6)
+//  GACL_SPLIT_SECTION_TRANSPOSE    unit plane transposition (section selector bits 0-1 and 4-5)
+#ifndef GACL_SPLIT_INDEX_PREDICTION
+#define GACL_SPLIT_INDEX_PREDICTION     1
+#endif
+#ifndef GACL_SPLIT_SECTION_LAYOUT
+#define GACL_SPLIT_SECTION_LAYOUT       1
+#endif
+#ifndef GACL_SPLIT_SECTION_REMAP
+#define GACL_SPLIT_SECTION_REMAP        1
+#endif
+#ifndef GACL_SPLIT_SECTION_TRANSPOSE
+#define GACL_SPLIT_SECTION_TRANSPOSE    1
+#endif
+
 /// Root Signatures
 #define PrepassCS_RS " \
     RootConstants(num32BitConstants = 2, b0),\
@@ -86,7 +106,7 @@ struct CommonHeader
     
     PerModeData perModeData[BC7_MODES_COUNT];
     
-    uint spaceCurveWidthInPixels;   // from the stream header, 0 = linear
+    uint spaceCurveWidthInPixels;   // bits 0-15: from the stream header, 0 = linear; prepass: 16-23 modes with section selectors, 31 reject
 };
 
 struct ModeCountsStruct
@@ -106,6 +126,7 @@ static uint ModeTransformBCountToModeBits[] =
     3, //  7
     3, //  8
     4, //  9 - only exists in pre-swizzled textures, which fill blank space with mode 8
+    0, 0, 0, 0, 0, 0, // 10-15 - invalid (the prepass rejects them), as the start byte's 4 bits are looked up before they're checked
 };
 
 #define EndpointPair4bit                            0
@@ -394,50 +415,6 @@ uint ReverseSpaceCurveFor16ByteBlock(uint srcSizeInBytes, uint widthInPixels, ui
     return newBlockID;
 }
 
-
-uint ReverseSpaceCurveFor8ByteBlock(uint srcSizeInBytes, uint widthInPixels, uint blockId)
-{
-    // 32 element * 64 element micro tile  
-    const uint tileSizeBytes = (16u * 1024);
-    const uint tileCount = srcSizeInBytes >> 14; // tileSizeBytes;
-
-    const uint textureWidthInBlocks = (widthInPixels + 3) / 4;
-    const uint tileWidthInBlocks = 64; // 512 (tile width bytes) div by 8 (block width bytes)
-    const uint tileHeightInBlocks = 32; // Tiles defined to always have 32 rows
-
-    const uint widthInTiles = textureWidthInBlocks / tileWidthInBlocks;
-    const uint heightInTiles = tileCount / widthInTiles;
-
-    uint tileID = blockId >> 11; //(tileWidthInBlocks * tileHeightInBlocks)
-
-    // default mask 
-    uint maskBase = tileCount - 1;
-    uint2 mask = uint2(0xAAAAAAAA, 0x55555555) & maskBase;
-    if (widthInTiles > heightInTiles)
-    {
-        uint smallDimMask = (heightInTiles * heightInTiles) - 1;
-        mask.y &= smallDimMask;
-        mask.x |= ~smallDimMask;
-    }
-    else if (widthInTiles < heightInTiles)
-    {
-        uint smallDimMask = (widthInTiles * widthInTiles) - 1;
-        mask.y |= ~smallDimMask;
-        mask.x &= smallDimMask;
-    }
-
-    // This transform gives us the Z curve traversal values.
-    uint2 dt = parallelExtract(tileID, mask);
-
-    uint blockIdWithinTile = blockId & 2047;
-    uint rowWithinTile = blockIdWithinTile >> 6;
-    uint colWithinTile = blockIdWithinTile & 63u;
-
-    // Find the ID of the block we need to write to
-    uint tileOffsetInBlocks = dt.y * (tileHeightInBlocks * textureWidthInBlocks) + dt.x * (tileWidthInBlocks);
-    uint newBlockID = tileOffsetInBlocks + ((rowWithinTile)*textureWidthInBlocks) + (colWithinTile);
-    return newBlockID;
-}
 
 /* included as an experiment, for perf measure on different hardware */
 uint ReverseSpaceCurveScalar(uint srcSizeInBytes, uint widthInPixels, uint blockId, uint elementSize)

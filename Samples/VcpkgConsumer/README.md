@@ -58,7 +58,7 @@ ctest --test-dir build -C Release --output-on-failure
 
 Expected output:
 ```
-GACL version: 1.1.0 (1.1.0-preview)
+GACL version: 1.2.0 (1.2.0)
 BC1 shuffle extension: gacl.bc11
 CLER test skipped (pass --test-cler to run).
 GACLVcpkgConsumer: all checks passed.

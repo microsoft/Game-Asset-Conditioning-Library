@@ -1,6 +1,6 @@
 {
   "name": "microsoft-gacl",
-  "version-semver": "1.1.0-preview",
+  "version-semver": "1.2.0",
   "description": "Game Asset Conditioning Library - GPU texture compression and conditioning toolkit",
   "homepage": "https://github.com/microsoft/Game-Asset-Conditioning-Library",
   "license": "MIT",

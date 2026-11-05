@@ -15,6 +15,13 @@
 
 #include "../includes/gacl.h"
 
+// String versions: a pre-release's ends in its label, a release's in its build number (as the numeric versions)
+#ifdef GACL_VERSION_LABEL
+#define GACL_RC_VERSION_STRING  STR(GACL_VERSION_MAJOR) "." STR(GACL_VERSION_MINOR) "." STR(GACL_VERSION_PATCH) "." STR(GACL_VERSION_LABEL)
+#else
+#define GACL_RC_VERSION_STRING  STR(GACL_VERSION_MAJOR) "." STR(GACL_VERSION_MINOR) "." STR(GACL_VERSION_PATCH) "." STR(GACL_VERSION_BUILD)
+#endif
+
 #if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
 LANGUAGE 9, 1
 
@@ -42,12 +49,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "Microsoft Corporation"
             VALUE "FileDescription",  "Game Asset Conditioning Library command-line tool"
-            VALUE "FileVersion",      STR(GACL_VERSION_MAJOR) "." STR(GACL_VERSION_MINOR) "." STR(GACL_VERSION_PATCH) "." STR(GACL_VERSION_LABEL)
+            VALUE "FileVersion",      GACL_RC_VERSION_STRING
             VALUE "InternalName",     "gacl.exe"
             VALUE "LegalCopyright",   "Copyright (c) Microsoft Corporation. Licensed under the MIT License."
             VALUE "OriginalFilename", "gacl.exe"
             VALUE "ProductName",      "Game Asset Conditioning Library"
-            VALUE "ProductVersion",   STR(GACL_VERSION_MAJOR) "." STR(GACL_VERSION_MINOR) "." STR(GACL_VERSION_PATCH) "." STR(GACL_VERSION_LABEL)
+            VALUE "ProductVersion",   GACL_RC_VERSION_STRING
         END
     END
     BLOCK "VarFileInfo"

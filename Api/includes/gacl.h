@@ -109,13 +109,19 @@
 #define WSTR(s) _WSTR(s)
 
 #define GACL_VERSION_MAJOR 1
-#define GACL_VERSION_MINOR 1
+#define GACL_VERSION_MINOR 2
 #define GACL_VERSION_PATCH 0
 #define GACL_VERSION_BUILD   0        // numeric — used in FILEVERSION resource field
-#define GACL_VERSION_LABEL   preview  // pre-release label — used in version strings
+// A pre-release also defines GACL_VERSION_LABEL (e.g. preview), which the version strings append as "-label"; the
+// version-semver of build/overlays/microsoft-gacl/vcpkg.json must match (CMakeLists.txt checks it).
 #define GACL_VERSION_NUMBER ((GACL_VERSION_MAJOR << 16) + (GACL_VERSION_MINOR << 8) + GACL_VERSION_PATCH)
+#ifdef GACL_VERSION_LABEL
 #define GACL_VERSION_STRING STR(GACL_VERSION_MAJOR) "." STR(GACL_VERSION_MINOR) "." STR(GACL_VERSION_PATCH) "-" STR(GACL_VERSION_LABEL)
 #define GACL_VERSION_WSTRING WSTR(GACL_VERSION_MAJOR) L"." WSTR(GACL_VERSION_MINOR) L"." WSTR(GACL_VERSION_PATCH) L"-" WSTR(GACL_VERSION_LABEL)
+#else
+#define GACL_VERSION_STRING STR(GACL_VERSION_MAJOR) "." STR(GACL_VERSION_MINOR) "." STR(GACL_VERSION_PATCH)
+#define GACL_VERSION_WSTRING WSTR(GACL_VERSION_MAJOR) L"." WSTR(GACL_VERSION_MINOR) L"." WSTR(GACL_VERSION_PATCH)
+#endif
 
 #ifndef GACL_EXPERIMENTAL
 #define GACL_EXPERIMENTAL 0
@@ -184,7 +190,8 @@ void
 
 /// <summary>
 /// Logging callback for routing debug\warning\error messages to content pipeline handers.  
-/// Default handler will route messages to OutputDebugString.  The gacl.exe front end helper demonstrates
+/// Default handler will route medium and high priority messages to OutputDebugString, and low priority messages only while
+/// a debugger is attached.  The gacl.exe front end helper demonstrates
 /// overriding to route messages to standard command line output streams based on message priority and verbosity settings.
 /// </summary>
 /// <param name="callback">Routine to receive log messages.  Pass nullptr to disable logging.</param>

@@ -278,7 +278,9 @@ HRESULT ShuffleAndCompress(DirectX::ScratchImage& srcForNonCurveTransforms, Para
             // if TargetBlockSize and ZstdCompressionLevel are 0, GACL will automatically determine the default values.
             shuffleParam.CompressSettings.Default.TargetBlockSize = param.zstdBlockSize;
             shuffleParam.CompressSettings.Default.ZstdCompressionLevel = param.zstdCompressionLevel;
-            GACL_SHUFFLE_TRANSFORM transformId = param.bShuffle ? GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED : GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY;
+            // The DirectStorage 1.4 preview package this sample builds against reverses the BC1\3\4\5 shuffles alone (GetTransformType).
+            // With the DirectStorage 1.4 GA release, which adds BC7 Split, request GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED and map Split too.
+            GACL_SHUFFLE_TRANSFORM transformId = param.bShuffle ? GACL_SHUFFLE_TRANSFORM_GROUP_DS_1_4_PREVIEW : GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY;
 
             hr = GACL_ShuffleCompress_BCn(
                 chunkBuffer.data(),

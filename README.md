@@ -18,16 +18,14 @@ implementing the reverse transform at data retrieval time.
 
 ---
 
-# Preview Release 
+# Supported Functionality
 
 ---
 
-GACL is currently **in preview**. We are actively seeking feedback from the community and welcome contributions to help guide the future development of this library.
-
-As a preview:
-
-- **APIs are subject to change.** Interfaces documented in this release, including those in `gacl.h`, `shuffle.h`, `blockentropy.h`, and `ml_RDO.h`, may be revised based on feedback from the community.
-- **Experimental features** (enabled via `GACL_EXPERIMENTAL`) are particularly likely to evolve or be replaced.
+GACL's current supported functionality is linked to the DirectStorage 1.4 GA release, which decompresses GACL's zstd streams and reverses
+its supported shuffle transforms (BC1\\3\\4\\5, and BC7 Split) at load time; see [Shuffle and Compression](#shuffle-and-compression-shuffleh).
+Experimental features, enabled via `GACL_EXPERIMENTAL` or requested with `GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL` (gacl.exe `-sce`),
+are not supported by a DirectStorage release yet, and are likely to evolve or be replaced.
 
 We would love to hear from you - please use [GitHub Issues](https://github.com/microsoft/Game-Asset-Conditioning-Library/issues) to report bugs, share results, or suggest improvements. Pull requests are also welcome; see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
@@ -35,7 +33,7 @@ We would love to hear from you - please use [GitHub Issues](https://github.com/m
 
 ---
 
-The GACL preview is buildable via Visual Studio, version 2022 or newer. The Visual Studio 2022
+GACL is buildable via Visual Studio, version 2022 or newer. The Visual Studio 2022
 `v143` and Visual Studio 2026 `v145` toolsets are both supported; see
 [Toolset selection](#toolset-selection).
 
@@ -184,8 +182,20 @@ multiple different shuffle transforms based upon `destTransformId` and `params`,
 shuffle transform that compressed the smallest.  Streams may be individual tiles, groups of tiles, mips, or any other scope of texture data.  At
 runtime, the reverse stages (decompression + unshuffle) are required to restore the original data stream.
 
-Currently shuffles for BC1\\3\\4\\5 are supported, with unshuffle operations supported within DirectStorage 1.4.  Experimental BC7 support is
-included in the GACL, but runtime unshuffle support is not currently available.
+Currently shuffles for BC1\\3\\4\\5 are supported, with unshuffle operations supported within DirectStorage 1.4.  The BC7 Split shuffle
+(`ZSTD_BC7_SPLIT`, transform ID 0x05) is supported from the DirectStorage 1.4 GA release, which adds its unshuffle.
+`GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED` (gacl.exe `-sc`) requests the transforms of the latest DirectStorage release, BC7 Split
+included; callers that target the DirectStorage 1.4 preview request `GACL_SHUFFLE_TRANSFORM_GROUP_DS_1_4_PREVIEW` instead, which
+compresses BC7 with zstd alone.
+
+Experimental shuffle transforms, requested with `GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL` (gacl.exe `-sce`) or a specific transform ID,
+add alternate BC1\\3\\5 shuffle patterns (`ZSTD_BC1_44`, `ZSTD_BC3_664`, `ZSTD_BC5_2266`), the headerless BC7 Join transform, and the
+extensible `_EX` transforms, one per format (`ZSTD_BC1_EX` to `ZSTD_BC7_EX`, transform IDs 0x0B-0x0F).  An `_EX` stream begins with a small
+header that names its shuffle pattern and carries its parameters, such as the space curve width of a curved stream.  The header takes the place
+of duplicate blocks (streams with too few duplicates code some blocks into the header), so the stream stays the size of the texture data.
+BC1\\3\\4\\5 `_EX` streams also use index prediction.  GPU unshuffle shaders for these transforms and for BC7 Split, with their thread group
+dispatch, are in [Shaders/Shuffle](Shaders/Shuffle/readme.md); DirectStorage 1.4 supports transform IDs 0x01-0x04, and its GA release 0x05
+(BC7 Split).
 
 Shuffle+Compress will generally yield up to a relative 10% reduction in compressed stream size, as compared to the same stream compressed with zstd without
 shuffling.  Savings can vary widely by texture.
@@ -217,6 +227,10 @@ extern PGACL_COMPRESSION_COMPRESSROUTINE GACL_Compression_CompressRoutine;
 extern PGACL_COMPRESSION_CLEANUPROUTINE GACL_Compression_CleanupRoutine;
 ```
 
+GACL only knows the zstd level (`CompressSettings.Default`) while all three default routines are installed.  With any of them replaced, it
+makes its level-dependent encoder choices as at the default level: the transforms and searches it only tries above that level, which trade
+decode or encode speed for size, stay off.
+
 ## Space Curves and transforms
 
 Texture data typically exists in linear (row-major) form until it is uploaded to GPU memory.  This means locations within a 2D texture that
@@ -231,7 +245,8 @@ texture.  This is partially from higher chances of repeat byte sequences, and pa
 
 When applying RDO, there is higher chance to finding "near similar" blocks when searching in a screen-adjacent pattern.
 
-To enable these screen adjacency gains, the GACL introduces the concept of curved transforms, *which are currently experimental*.
+To enable these screen adjacency gains, the GACL introduces the concept of curved transforms, *which are currently experimental*, apart from
+curved BC7 Split streams (supported from the DirectStorage 1.4 GA release).
 
 Any texture with a height and width that are both a power of 2 BCn elements in each direction, and with a total size that is a multiple of 16KB is
 eligible for curved space transforms.  Curved textures are arranged as a z-order series of 16KB micro tiles.  For example, a BC7 mip 1024 pixels
@@ -246,8 +261,10 @@ eligible for curved space transforms.  Curved textures are arranged as a z-order
 
 Each screen-adjacent set of 4 (2x2) micro tiles represent a screen-adjacent 64KB block.  Likewise sets of 16 (4x4) micro tiles represent screen
 adjacent 256KB blocks.  One API allows for converting textures to (forward) or from (reverse) curved space, so that RDO or other
-compression-improvement operations can be completed in curved space.  Future releases of DirectStorage will include unshuffle shaders that include
-support for reversing curved data.
+compression-improvement operations can be completed in curved space.  BC7 Split streams record the curve width in their header, and the
+DirectStorage 1.4 GA release reverses the curve when it unshuffles them.  Future releases of DirectStorage will include unshuffle shaders that
+reverse curved data of the other formats: the experimental `_EX` transforms record the curve width in the stream header, and their unshuffle
+shaders reverse the curve.
 
 ```
 bool GACL_Shuffle_ApplySpaceCurve(

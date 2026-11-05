@@ -5,18 +5,32 @@
 // Copyright (C) Microsoft Corporation. All rights reserved.
 //--------------------------------------------------------------------------------------
 
+// The count (6 or 8) rotation bytes at address, 4 bytes per component of the uint2 (LSB first): dword loads clamped to
+// the dword holding the last byte, so nothing past the rotation bytes is read
+uint2 fetchRotationBytes(uint address, uint count, in ByteAddressBuffer buffer)
+{
+    const uint a = address & ~3u;
+    const uint last = (address + count - 1u) & ~3u;
+    const uint sh = (address & 3u) << 3;
+    const uint d0 = buffer.Load(a);
+    const uint d1 = buffer.Load(a + 4u);
+    const uint d2 = buffer.Load(min(a + 8u, last));
+    // (d << 1) << (31 - sh) is d << (32 - sh), 0 when sh is 0
+    return uint2((d0 >> sh) | ((d1 << 1u) << (31u - sh)), (d1 >> sh) | ((d2 << 1u) << (31u - sh)));
+}
+
 void derotateMode0(uint modeRotationByteAddress, uint chunkIndex, in ByteAddressBuffer buffer, inout uint4 rawOut)
 {
     // Chunk index lets us know how deep into the mode rotation we need to go to fetch the rotation data for this block
     uint address = modeRotationByteAddress + 1 + (chunkIndex * 6);
     
     uint rotations[6]; 
-    rotations[0] = fetchNextByte(address, buffer);
-    rotations[1] = fetchNextByte(address + 1, buffer);
-    rotations[2] = fetchNextByte(address + 2, buffer);
-    rotations[3] = fetchNextByte(address + 3, buffer);
-    rotations[4] = fetchNextByte(address + 4, buffer);
-    rotations[5] = fetchNextByte(address + 5, buffer);
+    const uint2 rotationBytes = fetchRotationBytes(address, 6u, buffer);
+    [unroll]
+    for (uint rk = 0u; rk < 6u; ++rk)
+    {
+        rotations[rk] = ((rk < 4u ? rotationBytes.x : rotationBytes.y) >> ((rk & 3u) << 3)) & 0xFFu;
+    }
 
     // Mode 0
     // 1 bit mode                                                               =>  1 bit
@@ -116,12 +130,12 @@ void derotateMode1(uint modeRotationByteAddress, uint chunkIndex, in ByteAddress
     uint address = modeRotationByteAddress + 1 + (chunkIndex * 6);
     
     uint rotations[6];
-    rotations[0] = fetchNextByte(address, buffer);
-    rotations[1] = fetchNextByte(address + 1, buffer);
-    rotations[2] = fetchNextByte(address + 2, buffer);
-    rotations[3] = fetchNextByte(address + 3, buffer);
-    rotations[4] = fetchNextByte(address + 4, buffer);
-    rotations[5] = fetchNextByte(address + 5, buffer);
+    const uint2 rotationBytes = fetchRotationBytes(address, 6u, buffer);
+    [unroll]
+    for (uint rk = 0u; rk < 6u; ++rk)
+    {
+        rotations[rk] = ((rk < 4u ? rotationBytes.x : rotationBytes.y) >> ((rk & 3u) << 3)) & 0xFFu;
+    }
 
     // Mode 1
     // 2 bit mode                                       =>  2 bits
@@ -202,12 +216,12 @@ void derotateMode2(uint modeRotationByteAddress, uint chunkIndex, in ByteAddress
     uint address = modeRotationByteAddress + 1 + (chunkIndex * 6);
     
     uint rotations[6];
-    rotations[0] = fetchNextByte(address, buffer);
-    rotations[1] = fetchNextByte(address + 1, buffer);
-    rotations[2] = fetchNextByte(address + 2, buffer);
-    rotations[3] = fetchNextByte(address + 3, buffer);
-    rotations[4] = fetchNextByte(address + 4, buffer);
-    rotations[5] = fetchNextByte(address + 5, buffer);
+    const uint2 rotationBytes = fetchRotationBytes(address, 6u, buffer);
+    [unroll]
+    for (uint rk = 0u; rk < 6u; ++rk)
+    {
+        rotations[rk] = ((rk < 4u ? rotationBytes.x : rotationBytes.y) >> ((rk & 3u) << 3)) & 0xFFu;
+    }
 
     // Mode 2
     // 3 bit mode                                                               =>  3 bits
@@ -311,12 +325,12 @@ void derotateMode3(uint modeRotationByteAddress, uint chunkIndex, in ByteAddress
     uint address = modeRotationByteAddress + 1 + (chunkIndex * 6);
     
     uint rotations[6];
-    rotations[0] = fetchNextByte(address, buffer);
-    rotations[1] = fetchNextByte(address + 1, buffer);
-    rotations[2] = fetchNextByte(address + 2, buffer);
-    rotations[3] = fetchNextByte(address + 3, buffer);
-    rotations[4] = fetchNextByte(address + 4, buffer);
-    rotations[5] = fetchNextByte(address + 5, buffer);
+    const uint2 rotationBytes = fetchRotationBytes(address, 6u, buffer);
+    [unroll]
+    for (uint rk = 0u; rk < 6u; ++rk)
+    {
+        rotations[rk] = ((rk < 4u ? rotationBytes.x : rotationBytes.y) >> ((rk & 3u) << 3)) & 0xFFu;
+    }
         
     // Mode 3
     // 4 bit mode                                       =>  4 bits
@@ -398,14 +412,12 @@ void derotateMode4(uint modeRotationByteAddress, uint chunkIndex, in ByteAddress
     uint address = modeRotationByteAddress + 1 + (chunkIndex * 8);
     
     uint rotations[8];
-    rotations[0] = fetchNextByte(address, buffer);
-    rotations[1] = fetchNextByte(address + 1, buffer);
-    rotations[2] = fetchNextByte(address + 2, buffer);
-    rotations[3] = fetchNextByte(address + 3, buffer);
-    rotations[4] = fetchNextByte(address + 4, buffer);
-    rotations[5] = fetchNextByte(address + 5, buffer);
-    rotations[6] = fetchNextByte(address + 6, buffer);
-    rotations[7] = fetchNextByte(address + 7, buffer);
+    const uint2 rotationBytes = fetchRotationBytes(address, 8u, buffer);
+    [unroll]
+    for (uint rk = 0u; rk < 8u; ++rk)
+    {
+        rotations[rk] = ((rk < 4u ? rotationBytes.x : rotationBytes.y) >> ((rk & 3u) << 3)) & 0xFFu;
+    }
 
     // Mode 4
     // 5 bits mode                          =>  5 bits
@@ -477,14 +489,12 @@ void derotateMode5(uint modeRotationByteAddress, uint chunkIndex, in ByteAddress
     uint address = modeRotationByteAddress + 1 + (chunkIndex * 8);
     
     uint rotations[8];
-    rotations[0] = fetchNextByte(address, buffer);
-    rotations[1] = fetchNextByte(address + 1, buffer);
-    rotations[2] = fetchNextByte(address + 2, buffer);
-    rotations[3] = fetchNextByte(address + 3, buffer);
-    rotations[4] = fetchNextByte(address + 4, buffer);
-    rotations[5] = fetchNextByte(address + 5, buffer);
-    rotations[6] = fetchNextByte(address + 6, buffer);
-    rotations[7] = fetchNextByte(address + 7, buffer);
+    const uint2 rotationBytes = fetchRotationBytes(address, 8u, buffer);
+    [unroll]
+    for (uint rk = 0u; rk < 8u; ++rk)
+    {
+        rotations[rk] = ((rk < 4u ? rotationBytes.x : rotationBytes.y) >> ((rk & 3u) << 3)) & 0xFFu;
+    }
 
     // Mode 5
     // 6 bit mode               =>  6 bits
@@ -552,14 +562,12 @@ void derotateMode6(uint modeRotationByteAddress, uint chunkIndex, in ByteAddress
     uint address = modeRotationByteAddress + 1 + (chunkIndex * 8);
     
     uint rotations[8];
-    rotations[0] = fetchNextByte(address, buffer);
-    rotations[1] = fetchNextByte(address + 1, buffer);
-    rotations[2] = fetchNextByte(address + 2, buffer);
-    rotations[3] = fetchNextByte(address + 3, buffer);
-    rotations[4] = fetchNextByte(address + 4, buffer);
-    rotations[5] = fetchNextByte(address + 5, buffer);
-    rotations[6] = fetchNextByte(address + 6, buffer);
-    rotations[7] = fetchNextByte(address + 7, buffer);
+    const uint2 rotationBytes = fetchRotationBytes(address, 8u, buffer);
+    [unroll]
+    for (uint rk = 0u; rk < 8u; ++rk)
+    {
+        rotations[rk] = ((rk < 4u ? rotationBytes.x : rotationBytes.y) >> ((rk & 3u) << 3)) & 0xFFu;
+    }
         
     // Mode 6
     // 7 bit mode               =>  7 bits
@@ -629,14 +637,12 @@ void derotateMode7(uint modeRotationByteAddress, uint chunkIndex, in ByteAddress
     uint address = modeRotationByteAddress + 1 + (chunkIndex * 8);
     
     uint rotations[8];
-    rotations[0] = fetchNextByte(address, buffer);
-    rotations[1] = fetchNextByte(address + 1, buffer);
-    rotations[2] = fetchNextByte(address + 2, buffer);
-    rotations[3] = fetchNextByte(address + 3, buffer);
-    rotations[4] = fetchNextByte(address + 4, buffer);
-    rotations[5] = fetchNextByte(address + 5, buffer);
-    rotations[6] = fetchNextByte(address + 6, buffer);
-    rotations[7] = fetchNextByte(address + 7, buffer);
+    const uint2 rotationBytes = fetchRotationBytes(address, 8u, buffer);
+    [unroll]
+    for (uint rk = 0u; rk < 8u; ++rk)
+    {
+        rotations[rk] = ((rk < 4u ? rotationBytes.x : rotationBytes.y) >> ((rk & 3u) << 3)) & 0xFFu;
+    }
     
     // Mode 7
     // 8 bit mode                                       =>  8 bits

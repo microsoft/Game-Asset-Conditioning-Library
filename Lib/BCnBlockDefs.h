@@ -59,15 +59,6 @@ union BC7m0
     uint64_t B2() const { return B2_low + (B2_high << 3u); }
     void setB2(uint8_t value) { B2_low = value & 0b111; B2_high = (value >> 3) & 0b1; }
 
-    void ApplyRotation7bit(uint8_t* rotations)
-    {
-        uint8_t rotationsShifted[6] = {};
-        for (uint32_t e = 0; e < 6u; e++)
-        {
-            rotationsShifted[e] = uint8_t(rotations[e] >> 3u);
-        }
-        ApplyRotation(rotationsShifted);
-    }
     void ApplyRotation(uint8_t* rotations)
     {
         R0 = (R0 + rotations[0]) % 16u;
@@ -133,15 +124,6 @@ union BC7m1
     };
     uint64_t B1() const { return B1_low + (B1_high << 2); }
 
-    void ApplyRotation7bit(uint8_t* rotations)
-    {
-        uint8_t rotationsShifted[6] = {};
-        for (uint32_t e = 0; e < 6; e++)
-        {
-            rotationsShifted[e] = uint8_t(rotations[e] >> 1u);
-        }
-        ApplyRotation(rotationsShifted);
-    }
     void ApplyRotation(uint8_t* rotations)
     {
         R0 = (R0 + rotations[0]) % 64u;
@@ -202,15 +184,6 @@ union BC7m2
         uint64_t Index : 29;    // 99 - 127
     };
 
-    void ApplyRotation7bit(uint8_t* rotations)
-    {
-        uint8_t rotationsShifted[6] = {};
-        for (uint32_t e = 0; e < 6; e++)
-        {
-            rotationsShifted[e] = uint8_t(rotations[e] >> 2u);
-        }
-        ApplyRotation(rotationsShifted);
-    }
     void ApplyRotation(uint8_t* rotations)
     {
         R0 = (R0 + rotations[0]) % 32u;
@@ -276,10 +249,6 @@ union BC7m3
     };
     uint64_t G3() const { return G3_low + (G3_high << 5); }
 
-    void ApplyRotation7bit(uint8_t* rotations)
-    {
-        ApplyRotation(rotations);
-    }
     void ApplyRotation(uint8_t* rotations)
     {
         R0 = (R0 + rotations[0]) % 128;
@@ -383,15 +352,6 @@ union BC7m4_Derotated
         uint64_t IndexA : 47;       // 81 - 127
     };
 
-    void ApplyRotation7bit(uint8_t* rotations)
-    {
-        uint8_t rotationsShifted[8] = {};
-        for (uint32_t e = 0; e < 8u; e++)
-        {
-            rotationsShifted[e] = uint8_t(rotations[e] >> 2u);
-        }
-        ApplyRotation(rotationsShifted);
-    }
     void ApplyRotation(uint8_t* rotations)
     {
         R0 = (R0 + rotations[0]) % 32u;
@@ -488,10 +448,6 @@ union BC7m5_Derotated
     uint64_t A1() const { return A1_low + (A1_high << 5u); }
     void SetA1(uint8_t v) { A1_low = v; A1_high = uint64_t(v >> 5u); }
 
-    void ApplyRotation7bit(uint8_t* rotations)
-    {
-        ApplyRotation(rotations);
-    }
     void ApplyRotation(uint8_t* rotations) 
     { 
         R0 = (R0 + rotations[0]) % 128;
@@ -541,10 +497,6 @@ union BC7m6
         uint64_t index : 63;
     };
 
-    void ApplyRotation7bit(uint8_t* rotations)
-    {
-        ApplyRotation(rotations);
-    }
     void ApplyRotation(uint8_t* rotations) 
     { 
         R0 = (R0 + rotations[0]) % 128;
@@ -604,15 +556,6 @@ union BC7m7
         uint64_t index : 30;        // 98 - 127
     };
 
-    void ApplyRotation7bit(uint8_t* rotations)
-    {
-        uint8_t rotationsShifted[8] = {};
-        for (uint32_t e = 0; e < 8u; e++)
-        {
-            rotationsShifted[e] = uint8_t(rotations[e] >> 2u);
-        }
-        ApplyRotation(rotationsShifted);
-    }
     void ApplyRotation(uint8_t* rotations)
     {
         R0 = (R0 + rotations[0]) % 32;

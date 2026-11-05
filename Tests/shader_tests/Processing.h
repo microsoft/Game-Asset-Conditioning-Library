@@ -17,6 +17,8 @@
 struct ShuffleParameters
 {
     bool useSpaceCurve;
+    bool useIndexPrediction;
+    uint8_t sectionLayout;  // BC7ModeSplitShuffleOptions::SectionLayout: 0 off, 1 encoder trials, 2 forced test selectors
     uint32_t ChunkSize;
     uint8_t endpointOrderStrategy;
     BC7ModeSplitShufflePattern* Patterns;

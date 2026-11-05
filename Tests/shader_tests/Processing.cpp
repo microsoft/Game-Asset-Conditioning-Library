@@ -7,6 +7,7 @@
 
 #include "pch.h"
 #include "Processing.h"
+#include "TestParameters.h"
 
 using namespace DirectX;
 using namespace std;
@@ -36,6 +37,10 @@ void ShuffleBC7Texture(
     opt.EndpointOrderStrategy = (BC7ModeSplitFieldOrderStrategy)shuffleParams.endpointOrderStrategy;
     opt.RotationRegionSize = shuffleParams.ChunkSize;
     opt.SpaceCurveWidthInPixels = shuffleParams.useSpaceCurve ? static_cast<uint32_t>(m_bcTextureWidthInPixels) : 0u;   // recorded in the stream header
+    opt.IndexPrediction = shuffleParams.useIndexPrediction ? 1 : 0;   // recorded in the stream header
+    opt.SectionLayout = shuffleParams.sectionLayout;                  // recorded in the stream header
+    opt.SectionTrialLevel = 1;
+    memcpy(opt.SectionSelectors, g_sectionSelectors, sizeof(opt.SectionSelectors));
 
     // Call the GACL lib to do the shuffling
     vector<uint8_t> splitModeA, splitModeB;

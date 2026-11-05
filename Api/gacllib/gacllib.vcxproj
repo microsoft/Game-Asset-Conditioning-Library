@@ -89,8 +89,8 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalIncludeDirectories>$(ProjectDir)..\..\Lib;$(ProjectDir)..\..\Api\includes;$(SolutionDir)packages\Microsoft.ML.OnnxRuntime.1.24.2\build\native\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <AdditionalOptions>/guard:cast /d2CastGuardFailureMode:fastfail %(AdditionalOptions)</AdditionalOptions>
       <ControlFlowGuard>Guard</ControlFlowGuard>
+      <WholeProgramOptimization>false</WholeProgramOptimization>
     </ClCompile>
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
@@ -138,6 +138,12 @@
     <ClInclude Include="..\..\Lib\RDO_B\ClusterBlocks_BruteForce.h" />
     <ClInclude Include="..\..\Lib\RDO_B\ClusterBlocks_Common.h" />
     <ClInclude Include="..\..\Lib\shuffle\bc7.h" />
+    <ClInclude Include="..\..\Lib\shuffle\streamheader.h" />
+    <ClInclude Include="..\..\Lib\shuffle\bcnex.h" />
+    <ClInclude Include="..\..\Lib\shuffle\bcnexblockcode.h" />
+    <ClInclude Include="..\..\Lib\shuffle\bc7joinblockcode.h" />
+    <ClInclude Include="..\..\Lib\shuffle\bc7joinremap.h" />
+    <ClInclude Include="..\..\Lib\shuffle\bc7anchors.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\Helpers\FileUtility.cpp" />
@@ -153,8 +159,12 @@
     <ClCompile Include="..\..\Lib\shuffle\bc5.cpp" />
     <ClCompile Include="..\..\Lib\shuffle\bc7.cpp" />
     <ClCompile Include="..\..\Lib\shuffle\bc7modejoin.cpp" />
+    <ClCompile Include="..\..\Lib\shuffle\bc7modejoinlayout.cpp" />
+    <ClCompile Include="..\..\Lib\shuffle\bc7modejoinreverse.cpp" />
     <ClCompile Include="..\..\Lib\shuffle\bc7modesplit.cpp" />
+    <ClCompile Include="..\..\Lib\shuffle\bcnex.cpp" />
     <ClCompile Include="..\..\Lib\shuffle\shuffle.cpp" />
+    <ClCompile Include="..\..\Lib\shuffle\streamheader.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

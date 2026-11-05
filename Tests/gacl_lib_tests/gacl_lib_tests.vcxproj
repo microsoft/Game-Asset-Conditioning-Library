@@ -137,6 +137,7 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="PostBuild" AfterTargets="Build">
     <Exec Command="xcopy /F /Y &quot;$(SolutionDir)Assets\TestImages\InsectsDemo\BC1mip0\gerberaSingleLeaf_albedo.DDS&quot;     &quot;$(TargetDir)TestImages\InsectsDemo\BC1mip0\&quot;" />
+    <Exec Command="xcopy /F /Y &quot;$(SolutionDir)Assets\TestImages\InsectsDemo\BC1mip0\BlackboardEraser_albedo.DDS&quot;      &quot;$(TargetDir)TestImages\InsectsDemo\BC1mip0\&quot;" />
     <Exec Command="xcopy /F /Y &quot;$(SolutionDir)Assets\TestImages\InsectsDemo\BC3mip0\UI\LadybugColors.DDS&quot;             &quot;$(TargetDir)TestImages\InsectsDemo\BC3mip0\UI\&quot;" />
     <Exec Command="xcopy /F /Y &quot;$(SolutionDir)Assets\TestImages\InsectsDemo\BC3mip0\UI\Animation_sheet.DDS&quot;           &quot;$(TargetDir)TestImages\InsectsDemo\BC3mip0\UI\&quot;" />
     <Exec Command="xcopy /F /Y &quot;$(SolutionDir)Assets\TestImages\InsectsDemo\BC4mip0\Ladybug_fresnel.DDS&quot;              &quot;$(TargetDir)TestImages\InsectsDemo\BC4mip0\&quot;" />
