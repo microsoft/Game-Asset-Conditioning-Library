@@ -203,6 +203,12 @@ RDO_ErrorCode GACL_RDO_ComponentLevelEntropyReduce(
 {
     try 
     {
+		if (options.idealChunkSize != 262144) // 256KB
+        {
+			Utility::Printf(GACL_Logging_Priority_High, L"\nERROR: idealChunkSize parameter (%u) is not supported; only 256KB chunks are supported\n", options.idealChunkSize);
+            return RDO_ErrorCode::InvalidIdealChunkSize;
+        }
+
         // Calculate expected BC1 data size
         uint32_t widthInBlocks = (imageWidth + 3) / 4;
         uint32_t heightInBlocks = (imageHeight + 3) / 4;
@@ -342,6 +348,7 @@ RDO_ErrorCode GACL_RDO_ComponentLevelEntropyReduce(
             // Compute how many chunks (at least 1), last chunk will include any remainder less than half a chunk in size
             const uint32_t numChunks = ((numBlocks * uint32_t(bcElementSize)) / chunkNormalSize) + (remainderRequiresChunk ? 1 : 0);
             
+            // Assumes idealChunkSize is 256 KB
             uint32_t curvedChunkWidth = imageSizeBytes <= options.idealChunkSize ? imageWidth : (bcElementSize == 8 ? 1024 : 512);
             uint32_t curvedChunkHeight = imageSizeBytes <= options.idealChunkSize ? imageHeight : 512;
 
@@ -384,7 +391,16 @@ RDO_ErrorCode GACL_RDO_ComponentLevelEntropyReduce(
                 const void* chunkRefData = nullptr;
                 if (refData)
                 {
-                    chunkRefData = refData + chunk * (chunkPixelHeight * chunkPixelWidth * 4);		// 4 bytes each
+                    if (options.isDataCurved)
+                    {
+                        chunkRefData = refData + chunk * chunkPixelHeight * chunkPixelWidth * 4;
+                    }
+                    else
+                    {
+                        const size_t startPixelRow = chunk * linearChunkBlockRows * 4;
+
+                        chunkRefData = refData + startPixelRow * imageWidth * 4;
+                    }
                 }
 
                 std::vector<int> chunkModes;

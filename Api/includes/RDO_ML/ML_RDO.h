@@ -31,6 +31,7 @@ enum class RDO_ErrorCode : int
     UnsupportedBaseFormat = 14,
     InvalidClusterRange = 20,
     InvalidLossRange = 21,
+    InvalidIdealChunkSize = 22,
     ClusteredSizeMismatch = 30,
     ModesSizeMismatch = 31,
     UnsupportedFormatNotImplemented = 32,

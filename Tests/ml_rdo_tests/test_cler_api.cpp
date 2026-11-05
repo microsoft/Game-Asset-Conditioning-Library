@@ -132,6 +132,26 @@ namespace cler_api_tests {
         RDO_ErrorCode code2 = GACL_RDO_ComponentLevelEntropyReduce(8, fakeBC.data(), fakeRGBA.data(), 16, 0, DXGI_FORMAT_BC1_UNORM, opt);
         EXPECT_EQ(code2, RDO_ErrorCode::InvalidImageDimensions);
     }
+	//ensures it fails when given idealChunkSize other than 256KB
+    TEST(ClerAPI, InvalidIdealChunkSize)
+    {
+        for (bool curved : {false, true})
+        {
+            for (uint32_t chunkSize : {0, 128 * 1024, 384 * 1024}) // 0, 128, and 384 KB
+            {
+                RDOOptions opt = DefaultOptions();
+                opt.isDataCurved = curved;
+                opt.idealChunkSize = chunkSize;
+
+                std::vector<uint8_t> fakeBC(128);
+                std::vector<uint8_t> fakeRGBA(16 * 16 * 4, 0);
+
+                const auto code = GACL_RDO_ComponentLevelEntropyReduce(8, fakeBC.data(), fakeRGBA.data(), 16, 16, DXGI_FORMAT_BC1_UNORM, opt);
+
+                EXPECT_EQ(code, RDO_ErrorCode::InvalidIdealChunkSize);
+            }
+        }
+    }
 
     //runs CLER on dummy images of different sizes
     TEST(ClerAPI, Process256x256)
