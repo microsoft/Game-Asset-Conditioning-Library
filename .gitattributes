@@ -1,0 +1,5 @@
+# Keep large test/sample data out of GitHub source archives (used by the vcpkg port).
+Assets/TestImages/** export-ignore
+Tests/ml_rdo_tests/test_assets/** export-ignore
+Samples/GameAssetConditioningDemo/Condition/Input/** export-ignore
+Samples/GameAssetConditioningDemo/Condition/output/** export-ignore
