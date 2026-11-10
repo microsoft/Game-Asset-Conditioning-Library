@@ -4,8 +4,10 @@
 #include <wrl\wrappers\corewrappers.h>
 #include <algorithm>
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
 #include <map>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -48,7 +50,7 @@ namespace
     // Launch one test executable, wait for it, clean up its process tree.
     // Returns the exe's exit code, or throws
     DWORD RunProcess(const fs::path& executable, const std::vector<std::wstring>& arguments,
-        const fs::path& working, int timeout)
+        const fs::path& working, ULONGLONG deadline)
     {
         // Create a Windows job object
         Win32Handle job(CreateJobObjectW(nullptr, nullptr));
@@ -95,7 +97,9 @@ namespace
             ThrowIfWin32Failed(false, "Assign test process to job");
         }
         ThrowIfWin32Failed(ResumeThread(process.hThread) != static_cast<DWORD>(-1), "Resume test process");
-        const DWORD waited = WaitForSingleObject(process.hProcess, static_cast<DWORD>(timeout) * 1000);
+        const ULONGLONG now = GetTickCount64();
+        const DWORD waited = WaitForSingleObject(process.hProcess,
+            now < deadline ? static_cast<DWORD>(deadline - now) : 0);
         ThrowIfWin32Failed(waited == WAIT_OBJECT_0 || waited == WAIT_TIMEOUT, "Wait for test process");
         DWORD exitCode = 0;
         ThrowIfWin32Failed(GetExitCodeProcess(process.hProcess, &exitCode), "Get test exit code");
@@ -103,7 +107,7 @@ namespace
         ThrowIfWin32Failed(WaitForSingleObject(process.hProcess, 10000) == WAIT_OBJECT_0, "Wait for stopped test process");
 
         // Wait and finish
-        if (waited == WAIT_TIMEOUT) throw std::runtime_error("Suite timed out after " + std::to_string(timeout) + " seconds");
+        if (waited == WAIT_TIMEOUT) throw std::runtime_error("Overall run timeout reached");
         return exitCode;
     }
 
@@ -218,13 +222,20 @@ namespace
     // Coordinates the complete run, sequentially, one suite at a time.
     int RunTestSuites(const Options& options)
     {
+        const ULONGLONG deadline = GetTickCount64() + static_cast<ULONGLONG>(options.timeout) * 1000;
         WorkingDirectory workingDir;
-        bool failed = false;
+        size_t failed = 0;
+        std::vector<std::wstring> summary;
         for (const auto& suite : options.suites)
         {
-            std::wcout << L"[ SUITE RUN ] " << suite << std::endl;
+            const ULONGLONG started = GetTickCount64();
+            bool suiteFailed = true;
+            std::wostringstream result;
             try
             {
+                if (GetTickCount64() >= deadline)
+                    throw std::runtime_error("Not run: overall timeout exhausted");
+                std::wcout << L"[ SUITE RUN ] " << suite << std::endl;
                 const auto directory = workingDir.path / suite;
                 fs::create_directory(directory);
                 std::vector<std::wstring> arguments{ L"--gtest_color=no", L"--gtest_repeat=1",
@@ -235,18 +246,30 @@ namespace
                     arguments.push_back(options.inputDirectory.wstring());
                 }
                 const DWORD exitCode = RunProcess(options.binaryDirectory / (suite + L".exe"),
-                    arguments, directory, options.timeout);
-                std::wcout << (exitCode ? L"[ SUITE FAIL ] " : L"[ SUITE OK ] ")
-                    << suite << L" (exit " << exitCode << L")" << std::endl;
-                failed |= exitCode != 0;
+                    arguments, directory, deadline);
+                suiteFailed = exitCode != 0;
+                result << L"exit " << exitCode;
+                if (suiteFailed)
+                {
+                    result << L", 0x" << std::hex << std::uppercase << std::setfill(L'0')
+                        << std::setw(8) << exitCode;
+                    if (exitCode == 0xC0000005) result << L" (access violation)";
+                    if (exitCode == 0xC0000409) result << L" (fail-fast)";
+                }
             }
             catch (const std::exception& error)
             {
-                failed = true;
-                std::wcerr << L"[ SUITE FAIL ] " << suite << std::endl;
-                std::cerr << error.what() << std::endl;
+                result << error.what();
             }
+            const auto line = suite + L": " + (suiteFailed ? L"FAIL" : L"PASS") + L" (" +
+                result.str() + L", " + std::to_wstring(GetTickCount64() - started) + L" ms)";
+            std::wcout << (suiteFailed ? L"[ SUITE FAIL ] " : L"[ SUITE OK ] ") << line << std::endl;
+            summary.push_back(line);
+            failed += suiteFailed;
         }
+        std::wcout << L"\n[ RUN SUMMARY ] " << summary.size() - failed << L" suites passed, "
+            << failed << L" failed" << std::endl;
+        for (const auto& line : summary) std::wcout << L"  " << line << std::endl;
         return failed ? 1 : 0;
     }
 }
@@ -264,7 +287,7 @@ int wmain(int argc, wchar_t** argv)
                 L"  --input-directory <dir>   Content files; omit for fixed regressions\n"
                 L"  --suite <name>            Select a suite; repeat to select several\n"
                 L"  --gtest_filter <pattern>  Default: ContentInput.* with input, otherwise *\n"
-                L"  --timeout-seconds <n>     Per-suite timeout (default: 3600)\n"
+                L"  --timeout-seconds <n>     Overall run timeout (default: 3600)\n"
                 L"Suites: gacl_lib_tests, gacl_exe_tests, ml_rdo_tests, shader_tests\n";
             return 0;
         }

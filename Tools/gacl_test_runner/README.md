@@ -36,6 +36,8 @@ For example, if `BC1mip0/Ladybug_Body_albedo.DDS` is the first discovered file:
 
 Assertion messages and unsupported reasons appear through the normal GoogleTest printer. Unsupported inputs are **SKIPPED** with an explicit `[UNSUPPORTED]` reason, not reported as passes. The enclosing suite heading identifies the executable. There is no replay command, retained-work-directory option, mandatory results directory, JSON summary, automatic XML, or wrapper log file. Suites own validation; the launcher owns process lifetime and aggregate exit status.
 
+The final `[ RUN SUMMARY ]` repeats each suite's outcome, elapsed milliseconds, and exit code or launch/timeout error. Nonzero exits include hexadecimal status; access violations and fail-fast exits are labeled. Suite failures and timeout messages use stdout with the suite markers so they remain in order. Individual test counts remain in GoogleTest's summaries; the launcher does not parse them.
+
 A normal shell redirect is enough to save output when needed:
 
 ```powershell
@@ -57,7 +59,7 @@ A normal shell redirect is enough to save output when needed:
 | `--input-directory <path>` | Optional: recursive file-validation mode. |
 | `--suite <name>` | Repeat to select suites; default all four listed above. |
 | `--gtest_filter=<pattern>` | GoogleTest selection; a separate value is also accepted. Default `ContentInput.*` with an input folder; otherwise `*`. |
-| `--timeout-seconds <n>` | Per-suite limit, default 3600 seconds (one hour). Four sequential suites can consume four hours; this is not a one-hour limit for the entire invocation. |
+| `--timeout-seconds <n>` | Overall limit shared by all selected suites, default 3600 seconds (one hour). A suite only receives the time left in that budget. |
 | `--help` | Show usage. |
 
 The runner creates isolated temporary suite directories and removes them on completion, including ordinary failures/timeouts. Temporary-lock cleanup is retried briefly; persistent cleanup errors are printed. Inputs are read, not modified, and must remain stable during execution. Direct suite runs must also use a working directory outside the inputs. Some validators hold a whole file/texture in memory; this is not a streaming large-file harness.
@@ -83,7 +85,7 @@ Omit the input folder to run original fixed regressions with normal GoogleTest o
 
 Preserve fixed fixtures and dependencies. The ML suite stages its own `test_assets/` and checks its perceptual-model coverage. Its model copies must match beside EXEs and three EXE-directory parents above at `ThirdParty/models`; for `bin/v143/x64/Release`, the latter is `bin/ThirdParty/models`. Folder MSE cases do not require those perceptual models. Shader tests require a suitable D3D12 environment.
 
-Exit **0** means every selected suite passed. Exit **1** means at least one suite failed, timed out, or could not start; the other suites are still attempted. Exit **2** means an overall argument or working-directory setup error. Existing product/validation failures are not waived.
+Exit **0** means every selected suite passed. Exit **1** means at least one suite failed, timed out, or could not start; the other suites are attempted only while time remains. On timeout, the active process tree is stopped and remaining suites are reported as not run, not passes. Exit **2** means an overall argument or working-directory setup error. Existing product/validation failures are not waived.
 
 Processes start suspended and enter a kill-on-close Windows Job Object before execution. Remaining children are stopped when a suite finishes or times out. Child stdout/stderr flow directly to the caller, including shell redirects and pipes. The normal environment is inherited; the launcher explicitly sets the filter, disables colored output, and runs each suite once.
 
