@@ -261,7 +261,7 @@ namespace
 
 void RegisterGaclExeContentTests(const std::filesystem::path& input)
 {
-    ContentInput::Register(input, [input](const ContentInput::File& file)
+    ContentInput::RegisterDirectoryContents(input, [input](const ContentInput::File& file)
     {
         ValidateGaclFile(file.path, input);
     });

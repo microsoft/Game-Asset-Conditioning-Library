@@ -1,26 +1,3 @@
-# Prefer an original, SHA512-pinned package already staged in vcpkg's download cache.
-# In particular, a cache hit must not require access to a NuGet service index.
-function(gacl_download_nuget_package out_var package_id package_version filename sha512)
-    set(_cached "${DOWNLOADS}/${filename}")
-    if(EXISTS "${_cached}")
-        file(SHA512 "${_cached}" _actual_sha512)
-        if(NOT _actual_sha512 STREQUAL "${sha512}")
-            message(FATAL_ERROR "Cached NuGet package failed SHA512 verification: ${filename}")
-        endif()
-        message(STATUS "Using cached NuGet package: ${filename}")
-        set(${out_var} "${_cached}" PARENT_SCOPE)
-        return()
-    endif()
-
-    gacl_get_nuget_package_url(_url "${package_id}" "${package_version}")
-    vcpkg_download_distfile(_archive
-        URLS "${_url}"
-        FILENAME "${filename}"
-        SHA512 "${sha512}"
-    )
-    set(${out_var} "${_archive}" PARENT_SCOPE)
-endfunction()
-
 function(gacl_get_nuget_package_url out_var package_id package_version)
     set(_source "$ENV{GACL_NUGET_SOURCE}")
     if(_source STREQUAL "")

@@ -48,9 +48,3 @@ runs:
           /p:Platform=${{ inputs.platform }} `
           /p:GaclPlatformToolset=v143 `
           /p:OutDir=${{ github.workspace }}\out\${{ inputs.configuration }}\${{ inputs.platform }}\bin\
-          if ($LASTEXITCODE -ne 0) { throw "GACL build failed with exit code $LASTEXITCODE" }
-
-    - name: Stage test models
-      shell: pwsh
-      run: |
-        Tools\scripts\stageTestModels.ps1 -BinaryDirectory "${{ github.workspace }}\out\${{ inputs.configuration }}\${{ inputs.platform }}\bin"

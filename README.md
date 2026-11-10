@@ -77,10 +77,6 @@ integration into content pipelines which import textures, and a front end tool i
 * Shaders/... - Shaders implementing unshuffle runtime functionality.
 * Samples/... - Standalone samples showing DirectStorage or raw compute shader usage at runtime.
 
-For a prepared Windows x64 drop, the native C++ [test runner](Tools/gacl_test_runner/README.md) runs all four finite GoogleTest suites, including `shader_tests`, and prints each result directly to stdout. Optional `--input-directory` validates files recursively; omit it for fixed regressions. There is no mandatory report/results directory. It enforces timeouts, needs no Python/PowerShell/C# runtime, and leaves fuzzing separate.
-
-For only the runner, `gacl.exe`, library and four finite suites, opt in with `Tools\scripts\restorePackages.ps1 -TestBuild`, then build `gacl-tests.slnf` with `/p:GaclTestBuild=true` in Debug or Release x64. This uses a separate test dependency manifest without the DirectStorage/Agility SDK ports. The normal root manifest and default build remain unchanged; see the [test runner guide](Tools/gacl_test_runner/README.md) for commands, retained dependencies and runtime/model requirements.
-
 # Build and Test
 
 ---

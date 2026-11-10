@@ -11,8 +11,16 @@ set(PREVIEW "-preview1-2603.504")
 
 set(_SHA512 2ab4f0f2f6ebe41f8102b60d02c6db655b62e51dd0b1bf5d4a7d1cbfc0069b06541beb721adf0d98a0384c41456e7cd284716baf358c84589258770bf674fb0e)
 set(_FILENAME "directstorage.${VERSION}${PREVIEW}.zip")
-gacl_download_nuget_package(ARCHIVE
-    "Microsoft.Direct3D.DirectStorage" "${VERSION}${PREVIEW}" "${_FILENAME}" "${_SHA512}"
+gacl_get_nuget_package_url(
+    _PACKAGE_URL
+    "Microsoft.Direct3D.DirectStorage"
+    "${VERSION}${PREVIEW}"
+)
+
+vcpkg_download_distfile(ARCHIVE
+    URLS "${_PACKAGE_URL}"
+    FILENAME "${_FILENAME}"
+    SHA512 ${_SHA512}
 )
 
 vcpkg_extract_source_archive(

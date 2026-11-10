@@ -1,4 +1,4 @@
-ï»¿//--------------------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------
 // Main.cpp
 //
 // Advanced Technology Group (ATG)
@@ -610,7 +610,7 @@ int main(int argc, char* argv[])
         const auto input = ContentInput::ParseDirectory(argc, argv);
         if (!input.empty())
         {
-            ContentInput::Register(input, [](const ContentInput::File& file) {
+            ContentInput::RegisterDirectoryContents(input, [](const ContentInput::File& file) {
                 ASSERT_TRUE(g_game->RunContent(file.path, file.relative))
                     << "GPU unshuffle comparison failed for " << file.relative;
             });

@@ -20,8 +20,16 @@ if("cler" IN_LIST FEATURES)
     set(_ORT_PKG_LOWER   "microsoft.ml.onnxruntime")
     set(_ORT_FILENAME    "${_ORT_PKG_LOWER}.${_ORT_VERSION}.nupkg")
     set(_ORT_SHA512      "76b67c8dafc23c4f20ad09637057c2021f4a873701826cec9e274a04a2017ad11433879275a091f9a1d5997a9aea7fbb7589b49d036028b193b6168f99d9f460")
-    gacl_download_nuget_package(ORT_ARCHIVE
-        "Microsoft.ML.OnnxRuntime" "${_ORT_VERSION}" "${_ORT_FILENAME}" "${_ORT_SHA512}"
+    gacl_get_nuget_package_url(
+        _ORT_PACKAGE_URL
+        "Microsoft.ML.OnnxRuntime"
+        "${_ORT_VERSION}"
+    )
+
+    vcpkg_download_distfile(ORT_ARCHIVE
+        URLS     "${_ORT_PACKAGE_URL}"
+        FILENAME "${_ORT_FILENAME}"
+        SHA512   ${_ORT_SHA512}
     )
 
     vcpkg_extract_source_archive(
