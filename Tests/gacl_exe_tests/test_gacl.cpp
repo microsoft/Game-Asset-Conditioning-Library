@@ -55,26 +55,24 @@ namespace
     class WorkDirectory
     {
     public:
-        WorkDirectory(const fs::path& inputDirectory, const fs::path& executable)
+        WorkDirectory(const fs::path& inputDirectory)
         {
             static std::atomic<unsigned> sequence{ 0 };
-            const std::array<fs::path, 2> roots{ fs::temp_directory_path(), executable.parent_path() };
-            for (const auto& root : roots)
+            // The launcher owns CWD's tree even when forced termination skips this destructor.
+            const auto root = fs::canonical(fs::current_path());
+            if (WithinDirectory(root, inputDirectory))
+                throw std::runtime_error("Run from a working directory outside the input tree");
+            for (unsigned attempt = 0; attempt < 100; ++attempt)
             {
-                if (WithinDirectory(root, inputDirectory))
-                    continue;
-                for (unsigned attempt = 0; attempt < 100; ++attempt)
+                const auto candidate = root / (L"gacl_exe_content_" + std::to_wstring(GetCurrentProcessId())
+                    + L"_" + std::to_wstring(GetTickCount64()) + L"_" + std::to_wstring(sequence++));
+                if (fs::create_directory(candidate))
                 {
-                    const auto candidate = root / (L"gacl_exe_content_" + std::to_wstring(GetCurrentProcessId())
-                        + L"_" + std::to_wstring(GetTickCount64()) + L"_" + std::to_wstring(sequence++));
-                    if (fs::create_directory(candidate))
-                    {
-                        path = candidate;
-                        return;
-                    }
+                    path = candidate;
+                    return;
                 }
             }
-            throw std::runtime_error("Cannot create an isolated work directory outside the input directory");
+            throw std::runtime_error("Cannot create an isolated work directory beneath the current directory");
         }
 
         ~WorkDirectory()
@@ -195,7 +193,7 @@ namespace
             throw ContentInput::Unsupported("gacl CLI content validation supports DDS only");
 
         const auto executable = GaclExecutable();
-        WorkDirectory work(inputDirectory, executable);
+        WorkDirectory work(inputDirectory);
         const auto copiedInput = work.path / L"input.dds";
         const auto originalWriteTime = fs::last_write_time(file);
         fs::copy_file(file, copiedInput);

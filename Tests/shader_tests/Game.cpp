@@ -134,6 +134,30 @@ static const ShuffleShaderInfo gShaderInfo[] = {
     {L"UnshuffleBC5.cso", L"BC5CSRootSignature", L"BC5 Unshuffle", 16, 4},
 #endif
 
+static void ValidateContentDispatch(GBaseFormat format, size_t numBlocks, bool useUnifiedShader)
+{
+    size_t groups;
+    if (format == GBaseFormat::BC7)
+    {
+        groups = (numBlocks + TG_THREAD_COUNT - 1) / TG_THREAD_COUNT;
+    }
+    else
+    {
+#ifdef NEWBC1345
+        const ShuffleShaderInfo& geometry = (useUnifiedShader ? gUnifiedShaderInfo : gShaderInfo)[gHeaderlessShaders + format];
+        const uint32_t threadGroupSize = geometry.threadGroupSize;
+#else
+        UNREFERENCED_PARAMETER(useUnifiedShader);
+        const ShuffleShaderInfo& geometry = gShaderInfo[format];
+        const uint32_t threadGroupSize = TG_THREAD_COUNT;
+#endif
+        const size_t threads = numBlocks / geometry.blocksPerThread + numBlocks % geometry.blocksPerThread;
+        groups = (threads + threadGroupSize - 1) / threadGroupSize;
+    }
+    if (groups > D3D12_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION)
+        throw ContentInput::Unsupported("DDS mip 0 exceeds the GPU unshuffle dispatch group limit for this format");
+}
+
 
 Game::Game() noexcept(false) : 
     m_uavHeapOffsetInBytes(0),
@@ -1569,6 +1593,18 @@ GTestParameters Game::LoadContent(const std::filesystem::path& path, const std::
         metadata.height > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION)
         throw ContentInput::Unsupported("DDS dimensions exceed the D3D12 2D texture limit");
 
+    GTestParameters params = {};
+    switch (baseFormat)
+    {
+    case DXGI_FORMAT_BC1_TYPELESS: params.baseFormat = GBaseFormat::BC1; break;
+    case DXGI_FORMAT_BC3_TYPELESS: params.baseFormat = GBaseFormat::BC3; break;
+    case DXGI_FORMAT_BC4_TYPELESS: params.baseFormat = GBaseFormat::BC4; break;
+    case DXGI_FORMAT_BC5_TYPELESS: params.baseFormat = GBaseFormat::BC5; break;
+    case DXGI_FORMAT_BC7_TYPELESS: params.baseFormat = GBaseFormat::BC7; break;
+    default: throw std::runtime_error("Unexpected DDS base format");
+    }
+    ValidateContentDispatch(params.baseFormat, (metadata.width / 4) * (metadata.height / 4), m_useUnifiedShader);
+
     // Mip 0 only. Copy block rows using the loader's actual pitch, not DDS header guesses.
     const Image* firstMip = image.GetImage(0, 0, 0);
     if (!firstMip || !firstMip->pixels)
@@ -1600,16 +1636,6 @@ GTestParameters Game::LoadContent(const std::filesystem::path& path, const std::
         }
     }
 
-    GTestParameters params = {};
-    switch (baseFormat)
-    {
-    case DXGI_FORMAT_BC1_TYPELESS: params.baseFormat = GBaseFormat::BC1; break;
-    case DXGI_FORMAT_BC3_TYPELESS: params.baseFormat = GBaseFormat::BC3; break;
-    case DXGI_FORMAT_BC4_TYPELESS: params.baseFormat = GBaseFormat::BC4; break;
-    case DXGI_FORMAT_BC5_TYPELESS: params.baseFormat = GBaseFormat::BC5; break;
-    case DXGI_FORMAT_BC7_TYPELESS: params.baseFormat = GBaseFormat::BC7; break;
-    default: throw std::runtime_error("Unexpected DDS base format");
-    }
     params.testName = name;
     params.width = static_cast<uint32_t>(metadata.width);
     params.height = static_cast<uint32_t>(metadata.height);

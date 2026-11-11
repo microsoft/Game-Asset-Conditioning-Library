@@ -62,7 +62,7 @@ A normal shell redirect is enough to save output when needed:
 | `--timeout-seconds <n>` | Overall limit shared by all selected suites, default 3600 seconds (one hour). A suite only receives the time left in that budget. |
 | `--help` | Show usage. |
 
-The runner creates isolated temporary suite directories and removes them on completion, including ordinary failures/timeouts. Temporary-lock cleanup is retried briefly; persistent cleanup errors are printed. Inputs are read, not modified, and must remain stable during execution. Direct suite runs must also use a working directory outside the inputs. Some validators hold a whole file/texture in memory; this is not a streaming large-file harness.
+The runner creates isolated temporary suite directories and removes them on completion, including ordinary failures/timeouts. CLI cases keep their input copies and exports beneath the suite working directory so forced suite termination also leaves them under launcher cleanup. Temporary-lock cleanup is retried briefly; persistent cleanup errors are printed. Inputs are read, not modified, and must remain stable during execution. Direct suite runs must also use a working directory outside the inputs. Some validators hold a whole file/texture in memory; this is not a streaming large-file harness.
 
 ## What each suite validates in folder mode
 
@@ -71,7 +71,7 @@ The runner creates isolated temporary suite directories and removes them on comp
 | Library | Nonempty arbitrary-file compression/Zstd roundtrip or documented store-original fallback. Supported BC1/3/4/5/7 DDS also receive CPU shuffle/inverse checks across subresources. Other formats get buffer-only validation. |
 | CLI | Typed BC1/3/4/5/7 DDS through `gacl.exe`, export presence/header checks and saved-DDS validation. Not a full export decoder or visual-quality test. |
 | ML/RDO | PNG MSE/RMSE checks; basic CLER on applicable BC1 top mips without requiring a reference. A same-stem PNG additionally exercises reference-based MSE RDO and rejects fallback to basic clustering. No folder-mode perceptual-model or quality-threshold claim. |
-| Shader | Actual supported single-2D BC1/3/4/5/7 DDS data through GPU unshuffle comparison. Current folder-mode input is mip 0 only, not the complete synthetic parameter matrix. Unsupported shapes/formats are explicit. |
+| Shader | Actual supported single-2D BC1/3/4/5/7 DDS data through GPU unshuffle comparison. Current folder-mode input is mip 0 only, not the complete synthetic parameter matrix. Shapes exceeding the selected format's shader dispatch limit are unsupported even within the D3D12 texture-size limit. Unsupported shapes/formats are explicit. |
 
 An optional CLER reference must decode and match the DDS dimensions; malformed/mismatched references fail. CLER format/dimension limits still apply. PNG files also have independent loss-metric cases. Skips follow normal GoogleTest behavior; a suite with no passing tests, or a content run with no passing content cases, fails. Assertions and nonzero test exits also fail.
 
