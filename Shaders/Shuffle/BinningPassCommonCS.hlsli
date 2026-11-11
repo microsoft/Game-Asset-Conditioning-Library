@@ -168,7 +168,7 @@ void StoreGroupValues(uint scrapGroupBaseBits, uint sectionLayout, uint scWord)
     const uint heightInBlocks = (gs_bc7SizeInBytes + pitchBytes - 1) >> firstbithigh(pitchBytes);
     gs_spaceCurveWidthInPixels =
         (gs_bc7SizeInBytes > 16384u && countbits(widthInBlocks) == 1u &&
-         widthInBlocks >= 32u && countbits(heightInBlocks) == 1u && heightInBlocks >= 32u) ? spaceCurveWidthInPixels : 0u;
+         widthInBlocks >= 32u && countbits(heightInBlocks) == 1u && heightInBlocks >= 32u && (gs_bc7SizeInBytes % pitchBytes) == 0u) ? spaceCurveWidthInPixels : 0u;
 }
 
 // Wave 0 builds the group's per mode tables, lane m for mode m, so it needs at least BC7_MODES_COUNT lanes
