@@ -586,6 +586,13 @@ std::vector<GTestParameters> GetUnshufflingTestParameters()
         // Mode 0's color remap lengths inflated past its tables, with a stream its symbol reads would run past
         addSplit("BC7_RemapOverread_Res64x64_FewModes", SplitContentFewModes, SplitRejectNone, 0);
         testParams.back().BC7.remapOverread = true;
+
+        // A space curve width of 256 pixels (64 blocks) written into a linear stream's header, which the shaders only invert for whole
+        // rows of it: 64x32 blocks, uncurved, and 2,047 blocks, whose last row is partial, as they are
+        addSplit("BC7_CurveHeader_WholeRows_Res256x128", SplitContentModes, SplitRejectNone, 0, 256, 128);
+        testParams.back().BC7.curveTilesLog2 = 1;
+        addSplit("BC7_CurveHeader_PartialRow_Res8188x4", SplitContentModes, SplitRejectNone, 0, 8188, 4);
+        testParams.back().BC7.curveTilesLog2 = 1;
     }
 
     return testParams;

@@ -83,6 +83,9 @@ struct GTestParameters
             bool remapOverread;     // mode 0's color remap length bytes set to 255, which the shaders don't check, so that its symbol
                                     // reads would run past the stream: decoded twice, the stream followed by 0x00 then 0xFF bytes,
                                     // the decodes must match (the shaders keep symbol reads in the remap tables)
+            uint8_t curveTilesLog2; // 0, or n (1-7): a space curve width of 128 << n pixels written into a linear stream's header,
+                                    // which the shaders only invert for whole rows of it (as GACL_Shuffle_ApplySpaceCurve): the
+                                    // blocks are expected uncurved at that width, or as they are when the last row is partial
         } BC7;
 
         struct {

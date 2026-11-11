@@ -1599,6 +1599,32 @@ bool Game::RunTestWithParams(GTestParameters const& params)
         std::ofstream(dumpFileName.str(), std::ios::binary).write(reinterpret_cast<const char*>(shuffledBuffer.data()), shuffledBuffer.size());
 #endif
 
+        // A space curve width written into the extension byte (bits 0-2) of a linear stream: the shaders uncurve the blocks when they
+        // are whole rows of that width, and otherwise write them as they are
+        if (params.BC7.curveTilesLog2 != 0)
+        {
+            if (params.useSpaceCurve || shuffledBuffer.size() < 2 || !(shuffledBuffer[0] & 0x80u) || (shuffledBuffer[1] & 0x7u) != 0)
+            {
+                std::cout << "The BC7 split stream has no extension byte, or has a space curve width" << std::endl;
+                return false;
+            }
+            shuffledBuffer[1] = uint8_t(shuffledBuffer[1] | params.BC7.curveTilesLog2);
+
+            const size_t curveWidth = size_t(128) << params.BC7.curveTilesLog2;
+            if (bc7SizeInBytes % (curveWidth / 4 * BC7_BYTES_PER_BLOCK) == 0)
+            {
+                std::vector<uint8_t> uncurved(bc7SizeInBytes);
+                if (!GACL_Shuffle_ApplySpaceCurve(uncurved.data(), bc7TextureRaw.data(), bc7SizeInBytes, BC7_BYTES_PER_BLOCK,
+                    curveWidth, false))
+                {
+                    std::cout << "The space curve doesn't apply to " << bc7SizeInBytes / BC7_BYTES_PER_BLOCK << " blocks at " <<
+                        curveWidth << " pixels wide" << std::endl;
+                    return false;
+                }
+                bc7TextureRaw.swap(uncurved);
+            }
+        }
+
         // A stream made invalid is rejected, so the expected output is the destination's fill (the texture isn't needed after shuffling)
         if (params.BC7.reject != SplitRejectNone)
         {
