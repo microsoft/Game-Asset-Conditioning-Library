@@ -1,20 +1,20 @@
 # GACL test runner
 
-A thin native Windows x64/ARM64 launcher for the four existing GoogleTest executables: `gacl_lib_tests`, `gacl_exe_tests`, `ml_rdo_tests`, and `shader_tests`. Like the Zstd tests, results are printed to stdout as tests run. Fuzzing remains separate. No Python, PowerShell, C#, report parser, or separate wrapper-test framework is required.
+A thin native Windows x64 launcher for the four existing GoogleTest executables: `gacl_lib_tests`, `gacl_exe_tests`, `ml_rdo_tests`, and `shader_tests`. Like the Zstd tests, results are printed to stdout as tests run. Fuzzing remains separate. No Python, PowerShell, C#, report parser, or separate wrapper-test framework is required.
 
-Build the runner and suites from `gacl.sln` in Debug or Release x64, or Release ARM64. With v143, the executables are in `bin/v143/<platform>/<configuration>/`. Use architecture-matched runtime DLLs, shader `.cso` files, and applicable fixtures/models. ARM64 builds require the Visual Studio ARM64 C++ tools and Windows SDK soft-intrinsics libraries; SIMDe supplies the missing AVX/FMA operations. The launcher does not build or download dependencies or change graphics settings.
+Build the runner and suites from `gacl.sln` in Debug or Release x64. With v143, the executables are in `bin/v143/x64/<configuration>/`. Use x64 runtime DLLs, compiled GPU shader `.cso` files, and applicable fixtures/models. On Windows ARM64, run the complete x64 package under Windows x64 emulation, including x64 runtime dependencies; do not mix native ARM64 DLLs with x64 executables. The launcher does not build or download dependencies or change graphics settings.
 
 ## Build
 
 From a Visual Studio developer shell at the repository root:
 
 ```powershell
-.\Tools\scripts\restorePackages.ps1 -Platform x64 -Configuration Release
+.\Tools\scripts\restorePackages.ps1 -Configuration Release
 msbuild gacl.sln /t:Build /m /p:Configuration=Release /p:Platform=x64
 if ($LASTEXITCODE -ne 0) { throw "GACL build failed" }
 ```
 
-This uses the normal root vcpkg manifest, including its SDK dependencies, and the configured NuGet source. For ARM64, pass `-Platform ARM64 -Configuration Release` to restore and `/p:Platform=ARM64` to MSBuild. Export the ML models with `Tools\scripts\setupCLER.ps1` before building; the ML project's post-build target stages them automatically.
+This uses the normal root vcpkg manifest, including its SDK dependencies, and the configured NuGet source. Native ARM64 encoding is not built by this integration. Export the ML models with `Tools\scripts\setupCLER.ps1` before building; the ML project's post-build target stages them automatically.
 
 ## Run a content folder
 

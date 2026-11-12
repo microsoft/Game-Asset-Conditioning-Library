@@ -22,9 +22,6 @@
   <PropertyGroup Condition="'$(Platform)'=='x64'">
     <VcpkgTriplet>x64-windows-$(PlatformToolset)-static-md</VcpkgTriplet>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Platform)'=='ARM64'">
-    <VcpkgTriplet>arm64-windows-$(PlatformToolset)-static-md</VcpkgTriplet>
-  </PropertyGroup>
 
   <!-- Retarget IntDir to the toolset the project actually compiles with, for the
        same reason as the triplet above.  The condition keeps a project's own
