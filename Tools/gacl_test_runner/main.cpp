@@ -21,7 +21,7 @@ namespace
     using Microsoft::WRL::Wrappers::FileHandle;
 
     const std::vector<std::wstring> Suites{
-        L"gacl_lib_tests", L"gacl_exe_tests", L"ml_rdo_tests", L"shader_tests" };
+        L"shader_tests", L"gacl_lib_tests", L"gacl_exe_tests", L"ml_rdo_tests" };
 
     // Turns a failed Windows API operation into a C++ exception.
     void ThrowIfWin32Failed(bool success, const char* operation)

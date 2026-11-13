@@ -1,6 +1,6 @@
 # GACL test runner
 
-A thin native Windows x64 launcher for the four existing GoogleTest executables: `gacl_lib_tests`, `gacl_exe_tests`, `ml_rdo_tests`, and `shader_tests`. Like the Zstd tests, results are printed to stdout as tests run. Fuzzing remains separate. No Python, PowerShell, C#, report parser, or separate wrapper-test framework is required.
+A thin native Windows x64 launcher for the four existing GoogleTest executables: `shader_tests`, `gacl_lib_tests`, `gacl_exe_tests`, and `ml_rdo_tests`. Like the Zstd tests, results are printed to stdout as tests run. Fuzzing remains separate. No Python, PowerShell, C#, report parser, or separate wrapper-test framework is required.
 
 Build the runner and suites from `gacl.sln` in Debug or Release x64. With v143, the executables are in `bin/v143/x64/<configuration>/`. Use x64 runtime DLLs, compiled GPU shader `.cso` files, and applicable fixtures/models. On Windows ARM64, run the complete x64 package under Windows x64 emulation, including x64 runtime dependencies; do not mix native ARM64 DLLs with x64 executables. The launcher does not build or download dependencies or change graphics settings.
 
@@ -45,6 +45,8 @@ A normal shell redirect is enough to save output when needed:
 ```
 
 ## Choose suites and cases
+
+By default, both fixed and content runs execute shader tests first, followed by library, CLI, and ML/RDO tests, so CPU suites cannot exhaust the shared timeout before GPU testing starts. Explicit `--suite` selections run in the order supplied.
 
 ```powershell
 .\gacl_test_runner.exe --binary-directory . --input-directory C:\Textures --suite gacl_lib_tests
