@@ -36,6 +36,14 @@ jobs:
           configuration: ${{ matrix.configuration }}
           platform: ${{ matrix.platform }}
 
+      # Hosted CI only needs a CPU launcher smoke; shader/WARP execution remains below.
+      - name: Smoke test native launcher
+        shell: pwsh
+        run: |
+          $binDir = "${{ github.workspace }}\out\${{ matrix.configuration }}\${{ matrix.platform }}\bin"
+          & "$binDir\gacl_test_runner.exe" --binary-directory $binDir --suite gacl_lib_tests --gtest_filter="CompressBuffer.*"
+          if ($LASTEXITCODE -ne 0) { throw "GACL launcher smoke failed with exit code $LASTEXITCODE" }
+
       - name: Run native tests
         shell: pwsh
         run: |

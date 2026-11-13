@@ -9,6 +9,7 @@
 
 #include "DeviceResources.h"
 #include "StepTimer.h"
+#include <filesystem>
 #include <vector>
 // for Root descriptor versus heap descriptor...
 #include "../../Shaders/Shuffle/Shared.hlsli"
@@ -159,6 +160,10 @@ public:
     // Runs the full shuffle→unshuffle→validate pipeline for a loaded BCn texture. 
     // Returns true if all permutations pass.
     bool RunTestWithParams(GTestParameters const& params);
+
+    // Folder cases own their DDS bytes and exercise the same GPU comparison path.
+    // Validate every complete-block mip of a single non-cubemap 2D BC1/3/4/5/7 texture.
+    bool RunContent(const std::filesystem::path& path, const std::string& name);
     
     #if RUN_TEST_FROM_TEXTURE_IN_DISK
     // Runs a single test for a given set of parameters
@@ -186,6 +191,10 @@ private:
     void TestGpuUnshuffling(GTestParameters params, std::vector<uint8_t> const& BCnOriginalData, UNSHUFFLE_PER_TEST_STATISTICS& testStats, size_t sizeInBytes);
 
     void ResetD3D12Resources();
+
+    GTestParameters LoadContent(const std::filesystem::path& path, const std::string& name);
+    bool m_isTextureCase = false;
+    std::vector<uint8_t> m_contentData;
 
     void CreateBC7RawFromMetadata(uint32_t widthPixels, uint32_t heightPixels, std::vector<uint8_t>& rawBC7);
     void CreateBCnRawFromMetadata(uint32_t widthPixels, uint32_t heightPixels, uint32_t elementSize, std::vector<uint8_t>& rawBCn);

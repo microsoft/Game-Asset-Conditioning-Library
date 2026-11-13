@@ -9,6 +9,9 @@
 #include "Game.h"
 
 #include <gtest/gtest.h>
+#include "../ContentInput.h"
+#include <iostream>
+
 
 using namespace DirectX;
 
@@ -609,19 +612,25 @@ INSTANTIATE_TEST_SUITE_P(
 
 int main(int argc, char* argv[])
 {
-    ::testing::InitGoogleTest(&argc, argv);
-    g_game = std::make_unique<Game>();
-
-    // Parse args and initialise the D3D12 device. No tests run here.
-    g_game->Initialize(GetCommandLineW());
-
-    #if RUN_TEST_FROM_TEXTURE_IN_DISK == 0
-    return RUN_ALL_TESTS();
-    #else
-    g_game->RunAllPermutationsForLoadedTexture();
-    #endif
+    try
+    {
+        const auto input = ContentInput::ParseDirectory(argc, argv);
+        if (!input.empty())
+        {
+            ContentInput::RegisterDirectoryContents(input, [](const ContentInput::File& file) {
+                ASSERT_TRUE(g_game->RunContent(file.path, file.relative))
+                    << "GPU unshuffle comparison failed for " << file.relative;
+            });
+            ::testing::GTEST_FLAG(filter) = "ContentInput.*";
+        }
+        ::testing::InitGoogleTest(&argc, argv);
+        g_game = std::make_unique<Game>();
+        g_game->Initialize(GetCommandLineW());
+        #if RUN_TEST_FROM_TEXTURE_IN_DISK == 0
+        return ContentInput::RunTests(!input.empty());
+        #else
+        return g_game->RunAllPermutationsForLoadedTexture() ? 0 : 1;
+        #endif
+    }
+    catch (const std::exception& error) { std::cerr << "shader_tests: " << error.what() << '\n'; return 2; }
 }
-
-// Exit helper
-void ExitGame() noexcept {}
-

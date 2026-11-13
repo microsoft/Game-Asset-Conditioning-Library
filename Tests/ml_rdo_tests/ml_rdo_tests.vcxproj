@@ -149,6 +149,16 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="PostBuild" AfterTargets="Build">
     <Exec Command="xcopy /E /Y &quot;$(SolutionDir)tests\ml_rdo_tests\test_assets\*&quot; &quot;$(TargetDir)test_assets\&quot;" />
+    <PropertyGroup>
+      <_GaclLibraryModels>$([System.IO.Path]::GetFullPath('$(TargetDir)..\..\..\ThirdParty\models\'))</_GaclLibraryModels>
+    </PropertyGroup>
+    <ItemGroup>
+      <_GaclTestModel Include="$(SolutionDir)ThirdParty\models\lpips_model.onnx;$(SolutionDir)ThirdParty\models\vgg_model.onnx" />
+    </ItemGroup>
+    <Error Condition="!Exists('%(_GaclTestModel.Identity)')" Text="Missing exported model: %(_GaclTestModel.Identity). Run Tools\scripts\setupCLER.ps1 first." />
+    <Exec Command="for %%F in (&quot;%(_GaclTestModel.Identity)&quot;) do if %%~zF EQU 0 (echo Empty exported model: &quot;%%~fF&quot;. Run Tools\scripts\setupCLER.ps1 first. &amp; exit /b 1)" UseUtf8Encoding="Always" />
+    <Copy SourceFiles="@(_GaclTestModel)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_GaclTestModel)" DestinationFolder="$(_GaclLibraryModels)" SkipUnchangedFiles="true" />
   </Target>
   <ImportGroup Label="ExtensionTargets">
     <Import Project="$(SolutionDir)packages\Microsoft.ML.OnnxRuntime.1.24.2\build\native\Microsoft.ML.OnnxRuntime.targets" Condition="Exists('..\..\packages\Microsoft.ML.OnnxRuntime.1.24.2\build\native\Microsoft.ML.OnnxRuntime.targets')" />
