@@ -486,7 +486,7 @@ static bool PutHeadParams(uint8_t transformId, const std::vector<StreamHeaderPar
         byId[p.Id] = &p;
         present |= uint8_t(1 << (p.Id - 1));
     }
-    head = { uint8_t(code | (present << 3)) };
+    head = { uint8_t(code | (size_t(present) << 3)) };
     sorted.clear();
     for (const StreamHeaderParam* p : byId)
     {

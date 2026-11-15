@@ -1260,8 +1260,9 @@ static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplit
 
 bool GACL_Compression_DefaultRoutinesInstalled();    // shuffle.cpp
 
+_Success_(return == S_OK)
 HRESULT ShuffleCompress_BC7(
-    _Out_writes_all_(params.SizeInBytes) uint8_t* dest,
+    _Out_writes_bytes_to_(params.SizeInBytes, *destBytesWritten) uint8_t* dest,
     _Inout_ GACL_SHUFFLE_TRANSFORM* destTransformId,
     _Out_ size_t* destBytesWritten,
     SHUFFLE_COMPRESS_PARAMETERS& params

@@ -308,8 +308,9 @@ GACL_API HRESULT GACL_Compression_CompressBuffer(
 /// <param name="destBytesWritten">On exit, the number of bytes written to the destination.</param>
 /// <param name="inParams">Input parameters for the shuffle and compression stages, see SHUFFLE_COMPRESS_PARAMETERS.</param>
 /// <returns>HRESULT indicating success or failute.  S_FALSE indicates uncompressible content, with no compressed data copied to the destination.</returns>
+_Success_(return == S_OK)
 GACL_API HRESULT GACL_ShuffleCompress_BCn(
-    _Out_writes_(params.SizeInBytes) uint8_t* dest,
+    _Out_writes_bytes_to_(params.SizeInBytes, *destBytesWritten) uint8_t* dest,
     _Inout_ GACL_SHUFFLE_TRANSFORM* destTransformId,
     _Out_ size_t* destBytesWritten,
     _In_ SHUFFLE_COMPRESS_PARAMETERS& params

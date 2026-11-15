@@ -465,11 +465,13 @@ HRESULT Shuffle_BC1(uint8_t* dest, const uint8_t* src, size_t size, size_t versi
 HRESULT Shuffle_BC3(uint8_t* dest, const uint8_t* src, size_t size, size_t version);
 HRESULT Shuffle_BC4(uint8_t* dest, const uint8_t* src, size_t size, size_t version);
 HRESULT Shuffle_BC5(uint8_t* dest, const uint8_t* src, size_t size, size_t version);
-HRESULT ShuffleCompress_BC7(_Out_writes_all_(params.SizeInBytes) uint8_t* dest, _Inout_ GACL_SHUFFLE_TRANSFORM* destTransformId, _Out_ size_t* destBytesWritten, SHUFFLE_COMPRESS_PARAMETERS& params);
+_Success_(return == S_OK)
+HRESULT ShuffleCompress_BC7(_Out_writes_bytes_to_(params.SizeInBytes, *destBytesWritten) uint8_t* dest, _Inout_ GACL_SHUFFLE_TRANSFORM* destTransformId, _Out_ size_t* destBytesWritten, SHUFFLE_COMPRESS_PARAMETERS& params);
 
 
+_Success_(return == S_OK)
 HRESULT GACL_ShuffleCompress_BCn(
-    _Out_writes_(params.SizeInBytes) uint8_t* dest,
+    _Out_writes_bytes_to_(params.SizeInBytes, *destBytesWritten) uint8_t* dest,
     _Inout_ GACL_SHUFFLE_TRANSFORM* destTransformId,
     _Out_ size_t* destBytesWritten,
     _In_ SHUFFLE_COMPRESS_PARAMETERS& params

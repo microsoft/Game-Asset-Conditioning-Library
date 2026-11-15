@@ -281,13 +281,13 @@ static inline void BC7_ModeJoin_RawPre(uint64_t* r, unsigned mode, unsigned stat
     {
         // the endpoint fields of kStart / kW / kEpc (which only exist with IEDL)
         static const uint8_t kStartM[8] = { 5, 8, 9, 10, 8, 8, 7, 14 }, kWM[8] = { 4, 6, 5, 7, 5, 7, 7, 5 }, kEpcM[8] = { 6, 4, 6, 4, 2, 2, 2, 4 };
-        const unsigned S = mode < 4 ? (statics & 0x3f) : statics, w = kWM[mode];
+        const unsigned S = mode < 4 ? (statics & 0x3f) : statics, w = kWM[mode], start = kStartM[mode], epc = kEpcM[mode];
         const unsigned chans = (mode == 7 && (GACL_IMS & 2)) ? 4 : 3;
         for (unsigned c = ((GACL_IMS & 1) ? 0 : 3); c < chans; c++)
         {
             if ((S >> (2 * c)) & 3)
                 continue;
-            const unsigned pc = kStartM[mode] + w * c * kEpcM[mode];
+            const unsigned pc = start + w * c * epc;
             uint64_t e0 = BC7_ModeJoin_RawGet(r, pc, w), e1 = BC7_ModeJoin_RawGet(r, pc + w, w);
             BC7_ModeJoin_MidSpan(e0, e1, w);
             BC7_ModeJoin_RawPut(r, pc, w, e0);
@@ -2333,6 +2333,7 @@ void BC7_ModeJoin_Transform(const uint8_t* src, size_t srcSize, std::vector<uint
         }
         else
         {
+            _Analysis_assume_(mode < 8);
             BC7_ModeJoin_Shuffle_Fast[mode](src, d, modeMetrics[mode]);
         }
 

@@ -21,6 +21,7 @@
 #include "bcnex.h"
 #include "bc7joinblockcode.h"
 #include <intrin.h>
+#include <memory>
 #include <random>
 #include <utility>
 #include <cstring>
@@ -358,7 +359,9 @@ bool BC7_ModeJoin_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8_
         return false;
     }
 
-    LayoutInverse inv[8];
+    // on the heap: the eight inverses take 16 KB
+    const std::unique_ptr<LayoutInverse[][8]> invStorage = std::make_unique<LayoutInverse[][8]>(1);
+    LayoutInverse (&inv)[8] = invStorage[0];
     if (!BuildLayoutInverse(metrics, inv))
     {
         return false;

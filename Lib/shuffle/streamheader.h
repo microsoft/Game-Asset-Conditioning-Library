@@ -105,10 +105,10 @@ struct StreamHeaderParam
 
 struct StreamHeaderInfo
 {
-    uint8_t TransformId;                 // GACL_SHUFFLE_TRANSFORM id (from the header transform code)
+    uint8_t TransformId = 0;            // GACL_SHUFFLE_TRANSFORM id (from the header transform code)
     std::vector<StreamHeaderParam> Params;  // ascending id order
-    size_t HeaderBytes;                 // bytes used before the zero padding
-    size_t HeaderBlocks;                // k
+    size_t HeaderBytes = 0;             // bytes used before the zero padding
+    size_t HeaderBlocks = 0;            // k
     std::vector<size_t> Removed;        // removed duplicates: ascending original block indices
     std::vector<size_t> Sources;        // original block index of the kept copy of each removed duplicate
     std::vector<size_t> Coded;          // coded blocks: ascending original block indices
