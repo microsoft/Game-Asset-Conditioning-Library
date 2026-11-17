@@ -3423,7 +3423,7 @@ void BC7_ModeSplit_OrderEndpointFields(const uint8_t* src, size_t srcSize, std::
         unsigned long mode;
         _BitScanForward(&mode, *src | 0x100u);
 
-        if (0 == (modeMask & (1 << mode)))
+        if (mode >= 8 || 0 == (modeMask & (1 << mode)))
         {
             *reinterpret_cast<__m128i*>(pDest) = *reinterpret_cast<const __m128i*>(src);
         }

@@ -38,7 +38,7 @@ static void CountBC7Modes(const DirectX::ScratchImage& si, bool debugOutput, siz
         // Look for first set bit in [7:0].  If none set, return 8 (invalid).
         unsigned long mode;
         _BitScanForward(&mode, *data | 0x100);
-        counts[mode]++;
+        counts[mode < 8 ? mode : 8]++;     // mode <= 8 already; the clamp lets code analysis see it
     }
     
     if (debugOutput)
