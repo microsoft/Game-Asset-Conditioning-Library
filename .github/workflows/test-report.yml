@@ -1,0 +1,37 @@
+name: Publish GACL test results
+
+on:
+  workflow_run:
+    workflows: ["Test GACL"]
+    types: [completed]
+
+jobs:
+  report:
+    name: Report (${{ matrix.configuration }}-${{ matrix.platform }})
+    if: >-
+      github.event.workflow_run.conclusion != 'cancelled' &&
+      github.event.workflow_run.conclusion != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      checks: write
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+        platform: [x64]
+
+    steps:
+      # Only parse artifacts from the triggering run; never check out or execute PR code here.
+      - name: Publish test results
+        uses: dorny/test-reporter@d61b558e8df85cb60d09ca3e5b09653b4477cea7 # v1
+        with:
+          artifact: test-results-${{ matrix.configuration }}-${{ matrix.platform }}
+          name: Test Results (${{ matrix.configuration }}-${{ matrix.platform }})
+          path: "*.xml"
+          reporter: java-junit
+          fail-on-error: true
+          fail-on-empty: true

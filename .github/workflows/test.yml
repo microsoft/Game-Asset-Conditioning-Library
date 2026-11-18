@@ -15,7 +15,6 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 180
     permissions:
-      checks: write
       contents: read
 
     strategy:
@@ -69,10 +68,10 @@ jobs:
             }
           }
 
-      - name: Publish test results
-        uses: dorny/test-reporter@v1
-        if: always()
+      - name: Upload test results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: success() || failure()
         with:
-          name: Test Results (${{ matrix.configuration }}-${{ matrix.platform }})
+          name: test-results-${{ matrix.configuration }}-${{ matrix.platform }}
           path: TestResults/*.xml
-          reporter: java-junit
+          if-no-files-found: error
