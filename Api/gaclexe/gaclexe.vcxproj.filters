@@ -30,6 +30,9 @@
     <ClCompile Include="..\..\helpers\FormatHelper.cpp">
       <Filter>Source Files\util</Filter>
     </ClCompile>
+    <ClCompile Include="Deflate.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\helpers\FileUtility.h">
@@ -40,6 +43,9 @@
     </ClInclude>
     <ClInclude Include="..\..\helpers\FormatHelper.h">
       <Filter>Source Files\util</Filter>
+    </ClInclude>
+    <ClInclude Include="Deflate.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

@@ -211,7 +211,10 @@ struct BC7ModeSplitShuffleOptions
 
 
 
-void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uint8_t>& destA, std::vector<uint8_t>& destB, BC7ModeSplitShuffleOptions& opt, BC7TextureMetrics& metrics);
+struct StreamLayout;
+
+// layoutsOut (optional, 2 entries) receives the layouts of destA and destB, for the compression routines (streamlayout.h)
+void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uint8_t>& destA, std::vector<uint8_t>& destB, BC7ModeSplitShuffleOptions& opt, BC7TextureMetrics& metrics, StreamLayout* layoutsOut = nullptr);
 void BC7_ModeSplit_Reverse(const uint8_t* src, size_t srcSize, std::vector<uint8_t>& dest, size_t destSize, const uint8_t* ref);
 
 void BC7_ModeSplit_Validate_CopyBitOrders();

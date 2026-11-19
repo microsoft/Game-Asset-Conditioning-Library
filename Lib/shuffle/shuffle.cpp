@@ -14,6 +14,7 @@
 #include "../helpers/FormatHelper.h"
 #include "../helpers/Utility.h"
 #include "bcnex.h"
+#include "streamlayout.h"
 
 #include <intrin.h>
 #include <immintrin.h>
@@ -359,6 +360,31 @@ PGACL_COMPRESSION_COMPRESSROUTINE GACL_Compression_CompressRoutine = &GACL_Compr
 PGACL_COMPRESSION_CLEANUPROUTINE GACL_Compression_CleanupRoutine = &GACL_Compression_DefaultCleanupRoutine;
 
 
+/*  The layout of the stream being compressed on this thread (GACL_Compression_GetStreamLayout), set by a StreamLayoutScope around
+    each init, compress and cleanup sequence  */
+
+static thread_local const GACL_STREAM_LAYOUT* t_streamLayout = nullptr;
+
+GACL_API const GACL_STREAM_LAYOUT* GACL_Compression_GetStreamLayout(void)
+{
+    return t_streamLayout;
+}
+
+StreamLayoutScope::StreamLayoutScope(const StreamLayout* layout) : m_view{}, m_previous(t_streamLayout)
+{
+    if (layout != nullptr)
+    {
+        m_view = { layout->Transform, layout->Curved, layout->Sections.size(), layout->Sections.data() };
+    }
+    t_streamLayout = layout != nullptr ? &m_view : nullptr;
+}
+
+StreamLayoutScope::~StreamLayoutScope()
+{
+    t_streamLayout = m_previous;
+}
+
+
 /*  Whether GACL's default routines are installed, which each encode checks as it sets up its compression.  Only they are known
     to compress with zstd at CompressSettings.Default.ZstdCompressionLevel: a replaced handler's compressor is unknown, and it may
     use the CompressSettings union for other data.  So with custom routines the encoders read the requested level as 0 (GACL's
@@ -411,6 +437,10 @@ GACL_API HRESULT GACL_Compression_CompressBuffer(
         shuffleParams.CompressSettings.Default.ZstdCompressionLevel = params->ZstdCompressionLevel;
         shuffleParams.CompressSettings.Default.TargetBlockSize = params->TargetBlockSize;
     }
+
+    StreamLayout layout(GACL_SHUFFLE_TRANSFORM_NONE, false);
+    layout.Add(sizeInBytes, 1, GACL_STREAM_SECTION_KIND_OTHER);
+    const StreamLayoutScope layoutScope(&layout);
 
     void* cc = nullptr;
     size_t compressBound = 0;
@@ -598,6 +628,7 @@ HRESULT GACL_ShuffleCompress_BCn(
         std::vector<uint8_t> Data;
         int Prediction = -1;                // EX index prediction mask, -1 = the transform's default
         std::vector<uint8_t> Stream;        // the stream Data compresses, kept for a two-stage search (empty: Src)
+        StreamLayout Layout;                // the layout of the stream Data compresses
     };
 
     const uint8_t* const linear = params.TextureData;
@@ -671,8 +702,9 @@ HRESULT GACL_ShuffleCompress_BCn(
     std::vector<std::thread> tasks;
     std::atomic<HRESULT> lastError = S_OK;
 
-    auto compressTask = [&](std::vector<uint8_t>& dest, const uint8_t* src, size_t srcBytes, const SHUFFLE_COMPRESS_PARAMETERS* compressParams)
+    auto compressTask = [&](std::vector<uint8_t>& dest, const uint8_t* src, size_t srcBytes, const SHUFFLE_COMPRESS_PARAMETERS* compressParams, const StreamLayout* layout)
         {
+            const StreamLayoutScope layoutScope(layout);
             void* cc = nullptr;
             size_t compressedBytes;
             HRESULT hr = GACL_Compression_InitRoutine(&cc, &compressedBytes, compressParams);
@@ -733,7 +765,18 @@ HRESULT GACL_ShuffleCompress_BCn(
                         lastError = E_FAIL;
                     }
 #endif
-                    compressTask(c.Data, stream.data(), stream.size(), candParams);
+                    c.Layout = StreamLayout(c.Id, c.CurveTiles != 0);
+                    const size_t head = c.HeaderBlocks * elementSize;
+                    c.Layout.Add(head, elementSize, GACL_STREAM_SECTION_KIND_HEADER);
+                    if (c.Pattern == GACL_SHUFFLE_TRANSFORM_NONE)
+                    {
+                        c.Layout.Add(stream.size() - head, elementSize, GACL_STREAM_SECTION_KIND_BLOCKS);
+                    }
+                    else
+                    {
+                        StreamLayout_AddShuffled(c.Layout, uint8_t(c.Pattern), stream.size() - head);
+                    }
+                    compressTask(c.Data, stream.data(), stream.size(), candParams, &c.Layout);
                     if (twoStage)
                     {
                         c.Stream.swap(stream);
@@ -744,7 +787,9 @@ HRESULT GACL_ShuffleCompress_BCn(
             {
                 std::vector<uint8_t> shuffled(params.SizeInBytes);
                 pShuffle(shuffled.data(), c.Src, params.SizeInBytes, c.Version);
-                compressTask(c.Data, shuffled.data(), params.SizeInBytes, candParams);
+                c.Layout = StreamLayout(c.Id, false);
+                StreamLayout_AddShuffled(c.Layout, uint8_t(c.Pattern), params.SizeInBytes);
+                compressTask(c.Data, shuffled.data(), params.SizeInBytes, candParams, &c.Layout);
                 if (twoStage)
                 {
                     c.Stream.swap(shuffled);
@@ -752,7 +797,9 @@ HRESULT GACL_ShuffleCompress_BCn(
             }
             else
             {
-                compressTask(c.Data, c.Src, params.SizeInBytes, candParams);
+                c.Layout = StreamLayout(c.Id, false);
+                c.Layout.Add(params.SizeInBytes, elementSize, GACL_STREAM_SECTION_KIND_BLOCKS);
+                compressTask(c.Data, c.Src, params.SizeInBytes, candParams, &c.Layout);
             }
             }));
     }
@@ -802,7 +849,7 @@ HRESULT GACL_ShuffleCompress_BCn(
             for (Candidate* c : finalists)
             {
                 finalTasks.push_back(std::thread([&, c] {
-                    compressTask(c->Data, c->Stream.empty() ? c->Src : c->Stream.data(), c->Stream.empty() ? params.SizeInBytes : c->Stream.size(), &params);
+                    compressTask(c->Data, c->Stream.empty() ? c->Src : c->Stream.data(), c->Stream.empty() ? params.SizeInBytes : c->Stream.size(), &params, &c->Layout);
                     }));
             }
             for (auto& task : finalTasks) task.join();

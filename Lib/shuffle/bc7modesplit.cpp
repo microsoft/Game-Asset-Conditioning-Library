@@ -12,6 +12,7 @@
 #include "../BCnBlockDefs.h"
 #include "bc7.h"
 #include "bc7anchors.h"
+#include "streamlayout.h"
 
 #include <intrin.h>
 #include <immintrin.h>
@@ -4570,7 +4571,7 @@ namespace SplitSectionLayout
 }
 
 
-void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uint8_t>& destA, std::vector<uint8_t>& destB, BC7ModeSplitShuffleOptions& opt, BC7TextureMetrics& metrics)
+void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uint8_t>& destA, std::vector<uint8_t>& destB, BC7ModeSplitShuffleOptions& opt, BC7TextureMetrics& metrics, StreamLayout* layoutsOut)
 {
     const size_t block_count = srcSize / 16;
     const uint8_t* nextStageSrc = src;
@@ -5020,6 +5021,8 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
     OutputDebugString(message);
 #endif
 
+    uint8_t selectors[8] = {};
+    size_t layoutBlockBytes = 0, layoutTableBytes = 0;
     if (sectionLayout)
     {
         SplitSectionLayout::Section sections[16];
@@ -5040,7 +5043,6 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
         }
         SplitSectionLayout::Choose(sections, opt, srcSize > projected ? srcSize - projected : 0);
 
-        uint8_t selectors[8] = {};
         for (int m = 0; m < 8; m++)
         {
             const uint8_t colorSelector = SplitSectionLayout::Apply(sections[m]);
@@ -5049,6 +5051,8 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
         }
         std::vector<uint8_t> layoutBlock, layoutTables;
         SplitSectionLayout::Block(sections, selectors, layoutBlock, layoutTables);
+        layoutBlockBytes = layoutBlock.size();
+        layoutTableBytes = layoutTables.size();
         for (auto out : { &destA, &destB })
         {
             if (out->size() == 0) continue;
@@ -5106,6 +5110,56 @@ void BC7_ModeSplit_Transform(const uint8_t* src, size_t srcSize, std::vector<uin
 
             out->resize(currentSize + scrapDataSize);
             memcpy_s(out->data() + currentSize, scrapDataSize, b.Scraps64.data(), scrapDataSize);
+        }
+    }
+
+    // the sections of each stream as assembled above, for the compression routines (GACL_Compression_GetStreamLayout)
+    if (layoutsOut != nullptr)
+    {
+        // a color or misc section of n blocks: its unit planes when the section layout transposed it
+        auto addSection = [](StreamLayout& layout, size_t bits, size_t n, unsigned unitCode, GACL_STREAM_SECTION_KIND kind)
+            {
+                const size_t bytes = (bits + 7) / 8;
+                const size_t stride = n != 0 && bits % 8 == 0 && bits / 8 % n == 0 ? bits / 8 / n : 0;
+                if (stride == 0)
+                {
+                    layout.Add(bytes, 1, kind);
+                }
+                else if (n >= 2 && SplitSectionLayout::UnitAllowed(unitCode, stride))
+                {
+                    const size_t unit = SplitSectionLayout::UnitBytes(unitCode);
+                    for (size_t u = 0; u < stride / unit; u++)
+                    {
+                        layout.Add(n * unit, unit, kind);
+                    }
+                }
+                else
+                {
+                    layout.Add(bytes, stride, kind);
+                }
+            };
+        for (int s = 0; s < 2; s++)
+        {
+            const std::vector<uint8_t>& out = s ? destB : destA;
+            StreamLayout& layout = layoutsOut[s];
+            layout = StreamLayout(GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT, extensionByte.SpaceCurveWidthInTilesLog2 != 0);
+            if (out.empty())
+            {
+                continue;
+            }
+            layout.Add(header.size() + layoutBlockBytes, 1, GACL_STREAM_SECTION_KIND_OTHER);
+            layout.Add(s ? b.ModeB.size() : (modesUsed > 1 ? 3 : 0) + b.ModeA.size(), 1, GACL_STREAM_SECTION_KIND_OTHER);
+            layout.Add(layoutTableBytes, 1, GACL_STREAM_SECTION_KIND_OTHER);
+            for (int m = 0; m < 8; m++)
+            {
+                addSection(layout, b.ColorDataBitCounts[m], sectionCounts[m], selectors[m] & 3u, GACL_STREAM_SECTION_KIND_ENDPOINTS);
+            }
+            for (int m = 0; m < 8; m++)
+            {
+                addSection(layout, b.MiscDataBitCounts[m], sectionCounts[m], (selectors[m] >> SplitSectionLayout::MiscShift) & 3u, GACL_STREAM_SECTION_KIND_INDICES);
+            }
+            layout.Add((b.ScrapsBitCount + 7) / 8, 1, GACL_STREAM_SECTION_KIND_OTHER);
+            assert(layout.Size() == out.size());
         }
     }
 }

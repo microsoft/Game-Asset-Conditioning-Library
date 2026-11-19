@@ -42,6 +42,9 @@
     <ClInclude Include="..\..\lib\shuffle\streamheader.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\lib\shuffle\streamlayout.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\lib\shuffle\bcnex.h">
       <Filter>Header Files</Filter>
     </ClInclude>

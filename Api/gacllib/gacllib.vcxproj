@@ -139,6 +139,7 @@
     <ClInclude Include="..\..\Lib\RDO_B\ClusterBlocks_Common.h" />
     <ClInclude Include="..\..\Lib\shuffle\bc7.h" />
     <ClInclude Include="..\..\Lib\shuffle\streamheader.h" />
+    <ClInclude Include="..\..\Lib\shuffle\streamlayout.h" />
     <ClInclude Include="..\..\Lib\shuffle\bcnex.h" />
     <ClInclude Include="..\..\Lib\shuffle\bcnexblockcode.h" />
     <ClInclude Include="..\..\Lib\shuffle\bc7joinblockcode.h" />

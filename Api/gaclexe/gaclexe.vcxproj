@@ -17,12 +17,14 @@
   <ItemGroup>
     <ClCompile Include="..\..\Helpers\FileUtility.cpp" />
     <ClCompile Include="..\..\Helpers\FormatHelper.cpp" />
+    <ClCompile Include="Deflate.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="Processing.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\Helpers\FileUtility.h" />
     <ClInclude Include="..\..\Helpers\FormatHelper.h" />
+    <ClInclude Include="Deflate.h" />
     <ClInclude Include="Processing.h" />
   </ItemGroup>
   <ItemGroup>

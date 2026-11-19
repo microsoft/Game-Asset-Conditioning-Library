@@ -13,6 +13,7 @@
 #include "bcnexblockcode.h"
 #include "bc7.h"
 #include "streamheader.h"
+#include "streamlayout.h"
 #include <intrin.h>
 #include <cassert>
 #include <cstdlib>
@@ -235,6 +236,50 @@ size_t BCn_BlockSize(uint8_t transformId)
     default:
         return 0;
     }
+}
+
+void StreamLayout_AddShuffled(StreamLayout& layout, uint8_t patternId, size_t payloadBytes)
+{
+    // the fields of each pattern (shuffle.h), in stream order: start in 16ths of the shuffled area, bytes per block, kind
+    struct Field
+    {
+        uint8_t At;
+        uint8_t Bytes;
+        GACL_STREAM_SECTION_KIND Kind;
+    };
+    constexpr GACL_STREAM_SECTION_KIND E = GACL_STREAM_SECTION_KIND_ENDPOINTS, I = GACL_STREAM_SECTION_KIND_INDICES;
+    static const Field bc1_224[] = { { 0, 2, E }, { 4, 2, E }, { 8, 4, I } };
+    static const Field bc1_44[] = { { 0, 4, E }, { 8, 4, I } };
+    static const Field bc3_116224[] = { { 0, 1, E }, { 1, 1, E }, { 2, 6, I }, { 8, 2, E }, { 10, 2, E }, { 12, 4, I } };
+    static const Field bc3_664[] = { { 0, 6, E }, { 6, 6, I }, { 12, 4, I } };
+    static const Field bc4_116[] = { { 0, 1, E }, { 2, 1, E }, { 4, 6, I } };
+    static const Field bc5_116116[] = { { 0, 1, E }, { 1, 1, E }, { 2, 6, I }, { 8, 1, E }, { 9, 1, E }, { 10, 6, I } };
+    static const Field bc5_2266[] = { { 0, 2, E }, { 2, 2, E }, { 4, 6, I }, { 10, 6, I } };
+
+    const Field* fields = nullptr;
+    size_t count = 0;
+    switch (patternId)
+    {
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_224: fields = bc1_224; count = _countof(bc1_224); break;
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44: fields = bc1_44; count = _countof(bc1_44); break;
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_116224: fields = bc3_116224; count = _countof(bc3_116224); break;
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC3_664: fields = bc3_664; count = _countof(bc3_664); break;
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC4_116: fields = bc4_116; count = _countof(bc4_116); break;
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_116116: fields = bc5_116116; count = _countof(bc5_116116); break;
+    case GACL_SHUFFLE_TRANSFORM_ZSTD_BC5_2266: fields = bc5_2266; count = _countof(bc5_2266); break;
+    default: break;
+    }
+
+    // the patterns shuffle whole groups of blocks (GroupBlocks), and copy the blocks after the last group
+    const size_t bs = BCn_BlockSize(patternId);
+    const size_t group = fields != nullptr ? GroupBlocks(patternId) * bs : 0;
+    const size_t area = group ? payloadBytes / group * group : 0;
+    for (size_t i = 0; i < count; i++)
+    {
+        const size_t start = area * fields[i].At / 16, end = i + 1 < count ? area * fields[i + 1].At / 16 : area;
+        layout.Add(end - start, fields[i].Bytes, fields[i].Kind);
+    }
+    layout.Add(payloadBytes - area, bs ? bs : 1, GACL_STREAM_SECTION_KIND_BLOCKS);
 }
 
 uint8_t BCnEx_TransformId(uint8_t transformId)

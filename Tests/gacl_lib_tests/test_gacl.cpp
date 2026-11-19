@@ -1814,6 +1814,284 @@ TEST(ShuffleCompress, CustomRoutines_DefaultLevelChoices) {
     }
 }
 
+// GACL_Compression_GetStreamLayout(): the layout of the stream the compression routines are called for, on their thread from the
+// init routine's entry to the cleanup routine's return.  These routines wrap GACL's, recording the layout of every stream, which
+// must cover the stream exactly with sections of whole elements.
+namespace LayoutRoutines
+{
+    struct Record
+    {
+        GACL_SHUFFLE_TRANSFORM Transform;
+        bool Curved;
+        vector<GACL_STREAM_SECTION> Sections;
+        uint8_t Head[2];        // the stream's first bytes
+    };
+
+    mutex s_lock;               // candidates compress on threads of their own
+    vector<Record> s_records;
+    vector<string> s_errors;
+
+    void Fail(const string& error)
+    {
+        lock_guard<mutex> lock(s_lock);
+        s_errors.push_back(error);
+    }
+
+    HRESULT Init(void** cc, size_t* destBytesRequired, const SHUFFLE_COMPRESS_PARAMETERS* params)
+    {
+        if (GACL_Compression_GetStreamLayout() == nullptr)
+        {
+            Fail("no layout in the init routine");
+        }
+        return GACL_Compression_DefaultInitRoutine(cc, destBytesRequired, params);
+    }
+
+    HRESULT Compress(void* cc, void* dest, size_t* destBytes, const void* src, size_t srcBytes)
+    {
+        const GACL_STREAM_LAYOUT* layout = GACL_Compression_GetStreamLayout();
+        if (layout == nullptr || layout->Sections == nullptr)
+        {
+            Fail("no layout in the compress routine");
+        }
+        else
+        {
+            Record r = { layout->Transform, layout->Curved, vector<GACL_STREAM_SECTION>(layout->Sections, layout->Sections + layout->SectionCount), {} };
+            memcpy(r.Head, src, (std::min)(srcBytes, sizeof(r.Head)));
+            size_t offset = 0;
+            for (const GACL_STREAM_SECTION& s : r.Sections)
+            {
+                if (s.Offset != offset || s.Size == 0 || s.ElementSize == 0 || s.Size % s.ElementSize != 0 || s.Kind > GACL_STREAM_SECTION_KIND_OTHER)
+                {
+                    Fail("transform " + to_string(unsigned(r.Transform)) + ": bad section at " + to_string(s.Offset));
+                }
+                offset = s.Offset + s.Size;
+            }
+            if (offset != srcBytes)
+            {
+                Fail("transform " + to_string(unsigned(r.Transform)) + ": sections end at " + to_string(offset) + " of " + to_string(srcBytes));
+            }
+            lock_guard<mutex> lock(s_lock);
+            s_records.push_back(r);
+        }
+        return GACL_Compression_DefaultCompressRoutine(cc, dest, destBytes, src, srcBytes);
+    }
+
+    HRESULT Cleanup(void* cc)
+    {
+        if (GACL_Compression_GetStreamLayout() == nullptr)
+        {
+            Fail("no layout in the cleanup routine");
+        }
+        return GACL_Compression_DefaultCleanupRoutine(cc);
+    }
+
+    // installs the routines, with no records, until destroyed
+    struct Installed
+    {
+        Installed()
+        {
+            s_records.clear();
+            s_errors.clear();
+            GACL_Compression_InitRoutine = &Init;
+            GACL_Compression_CompressRoutine = &Compress;
+            GACL_Compression_CleanupRoutine = &Cleanup;
+        }
+        ~Installed()
+        {
+            GACL_Compression_InitRoutine = &GACL_Compression_DefaultInitRoutine;
+            GACL_Compression_CompressRoutine = &GACL_Compression_DefaultCompressRoutine;
+            GACL_Compression_CleanupRoutine = &GACL_Compression_DefaultCleanupRoutine;
+        }
+    };
+
+    string Errors()
+    {
+        string all;
+        for (const string& e : s_errors)
+        {
+            all += e + "\n";
+        }
+        return all;
+    }
+
+    // each section's kind letter (Header, Blocks, Endpoints, Indices, Other)
+    string Kinds(const Record& r)
+    {
+        string kinds;
+        for (const GACL_STREAM_SECTION& s : r.Sections)
+        {
+            kinds += s.Kind <= GACL_STREAM_SECTION_KIND_OTHER ? "HBEIO"[s.Kind] : '?';
+        }
+        return kinds;
+    }
+
+    // "transform: kind offset+size/element size, ...", e.g. "1: E 0+16384/2, E 16384+16384/2, I 32768+32768/4"
+    string Describe(const Record& r)
+    {
+        const string kinds = Kinds(r);
+        string d = to_string(unsigned(r.Transform)) + (r.Curved ? " curved:" : ":");
+        for (size_t i = 0; i < r.Sections.size(); i++)
+        {
+            const GACL_STREAM_SECTION& s = r.Sections[i];
+            d += string(i ? ", " : " ") + kinds[i] + " " + to_string(s.Offset) + "+" + to_string(s.Size) + "/" + to_string(s.ElementSize);
+        }
+        return d;
+    }
+
+    vector<string> Described()
+    {
+        vector<string> all;
+        for (const Record& r : s_records)
+        {
+            all.push_back(Describe(r));
+        }
+        sort(all.begin(), all.end());
+        return all;
+    }
+}
+
+TEST(CompressionLayout, CompressBuffer) {
+    const vector<uint8_t> src = MakePatternedBuffer(64 * 1024);
+    vector<uint8_t> dest(src.size());
+    size_t destBytesWritten = 0;
+    EXPECT_EQ(GACL_Compression_GetStreamLayout(), nullptr);
+    {
+        const LayoutRoutines::Installed installed;
+        ASSERT_EQ(GACL_Compression_CompressBuffer(dest.data(), src.size(), &destBytesWritten, src.data(), nullptr), S_OK);
+    }
+    EXPECT_EQ(GACL_Compression_GetStreamLayout(), nullptr);
+    EXPECT_TRUE(LayoutRoutines::s_errors.empty()) << LayoutRoutines::Errors();
+    const vector<string> expected = { "0: O 0+65536/1" };
+    EXPECT_EQ(LayoutRoutines::Described(), expected);
+}
+
+// 8193 BC1 blocks: the shuffle patterns' fields hold the first 8192, and the last is left unshuffled
+TEST(CompressionLayout, BC1Streams) {
+    const vector<uint8_t> tex = MakePatternedBuffer(64 * 1024 + 8);
+    struct LayoutCase
+    {
+        GACL_SHUFFLE_TRANSFORM request;
+        vector<string> layouts;     // sorted
+    };
+    const LayoutCase cases[] = {
+        { GACL_SHUFFLE_TRANSFORM_GROUP_ANY_SUPPORTED, {
+            "1: E 0+16384/2, E 16384+16384/2, I 32768+32768/4, B 65536+8/8",       // BC1_224
+            "7: B 0+65544/8" } },                                                   // ZSTD_ONLY
+        { GACL_SHUFFLE_TRANSFORM_ZSTD_BC1_44, {
+            "8: E 0+32768/4, I 32768+32768/4, B 65536+8/8" } },
+    };
+    for (const LayoutCase& c : cases)
+    {
+        SHUFFLE_COMPRESS_PARAMETERS params = {};
+        params.SizeInBytes = tex.size();
+        params.Format = DXGI_FORMAT_BC1_UNORM;
+        params.TextureData = tex.data();
+        GACL_SHUFFLE_TRANSFORM tid = c.request;
+        vector<uint8_t> sc(tex.size());
+        size_t scBytes = 0;
+        {
+            const LayoutRoutines::Installed installed;
+            ASSERT_EQ(GACL_ShuffleCompress_BCn(sc.data(), &tid, &scBytes, params), S_OK) << "request " << unsigned(c.request);
+        }
+        EXPECT_TRUE(LayoutRoutines::s_errors.empty()) << LayoutRoutines::Errors();
+        EXPECT_EQ(LayoutRoutines::Described(), c.layouts) << "request " << unsigned(c.request);
+    }
+}
+
+// An EX stream starts with its header, which records a curve (its parameter 1) when the layout is curved
+TEST(CompressionLayout, BC1CurvedStreams) {
+    const CurvedInputFormat& f = kCurvedInputFormats[0];
+    vector<uint8_t> tex, rdo;
+    CurvedInputTextures(f, tex, rdo);
+    SHUFFLE_COMPRESS_PARAMETERS params = {};
+    params.SizeInBytes = tex.size();
+    params.Format = f.format;
+    params.TextureData = tex.data();
+    params.CurvedTransforms.WidthInPixels = kCurvedInputWidth;
+    params.CurvedTransforms.TextureData = tex.data();
+    GACL_SHUFFLE_TRANSFORM tid = GACL_SHUFFLE_TRANSFORM_GROUP_ANY_EXPERIMENTAL;
+    vector<uint8_t> sc(tex.size());
+    size_t scBytes = 0;
+    {
+        const LayoutRoutines::Installed installed;
+        ASSERT_EQ(GACL_ShuffleCompress_BCn(sc.data(), &tid, &scBytes, params), S_OK);
+    }
+    EXPECT_TRUE(LayoutRoutines::s_errors.empty()) << LayoutRoutines::Errors();
+
+    const uint8_t curveParameter = uint8_t(1u << (3 + GACL_STREAMHEADER_PARAM_CURVE_WIDTH_TILES - 1));     // its presence bit in byte 0
+    size_t curved = 0;
+    for (const LayoutRoutines::Record& r : LayoutRoutines::s_records)
+    {
+        const string kinds = LayoutRoutines::Kinds(r);
+        if (r.Transform == f.ex)
+        {
+            EXPECT_TRUE(kinds[0] == 'H' && kinds.find('H', 1) == string::npos) << LayoutRoutines::Describe(r);
+            EXPECT_EQ(r.Curved, (r.Head[0] & curveParameter) != 0) << LayoutRoutines::Describe(r);
+        }
+        else
+        {
+            EXPECT_EQ(kinds.find('H'), string::npos) << LayoutRoutines::Describe(r);
+            EXPECT_FALSE(r.Curved) << LayoutRoutines::Describe(r);
+        }
+        curved += r.Curved ? 1 : 0;
+    }
+    EXPECT_GT(curved, 0u);
+}
+
+// BC7 Split streams: the header (with any section layout block), mode stream and tables, each mode's color section (ENDPOINTS),
+// then each mode's misc section (INDICES), then any scraps; the header's extension byte records a curve
+TEST(CompressionLayout, BC7Split) {
+    const filesystem::path file = GetAssetsDirectory() / "BC7mip0" / L"LetterBlock_LetterA_albedo.DDS";
+    ScratchImage si;
+    TexMetadata siMeta;
+    ASSERT_EQ(LoadFromDDSFile(file.c_str(), DDS_FLAGS::DDS_FLAGS_NONE, &siMeta, si), S_OK) << file;
+    const Image* img = si.GetImage(0, 0, 0);
+    const size_t srcBytes = TileRowPrefixBytes(*img, si.GetPixelsSize(), 256 * 1024);
+    ASSERT_EQ(srcBytes, 256u * 1024) << file;
+
+    // header, mode stream and tables (OTHER, any of the last two empty), ENDPOINTS, INDICES, then any scraps (OTHER)
+    auto splitKinds = [](const string& kinds)
+        {
+            size_t i = 0;
+            auto run = [&](char kind) { const size_t start = i; while (i < kinds.size() && kinds[i] == kind) i++; return i - start; };
+            const size_t head = run('O'), endpoints = run('E'), indices = run('I'), scraps = run('O');
+            return head >= 1 && head <= 3 && endpoints >= 1 && indices >= 1 && scraps <= 1 && i == kinds.size();
+        };
+
+    for (bool curve : { false, true })
+    {
+        SHUFFLE_COMPRESS_PARAMETERS params = { srcBytes, siMeta.format, img->pixels, {}, {} };
+        if (curve)
+        {
+            params.CurvedTransforms = { img->width, img->pixels };
+        }
+        GACL_SHUFFLE_TRANSFORM tid = GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT;
+        vector<uint8_t> sc(srcBytes);
+        size_t scBytes = 0;
+        {
+            const LayoutRoutines::Installed installed;
+            ASSERT_EQ(GACL_ShuffleCompress_BCn(sc.data(), &tid, &scBytes, params), S_OK) << "curve " << curve;
+        }
+        EXPECT_TRUE(LayoutRoutines::s_errors.empty()) << LayoutRoutines::Errors();
+
+        size_t split = 0;
+        for (const LayoutRoutines::Record& r : LayoutRoutines::s_records)
+        {
+            const string at = string(curve ? "curve, " : "linear, ") + LayoutRoutines::Describe(r);
+            if (r.Transform != GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_SPLIT)
+            {
+                EXPECT_EQ(LayoutRoutines::Describe(r), "7: B 0+262144/16") << at;        // the unshuffled candidate
+                continue;
+            }
+            split++;
+            EXPECT_TRUE(splitKinds(LayoutRoutines::Kinds(r))) << at;
+            EXPECT_EQ(r.Curved, curve) << at;
+            EXPECT_EQ(r.Curved, (r.Head[0] & 0x80) != 0 && (r.Head[1] & 7) != 0) << at;
+        }
+        EXPECT_GT(split, 0u) << "curve " << curve;
+    }
+}
+
 // The BC7 Join GPU decoder (Shaders/Shuffle/BC7JoinDecode.hlsli) embeds tables derived from the library's Join transform as
 // BC7JoinTables.hlsli, which this test checks and generates: when they differ it fails and writes the regenerated file to test_output.
 #include <random>

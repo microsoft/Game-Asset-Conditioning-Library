@@ -11,6 +11,7 @@
 #include  "gacl.h"
 #include "../helpers/Utility.h"
 #include "Processing.h"
+#include "Deflate.h"
 #define ZSTD_STATIC_LINKING_ONLY
 #include <zstd.h>
 
@@ -119,6 +120,29 @@ static void PrintThirdPartyLicenses(void)
     printf("ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT\n");
     printf("(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS\n");
     printf("SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.\n");
+    printf("\n");
+    printf("\n");
+
+    printf("*** Third party component notice: zlib ***\n");
+    printf("https://zlib.net\n");
+    printf("\n");
+    printf("Copyright (C) 1995-2026 Jean-loup Gailly and Mark Adler\n");
+    printf("\n");
+    printf("This software is provided 'as-is', without any express or implied\n");
+    printf("warranty.  In no event will the authors be held liable for any damages\n");
+    printf("arising from the use of this software.\n");
+    printf("\n");
+    printf("Permission is granted to anyone to use this software for any purpose,\n");
+    printf("including commercial applications, and to alter it and redistribute it\n");
+    printf("freely, subject to the following restrictions:\n");
+    printf("\n");
+    printf("1. The origin of this software must not be misrepresented; you must not\n");
+    printf("   claim that you wrote the original software. If you use this software\n");
+    printf("   in a product, an acknowledgment in the product documentation would be\n");
+    printf("   appreciated but is not required.\n");
+    printf("2. Altered source versions must be plainly marked as such, and must not be\n");
+    printf("   misrepresented as being the original software.\n");
+    printf("3. This notice may not be removed or altered from any source distribution.\n");
 }
 #endif
 
@@ -156,6 +180,12 @@ static void PrintHelp(void)
     printf("\n");
     printf("  -ztbs, --zstdtargetblocksize <size>   \n");
     printf("                            Target compressed block size for zstd compression. Default: 8192\n");
+    printf("\n");
+    printf("  -deflate, --deflate       Compress with zlib (DEFLATE, level 9) instead of zstd, for platforms whose decompression\n");
+    printf("                            hardware only decodes DEFLATE.  Each output is one standard zlib stream.  Shuffled streams\n");
+    printf("                            end DEFLATE blocks (new Huffman tables) at their sections' boundaries, by a per-format rule.\n");
+    printf("                            -z and -ztbs do not apply.  Exports are named <transform extension>.zlib (.zlib alone for\n");
+    printf("                            unshuffled streams), and -cr output defaults to <input>.zlib.\n");
     printf("\n");
     printf("  -v, --verbose             Display more information and statistics.\n");
     printf("  -q, --quiet               Suppress unnecessary messages.\n");
@@ -209,7 +239,8 @@ static void PrintHelp(void)
     printf("                            Compress the input file as opaque bytes, with no texture interpretation:\n");
     printf("                            no DDS parsing, and no --format or --width required.  For NON-TEXTURE\n");
     printf("                            content that needs the same compression settings GACL applies to\n");
-    printf("                            textures.  Output goes to --output if given, otherwise <input>.zst.\n");
+    printf("                            textures.  Output goes to --output if given, otherwise <input>.zst (<input>.zlib\n");
+    printf("                            with -deflate).\n");
     printf("\n");
     printf("  -e, --export <basename>   Output base name.  Each mip\\slice will be exported as a\n");
     printf("                            Shuffle+Compressed opaque data stream.  In mipmapped or array\n");
@@ -341,6 +372,7 @@ int wmain(size_t argc, const wchar_t* argv[])
     bool blockBC7Join = false;
     bool blockBC7Split = false;
     bool compressRaw = false;
+    bool deflate = false;
 
     for (size_t i = 2; i < argc; )
     {
@@ -371,6 +403,10 @@ int wmain(size_t argc, const wchar_t* argv[])
         else if ((option == L"-ztbs" || option == L"--zstdtargetblocksize") && i < argc)
         {
             compressOptions.TargetBlockSize = std::max<int>(ZSTD_TARGETCBLOCKSIZE_MIN, std::min<int>(ZSTD_TARGETCBLOCKSIZE_MAX, std::stol(wstring(argv[i++]), 0, 0)));
+        }
+        else if (option == L"-deflate" || option == L"--deflate")
+        {
+            deflate = true;
         }
         else if ((option == L"-v" || option == L"--verbose") && verbosity < Verbosity::eMaximum)
         {
@@ -522,6 +558,7 @@ int wmain(size_t argc, const wchar_t* argv[])
 #endif
         printf("DEBUG: curveOptions.ForwardSpaceCurve = %d\n", curveOptions.ForwardSpaceCurve);
         printf("DEBUG: curveOptions.ReverseSpaceCurve = %d\n", curveOptions.ReverseSpaceCurve);
+        printf("DEBUG: deflate = %d\n", deflate);
     }
 
     //  Raw mode is not a transform, so it must be exempt from the transform requirement below.
@@ -565,16 +602,21 @@ int wmain(size_t argc, const wchar_t* argv[])
     }
 
 #if GACL_INCLUDE_CLER
-    ProcessingOptions processingOptions = { shuffleOptions, compressOptions, clerOptions, blerOptions, curveOptions};
+    ProcessingOptions processingOptions = { shuffleOptions, compressOptions, clerOptions, blerOptions, curveOptions, deflate };
 #else
-    ProcessingOptions processingOptions = { shuffleOptions, compressOptions, blerOptions, curveOptions };
+    ProcessingOptions processingOptions = { shuffleOptions, compressOptions, blerOptions, curveOptions, deflate };
 #endif
+
+    if (deflate)
+    {
+        Deflate_InstallRoutines();
+    }
 
     if (compressRaw)
     {
         //  Raw mode bypasses the texture pipeline, so the texture-mode requirements above do not
         //  apply to it.
-        std::wstring rawOutputFileName = outputFileName.empty() ? (inputFileName + L".zst") : outputFileName;
+        std::wstring rawOutputFileName = outputFileName.empty() ? (inputFileName + (deflate ? L".zlib" : L".zst")) : outputFileName;
 
         if (!ProcessRawFile(inputFileName, rawOutputFileName, processingOptions, verbosity))
         {

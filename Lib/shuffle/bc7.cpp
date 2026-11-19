@@ -13,6 +13,7 @@
 #include "bc7.h"
 #include "streamheader.h"
 #include "bcnex.h"
+#include "streamlayout.h"
 #include "../helpers/Utility.h"
 #include "../helpers/FileUtility.h"
 #include "../helpers/FormatHelper.h"
@@ -895,8 +896,10 @@ void BC7_Mode45_ReorderRGBA(const uint8_t* src, size_t srcSize, std::vector<uint
     }
 }
 
-static void CompressTask(const uint8_t* pSrc, size_t sizeInBytes, std::vector<uint8_t>* pCompressed, SHUFFLE_COMPRESS_PARAMETERS& params, HRESULT& errorOut)
+// layout (optional) is published to the compression routines (GACL_Compression_GetStreamLayout)
+static void CompressTask(const uint8_t* pSrc, size_t sizeInBytes, std::vector<uint8_t>* pCompressed, SHUFFLE_COMPRESS_PARAMETERS& params, HRESULT& errorOut, const StreamLayout* layout)
 {
+    const StreamLayoutScope layoutScope(layout);
     void* cc = nullptr;
     size_t requiredBytes;
     HRESULT cleanup = S_OK, status = GACL_Compression_InitRoutine(&cc, &requiredBytes, &params);
@@ -921,9 +924,27 @@ static void CompressTask(const uint8_t* pSrc, size_t sizeInBytes, std::vector<ui
     }
 }
 
+// the layout of the unshuffled source (GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY)
+static StreamLayout BC7_NoShuffleLayout(size_t srcSize)
+{
+    StreamLayout layout(GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY, false);
+    layout.Add(srcSize, 16, GACL_STREAM_SECTION_KIND_BLOCKS);
+    return layout;
+}
+
+// the layout of a Join (or curve-only) stream: blocks behind the parameter header, if any
+static StreamLayout BC7_BlocksLayout(GACL_SHUFFLE_TRANSFORM transform, uint8_t curveWidthTiles, size_t headerBlocks, size_t streamSize)
+{
+    StreamLayout layout(transform, curveWidthTiles != 0);
+    layout.Add(headerBlocks * 16, 16, GACL_STREAM_SECTION_KIND_HEADER);
+    layout.Add(streamSize - headerBlocks * 16, 16, GACL_STREAM_SECTION_KIND_BLOCKS);
+    return layout;
+}
+
 static void strat_BC7_NoShuffle(const uint8_t* src, size_t srcSize, SHUFFLE_COMPRESS_PARAMETERS *params, vector<uint8_t>* compressedData, HRESULT *errorOut)
 {
-    CompressTask(src, srcSize, compressedData, *params, *errorOut);
+    const StreamLayout layout = BC7_NoShuffleLayout(srcSize);
+    CompressTask(src, srcSize, compressedData, *params, *errorOut, &layout);
 }
 
 #ifndef GACL_JOINCHK
@@ -956,8 +977,9 @@ static bool BC7_JoinNeedsHeader(const BC7TextureMetrics& metrics, uint8_t curveW
 // Places the parameter header in front of a Join-shuffled stream. The header is added after the shuffle so a
 // decoder can read it without knowing the parameters. Returns false when there is no room for the header within
 // BCNEX_MAX_HEADER_BLOCKS blocks (the GPU decoder's limit), or when the curve doesn't fit the stream
-// (GACL_Shuffle_ApplySpaceCurve's geometry), which the decoders would reject.
-static bool BC7_JoinAddHeader(vector<uint8_t>& shuffled, const BC7TextureMetrics& metrics, uint8_t curveWidthTiles, size_t* codedOut)
+// (GACL_Shuffle_ApplySpaceCurve's geometry), which the decoders would reject. headerBlocksOut (optional) receives
+// the number of blocks the header takes.
+static bool BC7_JoinAddHeader(vector<uint8_t>& shuffled, const BC7TextureMetrics& metrics, uint8_t curveWidthTiles, size_t* codedOut, size_t* headerBlocksOut = nullptr)
 {
     if (curveWidthTiles && !GACL_Shuffle_ApplySpaceCurve(nullptr, nullptr, shuffled.size(), 16, size_t(curveWidthTiles) * 128, true))
     {
@@ -999,6 +1021,10 @@ static bool BC7_JoinAddHeader(vector<uint8_t>& shuffled, const BC7TextureMetrics
     }
 
     *codedOut = info.Coded.size();
+    if (headerBlocksOut)
+    {
+        *headerBlocksOut = info.HeaderBlocks;
+    }
     shuffled.swap(withHeader);
     return true;
 }
@@ -1060,22 +1086,27 @@ static bool BC7_JoinVerify(const vector<uint8_t>& stream, bool header, uint8_t c
 class StreamOutputCache
 {
 public:
-    // the stream that compressed to the given output (nullptr if none did); call once no compression is in progress
-    const vector<uint8_t>* FindStream(const vector<uint8_t>& compressed)
+    // the stream that compressed to the given output (nullptr if none did), and its layout (layoutOut, optional); call once no
+    // compression is in progress
+    const vector<uint8_t>* FindStream(const vector<uint8_t>& compressed, const StreamLayout** layoutOut = nullptr)
     {
         lock_guard<mutex> guard(m_lock);
         for (const unique_ptr<Entry>& x : m_entries)
         {
             if (!compressed.empty() && x->compressed == compressed)
             {
+                if (layoutOut)
+                {
+                    *layoutOut = x->hasLayout ? &x->layout : nullptr;
+                }
                 return &x->stream;
             }
         }
         return nullptr;
     }
 
-    // takes the stream, unless an identical one is already held
-    void Compress(vector<uint8_t>&& stream, vector<uint8_t>* compressed, SHUFFLE_COMPRESS_PARAMETERS& params, HRESULT& errorOut)
+    // takes the stream, unless an identical one (which has the same layout) is already held
+    void Compress(vector<uint8_t>&& stream, vector<uint8_t>* compressed, SHUFFLE_COMPRESS_PARAMETERS& params, HRESULT& errorOut, const StreamLayout* layout)
     {
         Entry* e = nullptr;
         {
@@ -1093,9 +1124,14 @@ public:
                 m_entries.push_back(make_unique<Entry>());
                 e = m_entries.back().get();
                 e->stream = std::move(stream);
+                if (layout)
+                {
+                    e->layout = *layout;
+                    e->hasLayout = true;
+                }
             }
         }
-        call_once(e->once, [&] { CompressTask(e->stream.data(), e->stream.size(), &e->compressed, params, e->status); });
+        call_once(e->once, [&] { CompressTask(e->stream.data(), e->stream.size(), &e->compressed, params, e->status, e->hasLayout ? &e->layout : nullptr); });
         if (!SUCCEEDED(e->status))
         {
             errorOut = e->status;
@@ -1110,6 +1146,8 @@ private:
         vector<uint8_t> stream;
         vector<uint8_t> compressed;
         HRESULT status = S_OK;
+        StreamLayout layout;
+        bool hasLayout = false;
     };
     mutex m_lock;
     vector<unique_ptr<Entry>> m_entries;
@@ -1120,7 +1158,8 @@ private:
 static void strat_BC7_CurveOnly(const uint8_t* src, size_t srcSize, uint8_t curveWidthTiles, SHUFFLE_COMPRESS_PARAMETERS* params, StreamOutputCache* outputCache, vector<uint8_t>* compressedData, HRESULT* errorOut, size_t* codedOut)
 {
     vector<uint8_t> stream;
-    if (!BCnEx_EncodeCurveOnly(src, srcSize, uint8_t(GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN), curveWidthTiles, stream, nullptr, codedOut))
+    size_t headerBlocks = 0;
+    if (!BCnEx_EncodeCurveOnly(src, srcSize, uint8_t(GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN), curveWidthTiles, stream, &headerBlocks, codedOut))
     {
         compressedData->resize(0);
         return;
@@ -1136,7 +1175,8 @@ static void strat_BC7_CurveOnly(const uint8_t* src, size_t srcSize, uint8_t curv
         return;
     }
 #endif
-    outputCache->Compress(std::move(stream), compressedData, *params, *errorOut);
+    const StreamLayout layout = BC7_BlocksLayout(GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX, curveWidthTiles, headerBlocks, stream.size());
+    outputCache->Compress(std::move(stream), compressedData, *params, *errorOut, &layout);
 }
 
 // codedOut (optional) receives the number of blocks the stream header had to code itself (0 when the candidate is dropped).
@@ -1157,8 +1197,8 @@ static void strat_BC7_JoinMode(const uint8_t* src, size_t srcSize, BC7TextureMet
     BC7_ModeJoin_Transform(reordered45.data(), reordered45.size(), shuffled, *metrics, ctrl);
 
     const bool header = BC7_JoinNeedsHeader(*metrics, curveWidthTiles);
-    size_t coded = 0;
-    if (header && !BC7_JoinAddHeader(shuffled, *metrics, curveWidthTiles, &coded))
+    size_t coded = 0, headerBlocks = 0;
+    if (header && !BC7_JoinAddHeader(shuffled, *metrics, curveWidthTiles, &coded, &headerBlocks))
     {
         compressedData->resize(0);      // no room for the header: candidate dropped
         return;
@@ -1179,13 +1219,15 @@ static void strat_BC7_JoinMode(const uint8_t* src, size_t srcSize, BC7TextureMet
     }
 #endif
 
+    const StreamLayout layout = BC7_BlocksLayout(header ? GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_EX : GACL_SHUFFLE_TRANSFORM_ZSTD_BC7_JOIN,
+        curveWidthTiles, headerBlocks, shuffled.size());
     if (outputCache != nullptr)
     {
-        outputCache->Compress(std::move(shuffled), compressedData, *params, *errorOut);
+        outputCache->Compress(std::move(shuffled), compressedData, *params, *errorOut, &layout);
     }
     else
     {
-        CompressTask(shuffled.data(), shuffled.size(), compressedData, *params, *errorOut);
+        CompressTask(shuffled.data(), shuffled.size(), compressedData, *params, *errorOut, &layout);
     }
 }
 
@@ -1212,9 +1254,10 @@ static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplit
 #endif
 
     std::vector<uint8_t> outA, outB;
+    StreamLayout layouts[2];
     thread compressTaskA;
 
-    BC7_ModeSplit_Transform(src, srcSize, outA, outB, *opt, *metrics);
+    BC7_ModeSplit_Transform(src, srcSize, outA, outB, *opt, *metrics, layouts);
 
     // the streams are validated before the cache takes them
     if ((opt->ModeTransform == BC7ModeSplitModeTransformA || opt->ModeTransform == BC7ModeSplitModeTransformAny) && outA.size() <= srcSize)
@@ -1222,7 +1265,7 @@ static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplit
 #if _DEBUG || GACL_JOINCHK
         validateReverse(outA);
 #endif
-        thread t([&] { outputCache->Compress(std::move(outA), compressedDataA, *params, *errorOut); });
+        thread t([&] { outputCache->Compress(std::move(outA), compressedDataA, *params, *errorOut, &layouts[0]); });
         compressTaskA.swap(t);
     }
     else
@@ -1235,7 +1278,7 @@ static void strat_BC7_SplitMode(const uint8_t* src, size_t srcSize, BC7ModeSplit
 #if _DEBUG || GACL_JOINCHK
         validateReverse(outB);
 #endif
-        outputCache->Compress(std::move(outB), compressedDataB, *params, *errorOut);
+        outputCache->Compress(std::move(outB), compressedDataB, *params, *errorOut, &layouts[1]);
     }
     else
     {
@@ -1775,11 +1818,13 @@ HRESULT ShuffleCompress_BC7(
             }
         }
         vector<const vector<uint8_t>*> streams(picks.size(), nullptr);
+        const StreamLayout noShuffleLayout = BC7_NoShuffleLayout(srcSize);
+        vector<const StreamLayout*> layouts(picks.size(), &noShuffleLayout);
         for (size_t j = 0; j < picks.size(); j++)
         {
             if (picks[j].Cache != nullptr)
             {
-                streams[j] = picks[j].Cache->FindStream(*picks[j].Out);
+                streams[j] = picks[j].Cache->FindStream(*picks[j].Out, &layouts[j]);
                 if (streams[j] == nullptr)
                 {
                     hr = E_FAIL;
@@ -1793,7 +1838,7 @@ HRESULT ShuffleCompress_BC7(
             for (size_t j = 0; j < picks.size(); j++)
             {
                 ADDTASK(CompressTask, streams[j] ? streams[j]->data() : srcforUncurvedTransforms, streams[j] ? streams[j]->size() : srcSize,
-                    &finals[j], std::ref(params), std::ref(hr));
+                    &finals[j], std::ref(params), std::ref(hr), layouts[j]);
             }
             for (auto& task : tasks) task.join();
         }

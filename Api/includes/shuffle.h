@@ -178,6 +178,53 @@ GACL_API extern PGACL_COMPRESSION_CLEANUPROUTINE GACL_Compression_CleanupRoutine
 
 
 /// <summary>
+/// Layout of the stream the compression routines are handed, for custom routines that adapt to the stream's content, e.g. a
+/// DEFLATE encoder that starts a new block (with new Huffman tables) where the content changes.  See
+/// GACL_Compression_GetStreamLayout().
+/// </summary>
+
+enum GACL_STREAM_SECTION_KIND
+{
+    GACL_STREAM_SECTION_KIND_HEADER = 0,        // the parameter header of an EX stream (streamheader.h), which may code blocks itself
+    GACL_STREAM_SECTION_KIND_BLOCKS = 1,        // whole blocks, unshuffled: the stream of an unshuffled transform, or the blocks a shuffle pattern leaves at the end of a stream
+    GACL_STREAM_SECTION_KIND_ENDPOINTS = 2,     // shuffled endpoint (color or alpha) fields
+    GACL_STREAM_SECTION_KIND_INDICES = 3,       // shuffled index fields (BC7 Split: the fields of its misc sections)
+    GACL_STREAM_SECTION_KIND_OTHER = 4,         // byte data: GACL_Compression_CompressBuffer() data, and the header, mode stream, tables and scraps of a BC7 Split stream
+};
+
+struct GACL_STREAM_SECTION
+{
+    size_t Offset;                              // byte offset of the section in the stream
+    size_t Size;                                // byte count, never 0
+    size_t ElementSize;                         // bytes per element (block, field or unit), which Size is a multiple of; 1 for byte data
+    GACL_STREAM_SECTION_KIND Kind;
+};
+
+struct GACL_STREAM_LAYOUT
+{
+    GACL_SHUFFLE_TRANSFORM Transform;           // the stream's transform: NONE for GACL_Compression_CompressBuffer() data, ZSTD_ONLY for unshuffled BCn data
+    bool Curved;                                // the stream's blocks are in space curve order (an EX or BC7 Split stream that records a space curve)
+    size_t SectionCount;
+    const GACL_STREAM_SECTION* Sections;        // in stream order, covering the stream exactly
+};
+
+/// <summary>
+/// Returns the layout of the stream being compressed on the calling thread, or nullptr outside the compression routines.
+///
+/// Valid from the init routine's entry to the cleanup routine's return, for calls GACL makes on the calling thread: the stream
+/// passed to the compress routine is the one described (its srcBytes is the layout's size, at most params->SizeInBytes).  GACL
+/// sets it for GACL_Compression_CompressBuffer() and every candidate stream of GACL_ShuffleCompress_BCn().  The section kinds
+/// follow the transform, e.g. a BC1_224 stream of n blocks has an ENDPOINTS section of n * 2 bytes (color_0, 2 byte elements),
+/// one of n * 2 bytes (color_1), and an INDICES section of n * 4 bytes, followed by any BLOCKS the pattern leaves over.  A BC7
+/// Split stream reports each mode's color section as ENDPOINTS and its misc section as INDICES, or each of their unit planes
+/// when the stream's section layout transposes them.
+/// </summary>
+/// <returns>The layout, owned by GACL, or nullptr when no compression routine is running on the calling thread</returns>
+
+GACL_API const GACL_STREAM_LAYOUT* GACL_Compression_GetStreamLayout(void);
+
+
+/// <summary>
 /// Default compression init routine.
 ///
 /// This function will initialize a zstd compression context that will enforce the following settings

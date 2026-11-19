@@ -120,8 +120,14 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\Api\gaclexe\Deflate.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="test_gacl.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\Api\gacllib\gacllib.vcxproj">
+      <Project>{8a56e116-4e72-44e0-aa08-dd46ef9333bd}</Project>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
