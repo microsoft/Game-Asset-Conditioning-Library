@@ -28,6 +28,10 @@ The licenses for those components are listed below.
    - Upstream: https://github.com/google/googletest
    - License: BSD-3-Clause
 
+7) zlib (gacl command-line tool only, for its -deflate option)
+   - Upstream: https://github.com/madler/zlib
+   - License: Zlib
+
 For the exact license text and version resolved in a specific build, see:
 - LICENSE in this repository
 - vcpkg metadata for resolved ports

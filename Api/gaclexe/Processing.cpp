@@ -75,6 +75,22 @@ static void CountBC7Modes(const DirectX::ScratchImage& si, bool debugOutput, siz
     }
 }
 
+//  The file extension of an exported stream: its transform's, or "uncompressed" when it's stored.  -deflate streams add ".zlib",
+//  which replaces "zstd" for unshuffled ones.
+static wstring ExportExtension(GACL_SHUFFLE_TRANSFORM transformID, bool sizeReduced, bool deflate)
+{
+    if (!sizeReduced)
+    {
+        return L"uncompressed";
+    }
+    if (deflate && transformID == GACL_SHUFFLE_TRANSFORM_ZSTD_ONLY)
+    {
+        return L"zlib";
+    }
+    const wstring ext = GACL_ShuffleCompress_GetFileExtensionForTransform(transformID);
+    return deflate ? ext + L".zlib" : ext;
+}
+
 DXGI_FORMAT gacl::IdentifyBCEncodeFormat(const std::string& ident)
 {
     const std::string format = Utility::ToUpper(ident);
@@ -149,7 +165,7 @@ bool gacl::ProcessRawFile(
     else if (hr == S_FALSE)
     {
         //  Nothing was written and raw mode has no store-the-original fallback, so there is no
-        //  output file to produce - fail rather than exit 0 with no .zst on disk.
+        //  output file to produce - fail rather than exit 0 with no output on disk.
         Utility::Printf(GACL_Logging_Priority_High, L"WARNING: Compression did not reduce the size of \"%ws\", no output will be exported\n", inputFileName.c_str());
         return false;
     }
@@ -1047,25 +1063,25 @@ bool gacl::ProcessTexture(
 
                         // S_FALSE: nothing smaller than the source (no compressed data), so it's stored uncompressed like a failure
                         sizeReduced = status == S_OK;
-                        const wchar_t* ext = sizeReduced ? GACL_ShuffleCompress_GetFileExtensionForTransform(transformID) : L"uncompressed";
+                        const wstring ext = ExportExtension(transformID, sizeReduced, options.Deflate);
 
                         bytesProcessed = mipSize;
                         if (!exportBaseName.empty())
                         {
-                            wchar_t fileNamePostfix[64];
+                            wchar_t fileNamePostfix[96];
                             if (siMeta.mipLevels > 1 && siMeta.arraySize > 1)
                             {
-                                swprintf_s(fileNamePostfix, _countof(fileNamePostfix), L".item%I64u.mip%I64u.%ws", item, mip, ext);
+                                swprintf_s(fileNamePostfix, _countof(fileNamePostfix), L".item%I64u.mip%I64u.%ws", item, mip, ext.c_str());
                                 outputDerivedFileName = exportBaseName + fileNamePostfix;
                             }
                             else if (siMeta.mipLevels > 1)
                             {
-                                swprintf_s(fileNamePostfix, _countof(fileNamePostfix), L".mip%I64u.%ws", mip, ext);
+                                swprintf_s(fileNamePostfix, _countof(fileNamePostfix), L".mip%I64u.%ws", mip, ext.c_str());
                                 outputDerivedFileName = exportBaseName + fileNamePostfix;
                             }
                             else if (siMeta.arraySize > 1)
                             {
-                                swprintf_s(fileNamePostfix, _countof(fileNamePostfix), L".item%I64u.%ws", item, ext);
+                                swprintf_s(fileNamePostfix, _countof(fileNamePostfix), L".item%I64u.%ws", item, ext.c_str());
                                 outputDerivedFileName = exportBaseName + fileNamePostfix;
                             }
                             else
@@ -1082,7 +1098,7 @@ bool gacl::ProcessTexture(
 
                         status = GACL_ShuffleCompress_BCn(compressed.data(), &transformID, &compressedBytes, params);
                         sizeReduced = status == S_OK;
-                        const wchar_t* ext = sizeReduced ? GACL_ShuffleCompress_GetFileExtensionForTransform(transformID) : L"uncompressed";
+                        const wstring ext = ExportExtension(transformID, sizeReduced, options.Deflate);
                         outputDerivedFileName = exportBaseName + (siMeta.arraySize > 1 ? L".item" + to_wstring(item) : wstring()) + L".tail." + ext;
                         bytesProcessed = streamSize;
                     }

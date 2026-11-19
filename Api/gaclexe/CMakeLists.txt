@@ -3,11 +3,15 @@ cmake_minimum_required(VERSION 3.21)
 add_executable(gacl
     main.cpp
     Processing.cpp
+    Deflate.cpp
     ../../Helpers/FileUtility.cpp
     ../../Helpers/FormatHelper.cpp
 )
 
 add_executable(GACL::gacl ALIAS gacl)
+
+# zlib backs only the tool's -deflate option, so gacl_lib and its consumers do not depend on it.
+find_package(ZLIB REQUIRED)
 
 target_compile_features(gacl PRIVATE cxx_std_17)
 
@@ -30,7 +34,7 @@ target_compile_options(gacl PRIVATE
     >
 )
 
-target_link_libraries(gacl PRIVATE GACL::gacl_lib)
+target_link_libraries(gacl PRIVATE GACL::gacl_lib ZLIB::ZLIB)
 
 # CET compatibility (x64 only)
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)

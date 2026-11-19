@@ -71,6 +71,7 @@ integration into content pipelines which import textures, and a front end tool i
 ## Projects within this solution include:
 
 * zstd - Consumed via the standard vcpkg port, with GACL enforcing 256 KB-window-aligned compression defaults in-library.
+* zlib - Consumed via the standard vcpkg port, used only by gacl.exe's `-deflate` option.
 * gacl\_lib - Core library that contains APIs for RDO and Shuffle transforms, builds into static lib.
 * gacl\_exe - Builds the gacl.exe front end tool that loads textures and applies selected transforms.
 * Tests/... - gtest based projects used for validation.
@@ -230,6 +231,12 @@ extern PGACL_COMPRESSION_CLEANUPROUTINE GACL_Compression_CleanupRoutine;
 GACL only knows the zstd level (`CompressSettings.Default`) while all three default routines are installed.  With any of them replaced, it
 makes its level-dependent encoder choices as at the default level: the transforms and searches it only tries above that level, which trade
 decode or encode speed for size, stay off.
+
+A replacement routine can also see what it is compressing.  From its init call to its cleanup's return, `GACL_Compression_GetStreamLayout()`
+returns the layout of the stream on the calling thread: its transform, whether its blocks are in space curve order, and its sections (header,
+unshuffled blocks, endpoints, indices or byte data) with their offsets, sizes and element sizes.  gacl.exe's `-deflate` option uses it to
+compress with zlib for platforms whose decompression hardware only decodes DEFLATE: each output is one standard zlib stream, with DEFLATE
+blocks (and so Huffman tables) ended at section boundaries by per-format rules, see [Api/gaclexe/Deflate.cpp](Api/gaclexe/Deflate.cpp).
 
 ## Space Curves and transforms
 

@@ -87,6 +87,7 @@ namespace gacl
 #endif
         BlockLevelEntopyReductionOptions BlerOptions;
         SpaceCurveOptions CurveOptions;
+        bool Deflate;                   // zlib compression routines installed (-deflate), so exports are named .zlib
     };
 
     //  Compresses a file as opaque bytes, with no texture interpretation.  Used for NON-TEXTURE
